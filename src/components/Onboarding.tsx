@@ -72,32 +72,41 @@ export const Onboarding = () => {
   const handleGoogleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
       
-      // Check if user exists in Firestore
-      const userDocRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userDocRef);
-      
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        login({
-          id: user.uid,
-          username: userData.username,
-          displayName: userData.displayName,
-          avatar: userData.avatar,
-          description: userData.description,
-          isAdmin: userData.isAdmin,
-          joinDate: userData.joinDate
-        });
+      // If we're not inside an iframe (like Vercel deployment), use redirect
+      // which is vastly more reliable on mobile browsers.
+      if (window !== window.parent) {
+        // We are in an iframe (e.g. AI Studio preview)
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+        
+        // Check if user exists in Firestore
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          login({
+            id: user.uid,
+            username: userData.username,
+            displayName: userData.displayName,
+            avatar: userData.avatar,
+            description: userData.description,
+            isAdmin: userData.isAdmin,
+            joinDate: userData.joinDate
+          });
+        } else {
+          // New user, move to profile setup step
+          setProfile(prev => ({
+            ...prev,
+            displayName: user.displayName || '',
+            avatar: user.photoURL || prev.avatar
+          }));
+          setStep('profile');
+        }
       } else {
-        // New user, move to profile setup step
-        setProfile(prev => ({
-          ...prev,
-          displayName: user.displayName || '',
-          avatar: user.photoURL || prev.avatar
-        }));
-        setStep('profile');
+        // Not in iframe, use redirect
+        await signInWithRedirect(auth, provider);
       }
     } catch (err: any) {
       console.error(err);
