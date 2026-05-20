@@ -66,13 +66,29 @@ export default function App() {
                 let senderDoc = await getDoc(doc(db, 'users', r.fromUserId));
                 if (senderDoc.exists()) {
                   const senderData = senderDoc.data();
-                  fullRequests.push({
-                    id: r.id,
-                    userId: r.fromUserId,
-                    name: senderData.displayName || senderData.username || 'Unknown',
-                    avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
-                    timestamp: r.createdAt ? new Date(r.createdAt.toMillis()).toISOString() : new Date().toISOString()
-                  });
+                  if (r.status === 'accepted') {
+                     useAppStore.getState().addUser({
+                        id: r.fromUserId,
+                        username: senderData.username || r.fromUserId,
+                        displayName: senderData.displayName || senderData.username || 'Unknown',
+                        avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
+                        description: senderData.description || '',
+                        isOnline: true,
+                        profileVisibility: 'everyone',
+                        hasPrivateProfile: false,
+                        isAdmin: senderData.isAdmin || false,
+                        joinDate: senderData.joinDate || new Date().toISOString()
+                     } as any);
+                     useAppStore.getState().restoreFriend(r.fromUserId);
+                  } else {
+                    fullRequests.push({
+                      id: r.id,
+                      userId: r.fromUserId,
+                      name: senderData.displayName || senderData.username || 'Unknown',
+                      avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
+                      timestamp: r.createdAt ? new Date(r.createdAt.toMillis()).toISOString() : new Date().toISOString()
+                    });
+                  }
                 }
               } catch (e) {
                 console.error("Error fetching sender for request:", e);
@@ -83,11 +99,37 @@ export default function App() {
 
           // Fetch sent requests too
           const qSent = query(requestsRef, where('fromUserId', '==', firebaseUser.uid));
-          unsubscribeSent = onSnapshot(qSent, (snapshot) => {
-             const sentIds = snapshot.docs.map(doc => {
-               const data = doc.data() as any;
-               return data.toUserId;
-             });
+          unsubscribeSent = onSnapshot(qSent, async (snapshot) => {
+             const sentIds: string[] = [];
+             
+             for (let rDoc of snapshot.docs) {
+               const data = rDoc.data() as any;
+               if (data.status === 'accepted') {
+                 try {
+                   let recipientDoc = await getDoc(doc(db, 'users', data.toUserId));
+                   if (recipientDoc.exists()) {
+                     const recipientData = recipientDoc.data();
+                     useAppStore.getState().addUser({
+                        id: data.toUserId,
+                        username: recipientData.username || data.toUserId,
+                        displayName: recipientData.displayName || recipientData.username || 'Unknown',
+                        avatar: recipientData.avatar || `https://picsum.photos/seed/${data.toUserId}/200`,
+                        description: recipientData.description || '',
+                        isOnline: true,
+                        profileVisibility: 'everyone',
+                        hasPrivateProfile: false,
+                        isAdmin: recipientData.isAdmin || false,
+                        joinDate: recipientData.joinDate || new Date().toISOString()
+                     } as any);
+                     useAppStore.getState().restoreFriend(data.toUserId);
+                   }
+                 } catch (e) {
+                   console.error("Error fetching accepted friend:", e);
+                 }
+               } else {
+                 sentIds.push(data.toUserId);
+               }
+             }
              useAppStore.setState({ sentFriendRequests: sentIds });
           });
 

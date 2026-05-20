@@ -62,8 +62,7 @@ service cloud.firestore {
       allow read: if isVerified() && (resource.data.toUserId == request.auth.uid || resource.data.fromUserId == request.auth.uid);
       allow create: if isVerified() && isValidId(requestId) && isValidFriendRequest(incoming());
       allow delete: if isVerified() && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid);
-      // Optional: to accept a request we might just delete it and create a friend doc, or update it
-      // if updating to 'accepted', but the current logic just deletes it.
+      allow update: if isVerified() && (existing().toUserId == request.auth.uid || existing().fromUserId == request.auth.uid) && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
     }
   }
 }

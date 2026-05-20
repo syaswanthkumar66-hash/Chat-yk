@@ -382,8 +382,8 @@ export const useAppStore = create<AppState>((set) => ({
     
     try {
       const { db } = await import('./firebase');
-      const { deleteDoc, doc } = await import('firebase/firestore');
-      await deleteDoc(doc(db, 'friendRequests', requestId));
+      const { updateDoc, doc } = await import('firebase/firestore');
+      await updateDoc(doc(db, 'friendRequests', requestId), { status: 'accepted' });
     } catch (err) {
       console.error("Error accepting request in db:", err);
     }
@@ -700,23 +700,31 @@ export const useAppStore = create<AppState>((set) => ({
   updateUserByAdmin: (userId, data) => set((state) => ({
     users: state.users.map(u => u.id === userId ? { ...u, ...data } : u)
   })),
-  addUser: (userData) => set((state) => ({
-    users: [
-      ...state.users,
-      {
-        ...userData,
-        id: (userData as any).id || `u${Math.random().toString(36).substr(2, 9)}`,
-        joinDate: (userData as any).joinDate || new Date().toISOString(),
-        profileVisibility: 'everyone',
-        notificationSettings: {
-          pushEnabled: true,
-          previewEnabled: true,
-          soundEnabled: false,
-          vibrateEnabled: true
+  addUser: (userData) => set((state) => {
+    const existingId = (userData as any).id;
+    if (existingId && state.users.some(u => u.id === existingId)) {
+        return {
+            users: state.users.map(u => u.id === existingId ? { ...u, ...userData } : u)
+        };
+    }
+    return {
+      users: [
+        ...state.users,
+        {
+          ...userData,
+          id: existingId || `u${Math.random().toString(36).substr(2, 9)}`,
+          joinDate: (userData as any).joinDate || new Date().toISOString(),
+          profileVisibility: 'everyone',
+          notificationSettings: {
+            pushEnabled: true,
+            previewEnabled: true,
+            soundEnabled: false,
+            vibrateEnabled: true
+          }
         }
-      }
-    ]
-  })),
+      ]
+    };
+  }),
   sendMessage: (chatId, recipientId, text, type = 'text', fileUrl, fileSize, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }) => set((state) => {
     const newMessage: Message = {
       id: `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
