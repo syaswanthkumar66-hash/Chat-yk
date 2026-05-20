@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} { 
+      allow read, write: if false; 
+    }
+
+    // Auth Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isOwner(userId) { return isVerified() && request.auth.uid == userId; }
+
+    // Request evaluation helpers
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Role helpers
+    function isAdmin() {
+      // Allow the original platform dev or anyone whose email is explicitly admin@protocol.net
+      return isSignedIn() && (request.auth.token.email == 'admin@protocol.net' || request.auth.token.email == 'syaswanthkumar66@gmail.com') && request.auth.token.email_verified == true;
+    }
+
+    function isValidUserConfig(data) {
+       return data.keys().hasAll(['id', 'email', 'username', 'displayName']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.email is string && data.email.size() <= 128 &&
+        data.username is string && data.username.size() <= 128 &&
+        data.displayName is string && data.displayName.size() <= 128 &&
+        data.id == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // We allow users to list users securely here for app functionality, only if they are logged in maybe? 
+      // Actually reading all users is allowed right now by the app because there's a global user search.
+      // But PII includes email, so wait, we should isolate email if we want to allow blanket reads...
+      // The current frontend just fetches users manually or uses the mock store. We added one doc `setDoc` for the user themselves.
+
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserConfig(incoming()) &&
+        incoming().keys().size() <= 10;
+        
+      allow update: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserConfig(incoming()) && (
+           isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'avatar', 'description'])
+        );
+    }
+  }
+}

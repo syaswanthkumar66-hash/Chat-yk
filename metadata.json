@@ -1,0 +1,9 @@
+{
+  "name": "Connect & Share",
+  "description": "A seamless social and file sharing platform for direct device-to-device communication.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

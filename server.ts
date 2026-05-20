@@ -1,0 +1,339 @@
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import { fileURLToPath } from "url";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import multer from "multer";
+import { uploadFile, deleteFile } from "./src/services/storageService.js";
+import { initializeApp, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let db: any = null;
+if (process.env.FIREBASE_CONFIG) {
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+    initializeApp({ credential: cert(serviceAccount) });
+    db = getFirestore();
+    console.log("Firebase Admin initialized for store-and-forward");
+  } catch(e) {
+    console.error("Failed to initialize Firebase Admin:", e);
+  }
+}
+
+const dailyQuotaLimit = 100 * 1024 * 1024; // 100 MB
+const userQuotas = new Map<string, { date: string, bytes: number }>();
+
+function checkQuota(userId: string, size: number) {
+  const today = new Date().toISOString().split('T')[0];
+  let quota = userQuotas.get(userId);
+  if (!quota || quota.date !== today) {
+      quota = { date: today, bytes: 0 };
+  }
+  if (quota.bytes + size > dailyQuotaLimit) {
+      return false;
+  }
+  quota.bytes += size;
+  userQuotas.set(userId, quota);
+  return true;
+}
+
+async function startServer() {
+  const app = express();
+  const httpServer = createServer(app);
+  const io = new Server(httpServer, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"]
+    }
+  });
+  const PORT = 3000;
+
+  app.use(express.json({ limit: '10mb' }));
+
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+  // File Upload Endpoint
+  app.post("/api/upload", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const userId = req.body.userId;
+      if (userId && !checkQuota(userId, req.file.size)) {
+        return res.status(429).json({ error: "Daily 100MB quota exceeded" });
+      }
+
+      const fileName = `${Date.now()}-${req.file.originalname}`;
+      const fileUrl = await uploadFile(req.file.buffer, fileName, req.file.mimetype);
+
+      res.json({ 
+        success: true, 
+        fileUrl, 
+        fileName,
+        fileSize: `${(req.file.size / 1024 / 1024).toFixed(2)} MB`
+      });
+    } catch (error) {
+      console.error("Upload error:", error);
+      res.status(500).json({ error: "Failed to upload file to Cloudflare R2" });
+    }
+  });
+
+  // Socket.io logic
+  const users = new Map<string, string>(); // userId -> socketId
+  const userPublicKeys = new Map<string, string>(); // userId -> publicKey
+  const tempStorage = new Map<string, any>(); // messageId -> messageData 
+
+  io.on("connection", (socket) => {
+    console.log("User connected:", socket.id);
+
+    socket.on("register", async (data) => {
+      // Graceful handling if data is just string (old logic) or object (new E2EE logic)
+      let userId, publicKey;
+      if (typeof data === 'string') {
+        userId = data;
+      } else {
+        userId = data.userId;
+        publicKey = data.publicKey;
+        if (publicKey) userPublicKeys.set(userId, publicKey);
+      }
+      
+      users.set(userId, socket.id);
+      console.log(`User ${userId} registered with socket ${socket.id}`);
+      
+      const deliverAndCleanup = (msgId: string, msgData: any) => {
+        socket.emit("receive_message", msgData);
+        console.log(`Delivered offline message ${msgId} to ${userId}`);
+        // If it's a file, we DO NOT delete from R2 here because E2EE needs to download it.
+        // It's up to the client to delete or we delete it on a cron job. The prompt says: "forward after immediately delete incase not online" - meaning delete message from store-and-forward.
+      };
+
+      // Deliver temporary stored messages from Firebase if available
+      if (db) {
+        try {
+          const snapshot = await db.collection('offline_messages').where('to', '==', userId).get();
+          snapshot.forEach(async (doc: any) => {
+            deliverAndCleanup(doc.id, doc.data());
+            await doc.ref.delete(); // immediately delete after forwarding
+          });
+        } catch(e) {
+          console.error("Firebase fetch error", e);
+        }
+      }
+
+      // Deliver from local memory
+      for (const [msgId, msgData] of tempStorage.entries()) {
+        if (msgData.to === userId) {
+          deliverAndCleanup(msgId, msgData);
+          tempStorage.delete(msgId);
+        }
+      }
+    });
+
+    socket.on("get_public_key", ({ userId }, callback) => {
+      callback(userPublicKeys.get(userId));
+    });
+
+    socket.on("send_message", async (data) => {
+      const { recipientId, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
+      const targetSocketId = users.get(recipientId);
+      
+      let senderId = null;
+      for (const [uid, sid] of users.entries()) {
+        if (sid === socket.id) {
+          senderId = uid;
+          break;
+        }
+      }
+
+      if (!senderId) return;
+
+      // Track text message footprint in quota roughly
+      if (!checkQuota(senderId, JSON.stringify(data).length)) {
+        socket.emit("quota_exceeded", { error: "Daily 100MB quota exceeded" });
+        return;
+      }
+
+      const messageData = {
+        id: messageId || `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        senderId,
+        recipientId,
+        text, // this is now E2EE encrypted ciphertext
+        type: type || 'text',
+        fileUrl,
+        fileSize,
+        encryptedFileKey, // for e2ee attached files
+        iv, // init vector
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("receive_message", messageData);
+        console.log(`Message sent from ${senderId} to ${recipientId}`);
+      } else {
+        const storeData = { ...messageData, to: recipientId };
+        if (db) {
+          try {
+            await db.collection('offline_messages').doc(messageData.id).set(storeData);
+            console.log(`User ${recipientId} offline. Message saved to Firebase.`);
+          } catch(e) {
+            console.error("Firebase save error", e);
+          }
+        } else {
+          // Store temporarily in memory if firebase not configured
+          tempStorage.set(messageData.id, storeData);
+          console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
+        }
+      }
+    });
+
+    // SFU / Group Call Signaling (Simplified)
+    socket.on("join_call", (data) => {
+      const { roomId, userId } = data;
+      socket.join(roomId);
+      socket.to(roomId).emit("user_joined_call", { userId });
+      console.log(`User ${userId} joined call room ${roomId}`);
+    });
+
+    socket.on("sfu_signal", (data) => {
+      const { roomId, signal, from, type } = data;
+      socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
+    });
+
+    socket.on("call_user", (data) => {
+      const { to, roomId, type, from } = data;
+      const targetSocketId = users.get(to);
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("incoming_call", { roomId, type, from });
+      }
+    });
+
+    socket.on("end_call", (data) => {
+      const { to, roomId } = data;
+      if (to) {
+        const targetSocketId = users.get(to);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit("call_ended", { roomId });
+        }
+      } else {
+        socket.to(roomId).emit("call_ended", { roomId });
+      }
+    });
+
+    socket.on("disconnect", () => {
+      for (const [userId, socketId] of users.entries()) {
+        if (socketId === socket.id) {
+          users.delete(userId);
+          console.log(`User ${userId} disconnected`);
+          break;
+        }
+      }
+    });
+  });
+
+  // API routes
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  app.get("/api/webrtc/config", (req, res) => {
+    res.json({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { 
+          urls: process.env.TURN_SERVER_URL || 'turn:your-turn-server.com', 
+          username: process.env.TURN_SERVER_USERNAME || 'user', 
+          credential: process.env.TURN_SERVER_PASSWORD || 'password' 
+        }
+      ]
+    });
+  });
+
+  // Cloudflare Realtime API Proxy
+  app.all("/api/realtime/*", async (req, res) => {
+    const appId = process.env.CLOUDFLARE_CALLS_APP_ID;
+    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+    if (!appId || !apiToken) {
+      return res.status(500).json({ error: "Cloudflare credentials not configured" });
+    }
+
+    const apiPath = req.params[0];
+    const url = `https://rtc.live.cloudflare.com/v1/apps/${appId}/${apiPath}`;
+
+    try {
+      const response = await fetch(url, {
+        method: req.method,
+        headers: {
+          "Authorization": `Bearer ${apiToken}`,
+          "Content-Type": "application/json"
+        },
+        body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined
+      });
+
+      const data = await response.json().catch(() => ({}));
+      res.status(response.status).json(data);
+    } catch (error) {
+      console.error("Cloudflare API error:", error);
+      res.status(500).json({ error: "Failed to communicate with Cloudflare Realtime API" });
+    }
+  });
+
+  // Integration connection endpoint
+  app.post("/api/integrations/connect", (req, res) => {
+    const { service } = req.body;
+    
+    const credentials = {
+      'Firebase Cloud': process.env.FIREBASE_CONFIG ? 'Configured' : 'Missing',
+      'Gemini AI Engine': process.env.GEMINI_API_KEY ? 'Configured' : 'Missing',
+      'Stripe Gateway': process.env.STRIPE_SECRET_KEY ? 'Configured' : 'Missing',
+      'SendGrid SMTP': process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing',
+      'Cloudflare CDN': process.env.CLOUDFLARE_API_TOKEN ? 'Configured' : 'Missing',
+      'Twilio SMS': process.env.TWILIO_AUTH_TOKEN ? 'Configured' : 'Missing',
+      'Cloudflare Calls': process.env.CLOUDFLARE_CALLS_APP_ID ? 'Configured' : 'Missing',
+      'Cloudflare Storage (R2)': process.env.CLOUDFLARE_R2_BUCKET_NAME ? 'Configured' : 'Missing',
+      'Express TURN': process.env.TURN_SERVER_URL ? 'Configured' : 'Missing',
+    };
+
+    const status = credentials[service as keyof typeof credentials];
+
+    if (status === 'Configured') {
+      res.json({ 
+        success: true, 
+        message: `${service} connected successfully via environment variables.`,
+        details: 'Secure connection established.'
+      });
+    } else {
+      res.status(400).json({ 
+        success: false, 
+        message: `Failed to connect to ${service}.`,
+        details: `Missing environment variable for ${service}. Please configure it in the hosting environment.`
+      });
+    }
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

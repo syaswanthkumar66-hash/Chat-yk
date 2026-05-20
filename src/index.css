@@ -1,0 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-primary: #E67E6E;
+  --color-primary-rgb: 230, 126, 110;
+  --color-primary-dark: #D16B5B;
+  --color-bg-light: #FFF1E7;
+  --color-bg-gradient: linear-gradient(135deg, #FFF1E7 0%, #FFF9F5 100%);
+  --color-bg-dark: #2D2D2D;
+  --color-card-light: #FFFFFF;
+  --color-neutral-muted: #8E8E8E;
+}
+
+/* Fix for QR Scanner full-screen view */
+#qr-reader {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  background: black !important;
+  border: none !important;
+}
+
+#qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+}
+
+/* Hide all internal library UI elements */
+#qr-reader img,
+#qr-reader button,
+#qr-reader span,
+#qr-reader select,
+#qr-reader div:not(#qr-reader__scan_region):not(#qr-reader) {
+  display: none !important;
+}
+
+#qr-reader__scan_region {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+}
+
+#qr-reader__scan_region video {
+  display: block !important;
+}
+
+@layer base {
+  body {
+    background: var(--color-bg-light);
+    @apply text-slate-900 antialiased font-sans min-h-screen;
+  }
+  
+  .dark body {
+    @apply bg-bg-dark text-slate-100;
+  }
+}
+
+@layer components {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  @keyframes ring-pulse {
+    0% { transform: scale(1); opacity: 0.5; }
+    100% { transform: scale(1.5); opacity: 0; }
+  }
+
+  .animate-ring-pulse {
+    animation: ring-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
