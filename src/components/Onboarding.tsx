@@ -35,6 +35,18 @@ export const Onboarding = () => {
       .then(async (result) => {
         if (result) {
           const user = result.user;
+          
+          try {
+            const token = await user.getIdToken();
+            await fetch('/api/auth/google', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token })
+            });
+          } catch (e) {
+            console.warn('Backend API notification failed', e);
+          }
+          
           const userDocRef = doc(db, 'users', user.uid);
           const userDoc = await getDoc(userDocRef);
           
@@ -76,6 +88,17 @@ export const Onboarding = () => {
       // Always try popup first, it works well on desktop and most Vercel deployments
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
+      
+      try {
+        const token = await user.getIdToken();
+        await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+      } catch (e) {
+        console.warn('Backend API notification failed', e);
+      }
       
       // Check if user exists in Firestore
       const userDocRef = doc(db, 'users', user.uid);
