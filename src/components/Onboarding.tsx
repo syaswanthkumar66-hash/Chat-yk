@@ -72,52 +72,45 @@ export const Onboarding = () => {
   const handleGoogleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
       
-      // If we're not inside an iframe (like Vercel deployment), use redirect
-      // which is vastly more reliable on mobile browsers.
-      if (window !== window.parent) {
-        // We are in an iframe (e.g. AI Studio preview)
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        
-        // Check if user exists in Firestore
-        const userDocRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          login({
-            id: user.uid,
-            username: userData.username,
-            displayName: userData.displayName,
-            avatar: userData.avatar,
-            description: userData.description,
-            isAdmin: userData.isAdmin,
-            joinDate: userData.joinDate
-          });
-        } else {
-          // New user, move to profile setup step
-          setProfile(prev => ({
-            ...prev,
-            displayName: user.displayName || '',
-            avatar: user.photoURL || prev.avatar
-          }));
-          setStep('profile');
-        }
+      // Check if user exists in Firestore
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        login({
+          id: user.uid,
+          username: userData.username,
+          displayName: userData.displayName,
+          avatar: userData.avatar,
+          description: userData.description,
+          isAdmin: userData.isAdmin,
+          joinDate: userData.joinDate
+        });
       } else {
-        // Not in iframe, use redirect
-        await signInWithRedirect(auth, provider);
+        // New user, move to profile setup step
+        setProfile(prev => ({
+          ...prev,
+          displayName: user.displayName || '',
+          avatar: user.photoURL || prev.avatar
+        }));
+        setStep('profile');
       }
     } catch (err: any) {
       console.error(err);
       if (err.code === 'auth/unauthorized-domain') {
-        setError('This domain is not authorized for Firebase Auth. Please add your Vercel domain to Firebase Console > Authentication > Settings > Authorized Domains.');
+        setError('This domain is not authorized. Please add your Vercel domain to Firebase Console > Authentication > Settings > Authorized Domains.');
       } else if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
-        // Fallback for strict browsers like in-app browsers
-        const provider = new GoogleAuthProvider();
-        signInWithRedirect(auth, provider).catch(redirectErr => {
-           setError('Advanced Popup block. Please open in Safari/Chrome standard browser.');
-        });
+        // Fallback for strict browsers
+        try {
+           const provider = new GoogleAuthProvider();
+           await signInWithRedirect(auth, provider);
+        } catch (redirectErr) {
+           setError('Popup blocked. Please allow popups for this site.');
+        }
       } else {
         setError(err.message || 'Failed to login with Google');
       }
