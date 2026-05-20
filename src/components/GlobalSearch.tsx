@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Avatar, Card, Button } from './UI';
 import { useAppStore } from '../store';
+import { db } from '../firebase';
+import { collection, query as firestoreQuery, where, getDocs } from 'firebase/firestore';
 
 interface SearchResult {
   type: 'friend' | 'message' | 'file' | 'group' | 'device';
@@ -26,19 +28,23 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
   }, []);
 
   useEffect(() => {
+    let isActive = true;
+
     if (!query.trim()) {
       setResults([]);
       return;
     }
 
     const q = query.toLowerCase();
-    const newResults: SearchResult[] = [];
+    
+    // Start with local results
+    const localResults: SearchResult[] = [];
 
-    // Search Friends
+    // Search Local Users
     users.forEach(user => {
       if (blockedUserIds.includes(user.id)) return;
       if (user.displayName?.toLowerCase().includes(q) || user.username?.toLowerCase().includes(q)) {
-        newResults.push({
+        localResults.push({
           type: 'friend',
           id: user.id,
           title: user.displayName,
@@ -51,7 +57,7 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
     // Search Groups & Messages
     chats.forEach(chat => {
       if (chat.isGroup && chat.name?.toLowerCase().includes(q)) {
-        newResults.push({
+        localResults.push({
           type: 'group',
           id: chat.id,
           title: chat.name,
@@ -61,7 +67,7 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
       }
 
       if (chat.lastMessage?.text.toLowerCase().includes(q)) {
-        newResults.push({
+        localResults.push({
           type: 'message',
           id: chat.id,
           title: chat.isGroup ? chat.name! : chat.participants[0].name,
@@ -77,7 +83,7 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
 
     mockFiles.forEach((file, i) => {
       if (file.name.toLowerCase().includes(q)) {
-        newResults.push({
+        localResults.push({
           type: 'file',
           id: `file-${i}`,
           title: file.name,
@@ -87,7 +93,59 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
       }
     });
 
-    setResults(newResults);
+    setResults(localResults);
+
+    // Now async search in Firestore
+    const searchFirestore = async () => {
+      try {
+        const usersRef = collection(db, 'users');
+        // Simple client-side filtering since full text search needs extra setup, OR we can filter client side if small
+        const querySnapshot = await getDocs(usersRef);
+        if (!isActive) return;
+
+        const remoteResults: SearchResult[] = [];
+        querySnapshot.forEach((doc) => {
+          const userData = doc.data();
+          if (doc.id === useAppStore.getState().user?.id) return; // Skip self
+          
+          // Check if already in local results
+          if (localResults.some(r => r.id === doc.id)) return;
+          
+          if (userData.displayName?.toLowerCase().includes(q) || userData.username?.toLowerCase().includes(q)) {
+             remoteResults.push({
+               type: 'friend',
+               id: doc.id,
+               title: userData.displayName || userData.username,
+               subtitle: userData.username,
+               avatar: userData.avatar || `https://picsum.photos/seed/${doc.id}/200`,
+             });
+             
+             // Add to local store so they exist if clicked!
+             useAppStore.getState().addUser({
+               id: doc.id,
+               username: userData.username,
+               displayName: userData.displayName || userData.username,
+               avatar: userData.avatar || `https://picsum.photos/seed/${doc.id}/200`,
+               description: userData.description || '',
+               isAdmin: userData.isAdmin || false,
+               joinDate: userData.joinDate || new Date().toISOString(),
+             });
+          }
+        });
+
+        if (remoteResults.length > 0) {
+          setResults(prev => [...prev, ...remoteResults]);
+        }
+      } catch (err) {
+        console.error('Error searching Firestore:', err);
+      }
+    };
+    
+    searchFirestore();
+    
+    return () => {
+      isActive = false;
+    };
   }, [query]);
 
   const filteredResults = activeTab === 'all' 
