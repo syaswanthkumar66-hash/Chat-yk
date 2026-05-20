@@ -130,6 +130,10 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
                isAdmin: userData.isAdmin || false,
                joinDate: userData.joinDate || new Date().toISOString(),
              });
+             
+             if (!useAppStore.getState().removedFriendIds.includes(doc.id)) {
+               useAppStore.getState().removeFriend(doc.id);
+             }
           }
         });
 
