@@ -71,7 +71,9 @@ export const Onboarding = () => {
 
   const handleGoogleLogin = async () => {
     try {
+      setError('');
       const provider = new GoogleAuthProvider();
+      // Always try popup first, it works well on desktop and most Vercel deployments
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
@@ -100,17 +102,16 @@ export const Onboarding = () => {
         setStep('profile');
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("Auth error:", err);
       if (err.code === 'auth/unauthorized-domain') {
-        setError('This domain is not authorized. Please add your Vercel domain to Firebase Console > Authentication > Settings > Authorized Domains.');
+        setError('URGENT: This domain is not authorized. You MUST add your current domain url to Firebase Console > Authentication > Settings > Authorized Domains for Google Login to work.');
       } else if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
-        // Fallback for strict browsers
-        try {
-           const provider = new GoogleAuthProvider();
-           await signInWithRedirect(auth, provider);
-        } catch (redirectErr) {
-           setError('Popup blocked. Please allow popups for this site.');
-        }
+        // Automatically fallback to redirect when popups are blocked 
+        console.log("Popup blocked, falling back to redirect...");
+        const provider = new GoogleAuthProvider();
+        signInWithRedirect(auth, provider).catch(redirectErr => {
+           setError('Popup and redirect blocked. Please use a standard browser like Safari/Chrome.');
+        });
       } else {
         setError(err.message || 'Failed to login with Google');
       }
