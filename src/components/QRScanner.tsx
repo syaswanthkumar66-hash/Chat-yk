@@ -81,9 +81,9 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
         if (isMounted) {
           console.error("Error starting scanner:", err);
           if (err?.name === 'NotAllowedError' || err?.message?.includes('Permission denied')) {
-            setError("Camera access denied. Please click the lock icon in your browser's address bar to enable camera permissions for this site.");
+            setError("Camera access was denied. If you are viewing this in a preview window, try opening the app in a new tab, or use 'Upload from Gallery' below.");
           } else {
-            setError("Could not access camera. Please ensure your device has a camera and it's not being used by another app.");
+            setError("Could not access camera. Please ensure your device has a camera and it's not being used by another app. You can still use 'Upload from Gallery'.");
           }
         }
       } finally {
@@ -176,24 +176,6 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
                 </p>
                 <div className="flex flex-col gap-2">
                   <Button 
-                    variant="primary" 
-                    className="w-full h-12 rounded-2xl shadow-xl shadow-primary/20"
-                    onClick={async () => {
-                      try {
-                        setError(null);
-                        await navigator.mediaDevices.getUserMedia({ video: true });
-                        // If successful, we can try starting the scanner again
-                        window.location.reload(); // Simplest way to re-trigger everything if permission was just granted
-                      } catch (err: any) {
-                        console.error("Manual permission request failed:", err);
-                        setError("Permission still denied. Please check your browser's site settings and ensure camera access is allowed.");
-                      }
-                    }}
-                  >
-                    <Icon name="security" />
-                    Grant Camera Permission
-                  </Button>
-                  <Button 
                     variant="outline" 
                     className="text-white border-white/20 hover:bg-white/10 backdrop-blur-md bg-black/20"
                     onClick={() => {
@@ -213,7 +195,7 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
                           );
                         } catch (err: any) {
                           console.error("Retry error:", err);
-                          setError(err?.name === 'NotAllowedError' ? "Permission still denied. Check browser settings." : "Failed to start camera.");
+                          setError(err?.name === 'NotAllowedError' ? "Permission still denied. Try opening in a new tab if you are in a preview." : "Failed to start camera.");
                         } finally {
                           isInitializing.current = false;
                         }

@@ -110,6 +110,8 @@ interface AppState {
   setGroupJoinRequests: (requests: GroupJoinRequest[]) => void;
   chats: Chat[];
   setChats: (chats: Chat[]) => void;
+  typingUsers: Record<string, boolean>;
+  setTypingUser: (userId: string, isTyping: boolean) => void;
   activeGroupCall: { type: 'voice' | 'video', groupId?: string, userId?: string } | null;
   setActiveGroupCall: (call: { type: 'voice' | 'video', groupId?: string, userId?: string } | null) => void;
   blockedUserIds: string[];
@@ -333,6 +335,15 @@ export const useAppStore = create<AppState>((set) => ({
       set({ activeGroupCall: null });
     });
 
+    socket.on('typing', (data: { senderId: string, isTyping: boolean }) => {
+      set((state) => ({
+        typingUsers: {
+          ...state.typingUsers,
+          [data.senderId]: data.isTyping
+        }
+      }));
+    });
+
     set({ socket });
   },
   activeChatId: null,
@@ -384,6 +395,8 @@ export const useAppStore = create<AppState>((set) => ({
   setGroupJoinRequests: (requests) => set({ groupJoinRequests: requests }),
   chats: [],
   setChats: (chats) => set({ chats }),
+  typingUsers: {},
+  setTypingUser: (userId, isTyping) => set(state => ({ typingUsers: { ...state.typingUsers, [userId]: isTyping } })),
   activeGroupCall: null,
   setActiveGroupCall: (call) => set({ activeGroupCall: call }),
   blockedUserIds: [],

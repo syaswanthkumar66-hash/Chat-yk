@@ -488,7 +488,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
           {[
             { label: 'Friends', count: users.filter(u => !blockedUserIds.includes(u.id) && !removedFriendIds.includes(u.id) && !friendRequests.some(r => r.userId === u.id)).length.toString(), icon: 'group', onClick: () => setShowFriendsList(true) },
             { label: 'Groups', count: chats.filter(c => c.isGroup && c.participants.some(p => p.id === user?.id)).length.toString(), icon: 'groups', onClick: () => setShowGroupsList(true) },
-            { label: 'Calls', count: '86', icon: 'call', onClick: () => {} },
+            { label: 'Calls', count: '0', icon: 'call', onClick: () => {} },
           ].map((stat) => (
             <Card 
               key={`stat-${stat.label}`} 

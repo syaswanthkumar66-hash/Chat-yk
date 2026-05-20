@@ -73,11 +73,7 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
     });
 
     // Mock Files (since they are in chat history/local)
-    const mockFiles = [
-      { name: 'Weekend_Itinerary.pdf', size: '1.2 MB', chat: 'Weekend Planners' },
-      { name: 'Project_Assets_2024.zip', size: '1.8 GB', chat: 'Alex Johnson' },
-      { name: 'annual_report_draft.pdf', size: '8.4 MB', chat: 'Elena Rose' },
-    ];
+    const mockFiles: Array<{name: string, size: string, chat: string}> = [];
 
     mockFiles.forEach((file, i) => {
       if (file.name.toLowerCase().includes(q)) {

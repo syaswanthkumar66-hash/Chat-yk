@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Button, cn } from './UI';
+import { useAppStore } from '../store';
 
 interface MediaGalleryProps {
   onClose: () => void;
@@ -10,9 +11,21 @@ interface MediaGalleryProps {
 type TabType = 'photos' | 'videos' | 'docs' | 'links';
 
 export const MediaGallery = ({ onClose, groupId }: MediaGalleryProps) => {
+  const { chats, user, users } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabType>('photos');
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const chat = useMemo(() => chats.find(c => c.id === groupId), [chats, groupId]);
+  
+  const chatName = useMemo(() => {
+    if (!chat) return 'Chat Media';
+    if (chat.isGroup) return chat.name || 'Group Chat';
+    const otherParticipant = chat.participants.find(p => p.id !== user?.id);
+    const otherUser = otherParticipant ? users.find(u => u.id === otherParticipant.id) : null;
+    return otherUser?.displayName || otherUser?.username || 'User';
+  }, [chat, user, users]);
+
 
   const tabs: { id: TabType; label: string; icon: string }[] = [
     { id: 'photos', label: 'Photos', icon: 'image' },
@@ -22,10 +35,10 @@ export const MediaGallery = ({ onClose, groupId }: MediaGalleryProps) => {
   ];
 
   const mockData = {
-    photos: Array.from({ length: 15 }).map((_, i) => ({ id: `photo-${i}`, title: `Photo ${i + 1}`, url: `https://picsum.photos/seed/photo${i}/300` })),
-    videos: Array.from({ length: 6 }).map((_, i) => ({ id: `video-${i}`, title: `Video ${i + 1}`, url: `https://picsum.photos/seed/video${i}/400/225`, duration: '0:45', size: '12.4 MB' })),
-    docs: Array.from({ length: 8 }).map((_, i) => ({ id: `doc-${i}`, title: `Project_Specs_v${i + 1}.pdf`, size: '1.2 MB', date: 'Oct 24, 2023' })),
-    links: Array.from({ length: 10 }).map((_, i) => ({ id: `link-${i}`, url: `https://figma.com/file/design-system-${i}`, description: 'Check out the latest updates to the design system components and styles.' })),
+    photos: [],
+    videos: [],
+    docs: [],
+    links: [],
   };
 
   const filteredData = {
@@ -193,7 +206,7 @@ export const MediaGallery = ({ onClose, groupId }: MediaGalleryProps) => {
                 exit={{ opacity: 0, x: -20 }}
               >
                 <h3 className="text-xl font-black uppercase tracking-tight italic text-slate-900">Media & Links</h3>
-                <p className="text-[10px] font-black text-primary uppercase tracking-widest">Weekend Planners</p>
+                <p className="text-[10px] font-black text-primary uppercase tracking-widest">{chatName}</p>
               </motion.div>
             )}
           </AnimatePresence>

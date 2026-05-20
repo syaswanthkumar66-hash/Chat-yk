@@ -106,6 +106,7 @@ export const ChatDetail = () => {
     activeGroupInfoId,
     setActiveGroupInfoId,
     chats,
+    typingUsers,
     sendMessage,
     users
   } = useAppStore();
@@ -137,7 +138,27 @@ export const ChatDetail = () => {
   const audioChunks = useRef<Blob[]>([]);
   const recordingTimer = useRef<any>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<any>(null);
+
+  const handleTyping = (text: string) => {
+    setMessageText(text);
+    
+    // Only emit for 1-to-1 chats for simplicity or both. We can emit via socket.
+    const socket = useAppStore.getState().socket;
+    const targetId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
+    
+    if (socket && targetId && chat && !chat.isGroup) {
+      socket.emit('typing', { recipientId: targetId, isTyping: true });
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      typingTimeoutRef.current = setTimeout(() => {
+        socket.emit('typing', { recipientId: targetId, isTyping: false });
+      }, 2000);
+    }
+  };
 
   const handlePointerDown = (e: React.PointerEvent, id: string, text: string, isOwn: boolean) => {
     if (isSelectionMode) {
@@ -1027,6 +1048,24 @@ export const ChatDetail = () => {
                   </div>
                 );
               })}
+              
+              {(() => {
+                const partnerId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
+                if (partnerId && typingUsers[partnerId]) {
+                  return (
+                    <div className="flex flex-col gap-1.5 max-w-[85%] self-start items-start text-xs font-bold text-slate-400">
+                      <div className="flex items-end gap-2">
+                        <div className="p-4 rounded-[1.5rem] bg-white rounded-tl-none border border-slate-100 shadow-sm flex items-center gap-1.5 h-10">
+                          <motion.div className="w-1.5 h-1.5 bg-primary/50 rounded-full" animate={{ y: [0, -3, 0] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0 }} />
+                          <motion.div className="w-1.5 h-1.5 bg-primary/50 rounded-full" animate={{ y: [0, -3, 0] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.2 }} />
+                          <motion.div className="w-1.5 h-1.5 bg-primary/50 rounded-full" animate={{ y: [0, -3, 0] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.4 }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </>
         )}
@@ -1158,7 +1197,7 @@ export const ChatDetail = () => {
                   placeholder={isRecording ? "Recording..." : "Message..."}
                   disabled={isRecording}
                   value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
+                  onChange={(e) => handleTyping(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                   className="flex-1 bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-sm" 
                 />

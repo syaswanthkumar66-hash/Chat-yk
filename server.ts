@@ -138,6 +138,23 @@ async function startServer() {
       callback(userPublicKeys.get(userId));
     });
 
+    socket.on("typing", (data) => {
+      const { recipientId, isTyping } = data;
+      const targetSocketId = users.get(recipientId);
+      
+      let senderId = null;
+      for (const [uid, sid] of users.entries()) {
+        if (sid === socket.id) {
+          senderId = uid;
+          break;
+        }
+      }
+
+      if (targetSocketId && senderId) {
+        io.to(targetSocketId).emit("typing", { senderId, isTyping });
+      }
+    });
+
     socket.on("send_message", async (data) => {
       const { recipientId, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
       const targetSocketId = users.get(recipientId);
