@@ -155,12 +155,6 @@ export const Onboarding = () => {
                   <Icon name="mail" className="text-lg md:text-xl" />
                   Continue with Google
                 </Button>
-                <button 
-                  onClick={() => login()} // Default login is admin
-                  className="w-full h-14 md:h-16 rounded-2xl border border-slate-100 font-black uppercase tracking-widest text-[8px] md:text-[10px] text-slate-400 hover:bg-slate-50 transition-all"
-                >
-                  Admin Login (Secret)
-                </button>
               </div>
 
               <div className="pt-4 md:pt-6 border-t border-slate-50 text-center">
@@ -168,11 +162,7 @@ export const Onboarding = () => {
               </div>
             </div>
             
-            <div className="mt-6 md:mt-8 text-center">
-              <p className="text-[10px] md:text-xs font-medium text-slate-400">
-                New to the platform? <button className="text-primary font-black uppercase tracking-widest text-[8px] md:text-[10px] ml-1 hover:underline">Create Account</button>
-              </p>
-            </div>
+            <div className="mt-6 md:mt-8 text-center" />
           </motion.div>
         ) : (
           <motion.div 
