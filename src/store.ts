@@ -251,6 +251,17 @@ export const useAppStore = create<AppState>((set) => ({
       socket.emit('register', { userId, publicKey });
     });
 
+    socket.on('user_status', (data: { userId: string, isOnline: boolean }) => {
+      useAppStore.getState().updateUserByAdmin(data.userId, { isOnline: data.isOnline });
+    });
+
+    socket.on('online_users', (onlineUserIds: string[]) => {
+      const state = useAppStore.getState();
+      state.users.forEach(u => {
+        state.updateUserByAdmin(u.id, { isOnline: onlineUserIds.includes(u.id) });
+      });
+    });
+
     socket.on('receive_message', async (data: { senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[] }) => {
       const state = useAppStore.getState();
       const { cryptoService } = await import('./services/cryptoService');
@@ -300,20 +311,23 @@ export const useAppStore = create<AppState>((set) => ({
             unreadCount: state.activeChatId === c.id ? c.unreadCount : (c.unreadCount || 0) + 1
           } : c);
         } else {
-          const sender = state.users.find(u => u.id === data.senderId);
-          if (sender) {
-            const newChat: Chat = {
-              id: `c-${Date.now()}`,
-              participants: [
-                { id: sender.id, name: sender.displayName, username: sender.username, avatar: sender.avatar, status: 'online' },
-                { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
-              ],
-              unreadCount: 1,
-              messages: [newMessage],
-              lastMessage: newMessage
-            };
-            updatedChats.push(newChat);
-          }
+          const sender = state.users.find(u => u.id === data.senderId) || {
+            id: data.senderId,
+            displayName: 'Unknown User',
+            username: data.senderId,
+            avatar: `https://picsum.photos/seed/${data.senderId}/200`
+          };
+          const newChat: Chat = {
+            id: `c-${Date.now()}`,
+            participants: [
+              { id: sender.id, name: sender.displayName, username: sender.username, avatar: sender.avatar, status: 'online' },
+              { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
+            ],
+            unreadCount: 1,
+            messages: [newMessage],
+            lastMessage: newMessage
+          };
+          updatedChats.push(newChat);
         }
         return { chats: updatedChats };
       });
@@ -777,21 +791,25 @@ export const useAppStore = create<AppState>((set) => ({
       if (existingChat) {
         targetChatId = existingChat.id;
       } else {
-        const recipient = state.users.find(u => u.id === recipientId);
-        if (recipient) {
-          const newChat: Chat = {
-            id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            participants: [
-              { id: recipient.id, name: (recipient as any).name || (recipient as any).displayName, username: recipient.username, avatar: recipient.avatar, status: 'offline' },
-              { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
-            ],
-            unreadCount: 0,
-            messages: [newMessage],
-            lastMessage: newMessage
-          };
-          updatedChats.push(newChat);
-          return { chats: updatedChats, activeChatId: newChat.id, activeRecipientId: null };
-        }
+        const recipient = state.users.find(u => u.id === recipientId) || {
+          id: recipientId,
+          name: 'Unknown User',
+          username: recipientId,
+          avatar: `https://picsum.photos/seed/${recipientId}/200`
+        };
+        
+        const newChat: Chat = {
+          id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          participants: [
+            { id: recipient.id, name: (recipient as any).name || (recipient as any).displayName, username: recipient.username, avatar: recipient.avatar, status: 'offline' },
+            { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
+          ],
+          unreadCount: 0,
+          messages: [newMessage],
+          lastMessage: newMessage
+        };
+        updatedChats.push(newChat);
+        return { chats: updatedChats, activeChatId: newChat.id, activeRecipientId: null };
       }
     }
 

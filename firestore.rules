@@ -8,7 +8,7 @@ service cloud.firestore {
 
     // Auth Helpers
     function isSignedIn() { return request.auth != null; }
-    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isVerified() { return isSignedIn(); }
     function isOwner(userId) { return isVerified() && request.auth.uid == userId; }
 
     // Request evaluation helpers
@@ -22,7 +22,7 @@ service cloud.firestore {
     // Role helpers
     function isAdmin() {
       // Allow the original platform dev or anyone whose email is explicitly admin@protocol.net
-      return isSignedIn() && (request.auth.token.email == 'admin@protocol.net' || request.auth.token.email == 'syaswanthkumar66@gmail.com') && request.auth.token.email_verified == true;
+      return isSignedIn() && (request.auth.token.email == 'admin@protocol.net' || request.auth.token.email == 'syaswanthkumar66@gmail.com');
     }
 
     function isValidUserConfig(data) {

@@ -105,6 +105,10 @@ async function startServer() {
       users.set(userId, socket.id);
       console.log(`User ${userId} registered with socket ${socket.id}`);
       
+      // Broadcast online status
+      io.emit("user_status", { userId, isOnline: true });
+      socket.emit("online_users", Array.from(users.keys()));
+      
       const deliverAndCleanup = (msgId: string, msgData: any) => {
         socket.emit("receive_message", msgData);
         console.log(`Delivered offline message ${msgId} to ${userId}`);
@@ -245,6 +249,7 @@ async function startServer() {
       for (const [userId, socketId] of users.entries()) {
         if (socketId === socket.id) {
           users.delete(userId);
+          io.emit("user_status", { userId, isOnline: false });
           console.log(`User ${userId} disconnected`);
           break;
         }
