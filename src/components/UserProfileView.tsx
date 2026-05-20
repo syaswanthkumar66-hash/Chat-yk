@@ -39,6 +39,9 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     friendRequests,
     acceptFriendRequest,
     rejectFriendRequest,
+    sentFriendRequests,
+    sendFriendRequest,
+    cancelFriendRequest,
     setActiveGroupCall,
     users
   } = useAppStore();
@@ -61,6 +64,8 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
           relationship = 'blocked';
         } else if (friendRequests.some(r => r.userId === userId)) {
           relationship = 'pending_received';
+        } else if (sentFriendRequests.includes(userId)) {
+          relationship = 'pending_sent';
         } else if (removedFriendIds.includes(userId)) {
           relationship = 'not_friend';
         } else {
@@ -82,7 +87,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
       }
       setLoading(false);
     }, 600);
-  }, [userId, blockedUserIds, removedFriendIds, friendRequests, users]);
+  }, [userId, blockedUserIds, removedFriendIds, friendRequests, sentFriendRequests, users]);
 
   const handleCopyUsername = () => {
     if (!user) return;
@@ -124,14 +129,13 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
         setUser({ ...user, relationship: 'not_friend' });
       }
     } else if (action === 'add_friend') {
-      // If user was previously removed, restore them
       if (removedFriendIds.includes(user.id)) {
         restoreFriend(user.id);
       }
-      // In a real app, this would send a request. 
-      // For now, we'll just simulate it by changing local state.
+      sendFriendRequest(user.id);
       setUser({ ...user, relationship: 'pending_sent' });
     } else if (action === 'cancel_request') {
+      cancelFriendRequest(user.id);
       setUser({ ...user, relationship: 'not_friend' });
     }
     setShowMenu(false);

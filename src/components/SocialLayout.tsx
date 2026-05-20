@@ -12,6 +12,8 @@ import { Settings } from './Settings';
 import { GroupCall } from './GroupCall';
 import { GroupInfo } from './GroupInfo';
 import { motion, AnimatePresence } from 'framer-motion';
+import { db } from '../firebase';
+import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
 
 export const SocialLayout = () => {
   const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'calls' | 'profile'>('chats');
@@ -31,6 +33,7 @@ export const SocialLayout = () => {
     viewingUserId, 
     setViewingUserId, 
     friendRequests, 
+    sentFriendRequests,
     setFriendRequests,
     acceptFriendRequest,
     rejectFriendRequest,
@@ -69,7 +72,7 @@ export const SocialLayout = () => {
           )}
           {showScanner && (
             <QRScanner 
-              onScan={(data) => {
+              onScan={async (data) => {
                 console.log('Scanned:', data);
                 setShowScanner(false);
                 
@@ -82,19 +85,64 @@ export const SocialLayout = () => {
                   processedData = data.split('/request/').pop() || data;
                 }
 
-                // If it's a user ID (mock logic), open their profile
-                if (processedData.startsWith('u') || users.some(u => u.id === processedData)) {
-                  setViewingUserId(processedData);
-                } else {
-                  // If it's a username or other data, we could search for it
-                  const foundUser = users.find(u => 
-                    u.username === processedData || 
-                    u.username === `@${processedData}` ||
-                    u.username.replace('@', '') === processedData
-                  );
-                  if (foundUser) {
-                    setViewingUserId(foundUser.id);
+                const cleanUsername = processedData.replace('@', '');
+
+                // Check local users first
+                let foundUser = users.find(u => 
+                  u.id === cleanUsername ||
+                  u.username === cleanUsername
+                );
+
+                if (foundUser) {
+                  setViewingUserId(foundUser.id);
+                  return;
+                }
+
+                // Query Firestore if available
+                try {
+                  const usersRef = collection(db, 'users');
+                  const q = query(usersRef, where('username', '==', cleanUsername));
+                  const querySnapshot = await getDocs(q);
+                  
+                  if (!querySnapshot.empty) {
+                    const doc = querySnapshot.docs[0];
+                    const userData = doc.data();
+                    
+                    const newUser = {
+                      id: doc.id,
+                      username: userData.username,
+                      displayName: userData.displayName || userData.username,
+                      avatar: userData.avatar || `https://picsum.photos/seed/${doc.id}/200`,
+                      description: userData.description || '',
+                      isAdmin: userData.isAdmin || false,
+                      joinDate: userData.joinDate || new Date().toISOString()
+                    };
+                    
+                    // Add to local store so UserProfileView can see it
+                    useAppStore.getState().addUser(newUser);
+                    setViewingUserId(doc.id);
+                    return;
                   }
+                  
+                  // Also try querying by doc ID just in case
+                  const userDoc = await getDoc(doc(db, 'users', cleanUsername));
+                  if (userDoc.exists()) {
+                    const userData = userDoc.data();
+                    const newUser = {
+                      id: userDoc.id,
+                      username: userData.username,
+                      displayName: userData.displayName || userData.username,
+                      avatar: userData.avatar || `https://picsum.photos/seed/${userDoc.id}/200`,
+                      description: userData.description || '',
+                      isAdmin: userData.isAdmin || false,
+                      joinDate: userData.joinDate || new Date().toISOString()
+                    };
+                    
+                    useAppStore.getState().addUser(newUser);
+                    setViewingUserId(userDoc.id);
+                  }
+                } catch (e) {
+                  console.error('Error fetching scanned user from Firestore', e);
                 }
               }} 
               onClose={() => setShowScanner(false)} 
@@ -335,22 +383,24 @@ export const SocialLayout = () => {
               <div className="space-y-4">
                 <div className="space-y-1">
                   {users.filter(u => 
+                    u.id !== user?.id &&
                     !blockedUserIds.includes(u.id) && 
                     !removedFriendIds.includes(u.id) &&
-                    !friendRequests.some(r => r.userId === u.id)
-                  ).map(user => (
-                    <div key={`friend-${user.id}`} className="flex items-center gap-4 p-2 cursor-pointer hover:bg-primary/5 rounded-xl transition-colors group" onClick={() => setViewingUserId(user.id)}>
-                      <Avatar src={user.avatar} className="size-12" status={user.isOnline ? 'online' : 'offline'} />
+                    !friendRequests.some(r => r.userId === u.id) &&
+                    !sentFriendRequests.includes(u.id)
+                  ).map(loopUser => (
+                    <div key={`friend-${loopUser.id}`} className="flex items-center gap-4 p-2 cursor-pointer hover:bg-primary/5 rounded-xl transition-colors group" onClick={() => setViewingUserId(loopUser.id)}>
+                      <Avatar src={loopUser.avatar} className="size-12" status={loopUser.isOnline ? 'online' : 'offline'} />
                       <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
                         <div>
-                          <h3 className="font-bold text-slate-800">{user.displayName}</h3>
-                          <p className="text-xs text-neutral-muted">{user.username}</p>
+                          <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
+                          <p className="text-xs text-neutral-muted">{loopUser.username}</p>
                         </div>
                         <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
                             onClick={(e) => {
                               e.stopPropagation();
-                              setActiveGroupCall({ type: 'voice', userId: user.id });
+                              setActiveGroupCall({ type: 'voice', userId: loopUser.id });
                             }}
                             className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm"
                           >
@@ -359,7 +409,7 @@ export const SocialLayout = () => {
                           <button 
                             onClick={(e) => {
                               e.stopPropagation();
-                              setActiveGroupCall({ type: 'video', userId: user.id });
+                              setActiveGroupCall({ type: 'video', userId: loopUser.id });
                             }}
                             className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm"
                           >

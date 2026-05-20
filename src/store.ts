@@ -106,6 +106,9 @@ interface AppState {
   setFriendRequests: (requests: FriendRequest[]) => void;
   acceptFriendRequest: (requestId: string) => void;
   rejectFriendRequest: (requestId: string) => void;
+  sentFriendRequests: string[];
+  sendFriendRequest: (userId: string) => void;
+  cancelFriendRequest: (userId: string) => void;
   groupJoinRequests: GroupJoinRequest[];
   setGroupJoinRequests: (requests: GroupJoinRequest[]) => void;
   chats: Chat[];
@@ -173,7 +176,7 @@ interface AppState {
   flagUser: (userId: string, reason: string) => void;
   promoteUser: (userId: string) => void;
   updateUserByAdmin: (userId: string, data: Partial<UserProfile>) => void;
-  addUser: (user: Omit<UserProfile, 'id'>) => void;
+  addUser: (user: Partial<UserProfile> & Omit<UserProfile, 'id'>) => void;
   sendMessage: (chatId: string | null, recipientId: string | null, text: string, type?: Message['type'], fileUrl?: string, fileSize?: string, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }) => void;
   socket: Socket | null;
   initSocket: (userId: string) => void;
@@ -232,7 +235,7 @@ export const useAppStore = create<AppState>((set) => ({
       }
     }).catch(err => console.error("Firebase auth sign out failed", err));
 
-    set({ isLoggedIn: false, mode: 'hub', user: null, selectedMessageIds: [], friendRequests: [], groupJoinRequests: [], socket: null });
+    set({ isLoggedIn: false, mode: 'hub', user: null, selectedMessageIds: [], friendRequests: [], sentFriendRequests: [], groupJoinRequests: [], socket: null });
   },
   socket: null,
   tempMessages: [],
@@ -389,6 +392,18 @@ export const useAppStore = create<AppState>((set) => ({
   rejectFriendRequest: (requestId) => {
     set((state) => ({
       friendRequests: state.friendRequests.filter(r => r.id !== requestId)
+    }));
+  },
+  sentFriendRequests: [],
+  sendFriendRequest: (userId) => {
+    set((state) => {
+      if (state.sentFriendRequests.includes(userId)) return state;
+      return { sentFriendRequests: [...state.sentFriendRequests, userId] };
+    });
+  },
+  cancelFriendRequest: (userId) => {
+    set((state) => ({
+      sentFriendRequests: state.sentFriendRequests.filter(id => id !== userId)
     }));
   },
   groupJoinRequests: [],
@@ -645,8 +660,8 @@ export const useAppStore = create<AppState>((set) => ({
       ...state.users,
       {
         ...userData,
-        id: `u${Math.random().toString(36).substr(2, 9)}`,
-        joinDate: new Date().toISOString(),
+        id: (userData as any).id || `u${Math.random().toString(36).substr(2, 9)}`,
+        joinDate: (userData as any).joinDate || new Date().toISOString(),
         profileVisibility: 'everyone',
         notificationSettings: {
           pushEnabled: true,

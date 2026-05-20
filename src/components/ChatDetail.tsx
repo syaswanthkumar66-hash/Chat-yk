@@ -138,6 +138,7 @@ export const ChatDetail = () => {
   const audioChunks = useRef<Blob[]>([]);
   const recordingTimer = useRef<any>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
 
   const handleTyping = (text: string) => {

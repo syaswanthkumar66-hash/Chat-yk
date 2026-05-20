@@ -19,7 +19,7 @@ const PRELOADED_AVATARS = [
 ];
 
 export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
-  const { user, setUser, updateUser, setActiveGroupInfoId, setViewingUserId, chats, blockedUserIds, removedFriendIds, friendRequests, users } = useAppStore();
+  const { user, setUser, updateUser, setActiveGroupInfoId, setViewingUserId, chats, blockedUserIds, removedFriendIds, friendRequests, sentFriendRequests, users } = useAppStore();
   const [isEditing, setIsEditing] = useState(false);
   const [showGroupsList, setShowGroupsList] = useState(false);
   const [showFriendsList, setShowFriendsList] = useState(false);
@@ -486,7 +486,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
         {/* Stats Section */}
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'Friends', count: users.filter(u => !blockedUserIds.includes(u.id) && !removedFriendIds.includes(u.id) && !friendRequests.some(r => r.userId === u.id)).length.toString(), icon: 'group', onClick: () => setShowFriendsList(true) },
+            { label: 'Friends', count: users.filter(u => !blockedUserIds.includes(u.id) && !removedFriendIds.includes(u.id) && !friendRequests.some(r => r.userId === u.id) && !sentFriendRequests.includes(u.id)).length.toString(), icon: 'group', onClick: () => setShowFriendsList(true) },
             { label: 'Groups', count: chats.filter(c => c.isGroup && c.participants.some(p => p.id === user?.id)).length.toString(), icon: 'groups', onClick: () => setShowGroupsList(true) },
             { label: 'Calls', count: '0', icon: 'call', onClick: () => {} },
           ].map((stat) => (
@@ -668,7 +668,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
               </div>
               
               <div className="overflow-y-auto space-y-2 pr-2 no-scrollbar">
-                {users.filter(u => !blockedUserIds.includes(u.id) && !removedFriendIds.includes(u.id) && !friendRequests.some(r => r.userId === u.id)).map(friend => (
+                {users.filter(u => !blockedUserIds.includes(u.id) && u.id !== user?.id && !removedFriendIds.includes(u.id) && !friendRequests.some(r => r.userId === u.id) && !sentFriendRequests.includes(u.id)).map(friend => (
                   <button 
                     key={`profile-friend-${friend.id}`}
                     onClick={() => {
