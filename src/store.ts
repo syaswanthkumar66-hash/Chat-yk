@@ -370,41 +370,86 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   friendRequests: [],
   setFriendRequests: (requests) => set({ friendRequests: requests }),
-  acceptFriendRequest: (requestId) => {
+  acceptFriendRequest: async (requestId) => {
     set((state) => {
       const request = state.friendRequests.find(r => r.id === requestId);
       if (!request) return state;
       
-      // Remove from requests
       const newRequests = state.friendRequests.filter(r => r.id !== requestId);
-      
-      // In a real app, we'd add to friends list. 
-      // Here, MOCK_USERS is the source of truth for friends.
-      // We'll just remove it from removedFriendIds if it was there.
       const newRemoved = state.removedFriendIds.filter(id => id !== request.userId);
-      
-      return { 
-        friendRequests: newRequests,
-        removedFriendIds: newRemoved
-      };
+      return { friendRequests: newRequests, removedFriendIds: newRemoved };
     });
+    
+    try {
+      const { db } = await import('./firebase');
+      const { deleteDoc, doc } = await import('firebase/firestore');
+      await deleteDoc(doc(db, 'friendRequests', requestId));
+    } catch (err) {
+      console.error("Error accepting request in db:", err);
+    }
   },
-  rejectFriendRequest: (requestId) => {
+  rejectFriendRequest: async (requestId) => {
     set((state) => ({
       friendRequests: state.friendRequests.filter(r => r.id !== requestId)
     }));
+    
+    try {
+      const { db } = await import('./firebase');
+      const { deleteDoc, doc } = await import('firebase/firestore');
+      await deleteDoc(doc(db, 'friendRequests', requestId));
+    } catch (err) {
+      console.error("Error rejecting request in db:", err);
+    }
   },
   sentFriendRequests: [],
-  sendFriendRequest: (userId) => {
-    set((state) => {
-      if (state.sentFriendRequests.includes(userId)) return state;
-      return { sentFriendRequests: [...state.sentFriendRequests, userId] };
-    });
+  sendFriendRequest: async (userId) => {
+    const state = useAppStore.getState();
+    if (state.sentFriendRequests.includes(userId)) return;
+    
+    set({ sentFriendRequests: [...state.sentFriendRequests, userId] });
+    
+    if (state.user) {
+      try {
+        const { db } = await import('./firebase');
+        const { addDoc, collection, serverTimestamp, query, where, getDocs } = await import('firebase/firestore');
+        const requestsRef = collection(db, 'friendRequests');
+        
+        // Prevent dupes
+        const q = query(requestsRef, where('fromUserId', '==', state.user.id), where('toUserId', '==', userId));
+        const existing = await getDocs(q);
+        if (existing.empty) {
+          await addDoc(requestsRef, {
+            fromUserId: state.user.id,
+            toUserId: userId,
+            createdAt: serverTimestamp(),
+            status: 'pending'
+          });
+        }
+      } catch (err) {
+        console.error("Error sending friend request:", err);
+      }
+    }
   },
-  cancelFriendRequest: (userId) => {
+  cancelFriendRequest: async (userId) => {
     set((state) => ({
       sentFriendRequests: state.sentFriendRequests.filter(id => id !== userId)
     }));
+    
+    const state = useAppStore.getState();
+    if (state.user) {
+      try {
+        const { db } = await import('./firebase');
+        const { deleteDoc, doc, collection, query, where, getDocs } = await import('firebase/firestore');
+        const requestsRef = collection(db, 'friendRequests');
+        const q = query(requestsRef, where('fromUserId', '==', state.user.id), where('toUserId', '==', userId));
+        const existing = await getDocs(q);
+        existing.forEach(async (d) => {
+           await deleteDoc(doc(db, 'friendRequests', d.id));
+        });
+      } catch (err) {
+        console.error("Error canceling request", err);
+      }
+    }
   },
   groupJoinRequests: [],
   setGroupJoinRequests: (requests) => set({ groupJoinRequests: requests }),

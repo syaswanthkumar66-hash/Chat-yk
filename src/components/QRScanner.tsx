@@ -19,7 +19,10 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
       try {
         // Ensure any previous instance is stopped
         if (scannerRef.current && scannerRef.current.isScanning) {
-          await scannerRef.current.stop();
+          try {
+            await scannerRef.current.stop();
+            scannerRef.current.clear();
+          } catch(e) {}
         }
 
         const container = document.getElementById(scannerId);
@@ -103,8 +106,19 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
         const scanner = scannerRef.current;
         if (scanner.isScanning) {
           scanner.stop().then(() => {
-            scanner.clear();
-          }).catch(err => console.error("Error cleaning up scanner:", err));
+            try {
+              scanner.clear();
+            } catch (clearErr) {
+              console.warn("Scanner clear error ignored:", clearErr);
+            }
+          }).catch(err => {
+            // Check if error is due to node removal we can safely ignore
+            if (err?.message?.includes('removeChild')) {
+              console.warn("Scanner stop removeChild error ignored.");
+            } else {
+              console.error("Error cleaning up scanner:", err);
+            }
+          });
         }
       }
     };
@@ -185,6 +199,13 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
                         if (isInitializing.current) return;
                         isInitializing.current = true;
                         try {
+                          if (scannerRef.current && scannerRef.current.isScanning) {
+                             await scannerRef.current.stop().catch(() => {});
+                             try { scannerRef.current.clear(); } catch(e) {}
+                          }
+                          const container = document.getElementById(scannerId);
+                          if (container) container.innerHTML = "";
+
                           const html5QrCode = new Html5Qrcode(scannerId);
                           scannerRef.current = html5QrCode;
                           await html5QrCode.start(

@@ -10,7 +10,7 @@ import { Icon, cn } from './components/UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, getDocFromServer } from 'firebase/firestore';
+import { doc, getDoc, setDoc, getDocFromServer, collection, query, where, onSnapshot } from 'firebase/firestore';
 
 async function testConnection() {
   try {
@@ -27,7 +27,9 @@ export default function App() {
   const { mode, isLoggedIn, joinGroupId, setJoinGroupId, setMode, login, logout, broadcasts, systemSettings, user } = useAppStore();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubscribeFirestore = () => {};
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
@@ -45,16 +47,66 @@ export default function App() {
           }
           // If no doc exists, they might be mid-onboarding.
           // Onboarding will handle doc creation.
+          
+          // Set up friend request listener
+          if (unsubscribeFirestore) unsubscribeFirestore(); // clean old if any
+          let unsubscribeReceived = () => {};
+          let unsubscribeSent = () => {};
+
+          const requestsRef = collection(db, 'friendRequests');
+          const qReceived = query(requestsRef, where('toUserId', '==', firebaseUser.uid));
+          unsubscribeReceived = onSnapshot(qReceived, async (snapshot) => {
+            const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+            
+            // Generate full FriendRequest objects
+            const fullRequests = [];
+            for (const r of requests) {
+              try {
+                // Get sender info
+                let senderDoc = await getDoc(doc(db, 'users', r.fromUserId));
+                if (senderDoc.exists()) {
+                  const senderData = senderDoc.data();
+                  fullRequests.push({
+                    id: r.id,
+                    userId: r.fromUserId,
+                    name: senderData.displayName || senderData.username || 'Unknown',
+                    avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
+                    timestamp: r.createdAt ? new Date(r.createdAt.toMillis()).toISOString() : new Date().toISOString()
+                  });
+                }
+              } catch (e) {
+                console.error("Error fetching sender for request:", e);
+              }
+            }
+            useAppStore.getState().setFriendRequests(fullRequests);
+          });
+
+          // Fetch sent requests too
+          const qSent = query(requestsRef, where('fromUserId', '==', firebaseUser.uid));
+          unsubscribeSent = onSnapshot(qSent, (snapshot) => {
+             const sentIds = snapshot.docs.map(doc => {
+               const data = doc.data() as any;
+               return data.toUserId;
+             });
+             useAppStore.setState({ sentFriendRequests: sentIds });
+          });
+
+          unsubscribeFirestore = () => {
+             unsubscribeReceived();
+             unsubscribeSent();
+          };
         } catch (err) {
           console.error("Error fetching user data:", err);
         }
       } else {
-        // User is signed out.
-        // We shouldn't auto logout unless we want strictly authenticated app
+        if (unsubscribeFirestore) unsubscribeFirestore();
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeFirestore) unsubscribeFirestore();
+    };
   }, [login]);
 
   useEffect(() => {

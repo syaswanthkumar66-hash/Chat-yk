@@ -35,12 +35,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      
-      // We allow users to list users securely here for app functionality, only if they are logged in maybe? 
-      // Actually reading all users is allowed right now by the app because there's a global user search.
-      // But PII includes email, so wait, we should isolate email if we want to allow blanket reads...
-      // The current frontend just fetches users manually or uses the mock store. We added one doc `setDoc` for the user themselves.
+      allow read: if isVerified();
 
       allow create: if isOwner(userId) &&
         isValidId(userId) &&
@@ -52,6 +47,23 @@ service cloud.firestore {
         isValidUserConfig(incoming()) && (
            isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'avatar', 'description'])
         );
+    }
+
+    function isValidFriendRequest(data) {
+       return data.keys().hasAll(['fromUserId', 'toUserId', 'createdAt', 'status']) &&
+         data.fromUserId is string && data.fromUserId.size() <= 128 &&
+         data.fromUserId == request.auth.uid &&
+         data.toUserId is string && data.toUserId.size() <= 128 &&
+         data.createdAt == request.time &&
+         data.status == 'pending';
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if isVerified() && (resource.data.toUserId == request.auth.uid || resource.data.fromUserId == request.auth.uid);
+      allow create: if isVerified() && isValidId(requestId) && isValidFriendRequest(incoming());
+      allow delete: if isVerified() && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid);
+      // Optional: to accept a request we might just delete it and create a friend doc, or update it
+      // if updating to 'accepted', but the current logic just deletes it.
     }
   }
 }
