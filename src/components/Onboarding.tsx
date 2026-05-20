@@ -1,9 +1,9 @@
-import { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { useAppStore } from '../store';
 import { Button, Icon, Avatar, Card } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db } from '../firebase';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const TAKEN_USERNAMES = ['sarah_c', 'admin', 'system', 'root'];
@@ -29,6 +29,45 @@ export const Onboarding = () => {
   const [error, setError] = useState('');
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result) {
+          const user = result.user;
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            login({
+              id: user.uid,
+              username: userData.username,
+              displayName: userData.displayName,
+              avatar: userData.avatar,
+              description: userData.description,
+              isAdmin: userData.isAdmin,
+              joinDate: userData.joinDate
+            });
+          } else {
+            setProfile(prev => ({
+              ...prev,
+              displayName: user.displayName || '',
+              avatar: user.photoURL || prev.avatar
+            }));
+            setStep('profile');
+          }
+        }
+      })
+      .catch((err: any) => {
+        console.error("Redirect error: ", err);
+        if (err.code === 'auth/unauthorized-domain') {
+          setError('This domain is not authorized for Firebase Auth. Please add your Vercel domain to Firebase Console > Authentication > Settings > Authorized Domains.');
+        } else {
+          setError(err.message || 'Failed to complete Google login.');
+        }
+      });
+  }, []);
 
   const handleGoogleLogin = async () => {
     try {
@@ -62,7 +101,17 @@ export const Onboarding = () => {
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to login with Google');
+      if (err.code === 'auth/unauthorized-domain') {
+        setError('This domain is not authorized for Firebase Auth. Please add your Vercel domain to Firebase Console > Authentication > Settings > Authorized Domains.');
+      } else if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
+        // Fallback for strict browsers like in-app browsers
+        const provider = new GoogleAuthProvider();
+        signInWithRedirect(auth, provider).catch(redirectErr => {
+           setError('Advanced Popup block. Please open in Safari/Chrome standard browser.');
+        });
+      } else {
+        setError(err.message || 'Failed to login with Google');
+      }
     }
   };
 
