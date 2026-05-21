@@ -8,7 +8,8 @@ const ROOM_ID = 'global-sync-room';
 interface Message {
   messageId: string;
   senderId: string;
-  message: string;
+  message?: string;
+  image?: string;
   timestamp: string;
   isMe?: boolean;
 }
@@ -21,6 +22,7 @@ export default function App() {
   
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     socketRef.current = io(BACKEND_URL, {
@@ -72,6 +74,32 @@ export default function App() {
     setInputText('');
   };
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64String = event.target?.result as string;
+      
+      const newMessage: Message = {
+        messageId: Math.random().toString(36).substring(7),
+        image: base64String,
+        senderId: socketId || 'unknown',
+        timestamp: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, { ...newMessage, isMe: true }]);
+
+      socketRef.current?.emit('send_message', {
+        roomId: ROOM_ID,
+        ...newMessage
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ''; // Reset input
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-50 font-sans">
       <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200">
@@ -102,7 +130,11 @@ export default function App() {
                   : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
               }`}
             >
-              {msg.message}
+              {msg.image ? (
+                <img src={msg.image} alt="Uploaded" className="max-w-full rounded-lg" />
+              ) : (
+                msg.message
+              )}
             </div>
             <span className="text-[10px] text-gray-400 mt-1 px-1">
               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -114,18 +146,28 @@ export default function App() {
 
       <footer className="bg-white border-t border-gray-200 p-4">
         <form onSubmit={sendMessage} className="flex items-center gap-3 max-w-4xl mx-auto">
-          <button type="button" className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0" title="Upload File / Image">
+          <input 
+            type="file" 
+            accept="image/*" 
+            ref={fileInputRef} 
+            className="hidden" 
+            onChange={handleImageUpload}
+          />
+          <button 
+            type="button" 
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0" 
+            title="Upload File / Image"
+          >
             <Upload size={20} />
           </button>
-          <button type="button" className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0" title="Use Camera">
-            <Camera size={20} />
-          </button>
+          
           <div className="flex-1 relative">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Type a message to sync with the mobile app..."
+              placeholder="Type a message or share a photo..."
               className="w-full px-4 py-3 bg-gray-100 border-transparent rounded-full focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all outline-none"
             />
           </div>

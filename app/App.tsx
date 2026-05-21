@@ -8,19 +8,23 @@ import {
   FlatList, 
   KeyboardAvoidingView, 
   Platform,
-  SafeAreaView
+  SafeAreaView,
+  Image,
+  ActivityIndicator
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import io from 'socket.io-client';
+import * as ImagePicker from 'expo-image-picker';
 
-// Replace with your Render/Fly.io production URL once deployed
-const BACKEND_URL = 'http://localhost:8080'; 
+// Replace with your Render/Fly.io production URL or local network IP (e.g., http://192.168.1.X:8080)
+const BACKEND_URL = 'http://192.168.1.100:8080'; 
 const ROOM_ID = 'global-sync-room'; 
 
 type Message = {
   messageId: string;
   senderId: string;
-  message: string;
+  message?: string;
+  image?: string;
   timestamp: string;
   isMe?: boolean;
 };
@@ -33,6 +37,14 @@ export default function App() {
   const socketRef = useRef<any>(null);
 
   useEffect(() => {
+    // Request permissions
+    (async () => {
+      if (Platform.OS !== 'web') {
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+        await ImagePicker.requestCameraPermissionsAsync();
+      }
+    })();
+
     // Initialize Socket Connection
     socketRef.current = io(BACKEND_URL, {
       transports: ['websocket'],
@@ -48,7 +60,7 @@ export default function App() {
 
     // Listen for incoming messages from Web / other Mobile apps
     socketRef.current.on('receive_message', (data: Message) => {
-      console.log('Got message:', data);
+      console.log('Got message:', data.message || 'Image received');
       setMessages((prev) => [...prev, { ...data, isMe: false }]);
     });
 
@@ -79,12 +91,60 @@ export default function App() {
     setInputText('');
   };
 
+  const pickImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.5,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      sendImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+    }
+  };
+
+  const takePhoto = async () => {
+    let result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.5,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      sendImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+    }
+  };
+
+  const sendImage = (base64Image: string) => {
+    const newMessage: Message = {
+      messageId: Math.random().toString(36).substring(7),
+      image: base64Image,
+      senderId: socketId || 'unknown',
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, { ...newMessage, isMe: true }]);
+
+    socketRef.current.emit('send_message', {
+      roomId: ROOM_ID,
+      ...newMessage
+    });
+  };
+
   const renderItem = ({ item }: { item: Message }) => {
     const isMe = item.isMe;
     return (
       <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.theirMessage]}>
         {!isMe && <Text style={styles.sender}>Web / User</Text>}
-        <Text style={[styles.messageText, isMe ? styles.myMessageText : null]}>{item.message}</Text>
+        {item.image ? (
+          <Image source={{ uri: item.image }} style={styles.messageImage} />
+        ) : (
+          <Text style={[styles.messageText, isMe ? styles.myMessageText : null]}>
+            {item.message}
+          </Text>
+        )}
       </View>
     );
   };
@@ -107,18 +167,26 @@ export default function App() {
 
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.inputContainer}
+        style={styles.keyboardView}
       >
-        <TextInput
-          style={styles.input}
-          placeholder="Type a message..."
-          value={inputText}
-          onChangeText={setInputText}
-          onSubmitEditing={sendMessage}
-        />
-        <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
-          <Text style={styles.sendButtonText}>Send</Text>
-        </TouchableOpacity>
+        <View style={styles.inputContainer}>
+          <TouchableOpacity style={styles.iconButton} onPress={pickImage}>
+             <Text style={styles.iconText}>📁</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton} onPress={takePhoto}>
+             <Text style={styles.iconText}>📷</Text>
+          </TouchableOpacity>
+          <TextInput
+            style={styles.input}
+            placeholder="Type a message..."
+            value={inputText}
+            onChangeText={setInputText}
+            onSubmitEditing={sendMessage}
+          />
+          <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
+            <Text style={styles.sendButtonText}>Send</Text>
+          </TouchableOpacity>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -176,12 +244,27 @@ const styles = StyleSheet.create({
   myMessageText: {
     color: '#FFFFFF',
   },
+  messageImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 8,
+  },
+  keyboardView: {
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    backgroundColor: '#fff',
+  },
   inputContainer: {
     flexDirection: 'row',
     padding: 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    alignItems: 'center'
+  },
+  iconButton: {
+    marginRight: 10,
+    padding: 4,
+  },
+  iconText: {
+    fontSize: 20,
   },
   input: {
     flex: 1,

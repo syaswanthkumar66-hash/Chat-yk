@@ -6,7 +6,8 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const server = http.createServer(app);
 
@@ -15,7 +16,8 @@ const io = new Server(server, {
   cors: {
     origin: "*", // Adjust for production to match your Vercel URL
     methods: ["GET", "POST"]
-  }
+  },
+  maxHttpBufferSize: 50 * 1024 * 1024 // 50 MB
 });
 
 // STUN/TURN Server Configuration (passed to clients for WebRTC)
