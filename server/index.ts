@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import { fileURLToPath } from "url";
+
 import { createServer } from "http";
 import { Server } from "socket.io";
 import multer from "multer";
@@ -9,8 +9,7 @@ import { uploadFile, deleteFile } from "../src/services/storageService.js";
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+
 
 let db: any = null;
 if (process.env.FIREBASE_CONFIG) {
@@ -49,7 +48,7 @@ const io = new Server(httpServer, {
     methods: ["GET", "POST"]
   }
 });
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
