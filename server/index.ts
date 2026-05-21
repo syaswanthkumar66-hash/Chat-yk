@@ -48,7 +48,6 @@ const io = new Server(httpServer, {
     methods: ["GET", "POST"]
   }
 });
-const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -353,8 +352,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 
   if (!process.env.VERCEL) {
-    httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+    const port = process.env.PORT || 3000;
+    httpServer.listen(port, "0.0.0.0", () => {
+      console.log(`Server running on port ${port}`);
     });
   }
 }
