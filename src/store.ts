@@ -221,6 +221,7 @@ export const useAppStore = create<AppState>((set) => ({
       friendRequests: [],
       groupJoinRequests: []
     });
+    
     useAppStore.getState().initSocket(user.id);
   },
   logout: () => {
@@ -249,6 +250,150 @@ export const useAppStore = create<AppState>((set) => ({
       const { cryptoService } = await import('./services/cryptoService');
       const publicKey = await cryptoService.getMyPublicKeyBase64();
       socket.emit('register', { userId, publicKey });
+    });
+
+    // === FIREBASE FALLBACK: Listen to offline messages ===
+    import('./firebase').then(({ db }) => {
+      import('firebase/firestore').then(({ collection, onSnapshot, query, where, doc, deleteDoc, getDoc, setDoc }) => {
+        // Broadcast my public key via Firebase:
+        import('./services/cryptoService').then(async ({ cryptoService }) => {
+            const publicKey = await cryptoService.getMyPublicKeyBase64();
+            setDoc(doc(db, 'users', userId), { publicKey }, { merge: true }).catch(console.error);
+        });
+
+        // Smart fallback logic: only use Firebase listeners when Socket.IO is disconnected
+        let usersUnsubscribe: (() => void) | null = null;
+
+        const startFirebaseFallback = () => {
+           if (!usersUnsubscribe) {
+              usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+                snapshot.docChanges().forEach(change => {
+                   const data = change.doc.data();
+                   if (data.isOnline !== undefined) {
+                      useAppStore.getState().updateUserByAdmin(change.doc.id, { isOnline: data.isOnline, ...(data.publicKey ? { publicKey: data.publicKey } : {}) });
+                   }
+                });
+              });
+           }
+        };
+
+        const stopFirebaseFallback = () => {
+           if (usersUnsubscribe) {
+              usersUnsubscribe();
+              usersUnsubscribe = null;
+           }
+        };
+
+        socket.on('disconnect', () => {
+           startFirebaseFallback();
+           // Mark self as offline in Firebase
+           import('./firebase').then(({ db }) => {
+              import('firebase/firestore').then(({ doc, setDoc }) => {
+                 setDoc(doc(db, 'users', userId), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch(console.error);
+              });
+           });
+        });
+
+        socket.on('connect', () => {
+           stopFirebaseFallback();
+           // Mark self as online in Firebase so offline users know
+           import('./firebase').then(({ db }) => {
+              import('firebase/firestore').then(({ doc, setDoc }) => {
+                 setDoc(doc(db, 'users', userId), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch(console.error);
+              });
+           });
+        });
+
+        // Start fallback initially if socket isn't connected within a short time
+        setTimeout(() => {
+           if (!socket.connected) {
+              startFirebaseFallback();
+           }
+        }, 3000);
+
+        // Listen for messages directly in Firebase if sent via fallback
+        onSnapshot(query(collection(db, 'offline_messages'), where('to', '==', userId)), (snapshot) => {
+           snapshot.docChanges().forEach(async (change) => {
+              if (change.type === 'added') {
+                  const data = change.doc.data() as any;
+                  
+                  // If socket is connected, server will deliver them via socket anyway.
+                  // We only consume from Firebase fallback if socket fails or isn't connected.
+                  if (socket.connected) return; 
+                  
+                  const state = useAppStore.getState();
+                  const { cryptoService } = await import('./services/cryptoService');
+                  let decryptedText = data.text;
+                  
+                  if (data.iv && data.text) {
+                     try {
+                        let remotePubKeyBase64 = null;
+                        const userDoc = await getDoc(doc(db, 'users', data.senderId));
+                        if(userDoc.exists()) {
+                           remotePubKeyBase64 = userDoc.data()?.publicKey;
+                        }
+                        if (remotePubKeyBase64) {
+                            const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64);
+                            const encryptedObj = JSON.parse(data.text);
+                            decryptedText = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
+                        }
+                     } catch(e) {
+                        console.error("Decryption fallback failed", e);
+                        decryptedText = "🔒 [Encrypted Message]";
+                     }
+                  }
+
+                  const newMessage: Message = {
+                    id: data.id || `m-${Date.now()}`,
+                    senderId: data.senderId,
+                    text: decryptedText,
+                    timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    type: data.type || 'text',
+                    fileUrl: data.fileUrl,
+                    fileSize: data.fileSize,
+                    encryptedFileKey: data.encryptedFileKey,
+                    iv: data.iv,
+                    isE2E: !!(data.iv || data.encryptedFileKey || (data.text && typeof data.text === 'string' && data.text.includes('"iv"'))),
+                    isOwn: false
+                  };
+
+                  set((state) => {
+                    let updatedChats = [...state.chats];
+                    let chat = updatedChats.find(c => !c.isGroup && c.participants.some(p => p.id === data.senderId));
+                    if (chat) {
+                      updatedChats = updatedChats.map(c => c.id === chat!.id ? {
+                        ...c,
+                        messages: [...(c.messages || []), newMessage],
+                        lastMessage: newMessage,
+                        unreadCount: state.activeChatId === c.id ? c.unreadCount : (c.unreadCount || 0) + 1
+                      } : c);
+                    } else {
+                      const sender = state.users.find(u => u.id === data.senderId) || {
+                        id: data.senderId,
+                        displayName: 'Unknown User',
+                        username: data.senderId,
+                        avatar: `https://picsum.photos/seed/${data.senderId}/200`
+                      };
+                      const newChat: Chat = {
+                        id: `c-${Date.now()}`,
+                        participants: [
+                          { id: sender.id, name: sender.displayName, username: sender.username, avatar: sender.avatar, status: 'online' },
+                          { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
+                        ],
+                        unreadCount: 1,
+                        messages: [newMessage],
+                        lastMessage: newMessage
+                      };
+                      updatedChats.push(newChat);
+                    }
+                    return { chats: updatedChats };
+                  });
+
+                  deleteDoc(doc(db, 'offline_messages', change.doc.id)).catch(console.error);
+              }
+           });
+        });
+      });
     });
 
     socket.on('user_status', (data: { userId: string, isOnline: boolean }) => {
@@ -767,10 +912,10 @@ export const useAppStore = create<AppState>((set) => ({
       }));
     }, 2000);
 
-    // Emit via socket
-    if (state.socket) {
-      const targetId = recipientId || state.chats.find(c => c.id === chatId)?.participants.find(p => p.id !== state.user?.id)?.id;
-      if (targetId) {
+    // Emit via socket or fallback to Firebase
+    const targetId = recipientId || state.chats.find(c => c.id === chatId)?.participants.find(p => p.id !== state.user?.id)?.id;
+    if (targetId) {
+      if (state.socket && state.socket.connected) {
         state.socket.emit('send_message', {
           recipientId: targetId,
           text: e2eData ? e2eData.encryptedText : text,
@@ -780,6 +925,25 @@ export const useAppStore = create<AppState>((set) => ({
           iv: e2eData?.iv,
           encryptedFileKey: e2eData?.encryptedFileKey
         });
+      } else {
+         import('./firebase').then(({ db }) => {
+            import('firebase/firestore').then(({ doc, setDoc }) => {
+                const msgId = `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                setDoc(doc(db, 'offline_messages', msgId), {
+                    id: msgId,
+                    senderId: state.user?.id,
+                    recipientId: targetId,
+                    text: e2eData ? e2eData.encryptedText : text,
+                    type: type || 'text',
+                    fileUrl,
+                    fileSize,
+                    iv: e2eData?.iv,
+                    encryptedFileKey: e2eData?.encryptedFileKey,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    to: targetId
+                }).catch(console.error);
+            });
+         });
       }
     }
 

@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import multer from "multer";
-import { uploadFile, deleteFile } from "./src/services/storageService.js";
+import { uploadFile, deleteFile } from "../src/services/storageService.js";
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
@@ -41,23 +41,26 @@ function checkQuota(userId: string, size: number) {
   return true;
 }
 
-async function startServer() {
-  const app = express();
-  const httpServer = createServer(app);
-  const io = new Server(httpServer, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"]
-    }
-  });
-  const PORT = 3000;
+const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+const PORT = 3000;
 
-  app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
 
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-  // File Upload Endpoint
-  app.post("/api/upload", upload.single("file"), async (req, res) => {
+const users = new Map<string, string>(); // userId -> socketId
+const userPublicKeys = new Map<string, string>(); // userId -> publicKey
+const tempStorage = new Map<string, any>(); // messageId -> messageData 
+
+// File Upload Endpoint
+app.post("/api/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -84,10 +87,6 @@ async function startServer() {
   });
 
   // Socket.io logic
-  const users = new Map<string, string>(); // userId -> socketId
-  const userPublicKeys = new Map<string, string>(); // userId -> publicKey
-  const tempStorage = new Map<string, any>(); // messageId -> messageData 
-
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
@@ -338,14 +337,15 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  async function startServer() {
+    // Vite middleware for development
+    if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
@@ -353,9 +353,13 @@ async function startServer() {
     });
   }
 
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    httpServer.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer();
+
+export default app;

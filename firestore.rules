@@ -45,8 +45,14 @@ service cloud.firestore {
       allow update: if isOwner(userId) &&
         isValidId(userId) &&
         isValidUserConfig(incoming()) && (
-           isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'avatar', 'description'])
+           isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'avatar', 'description', 'isOnline', 'lastSeen', 'publicKey'])
         );
+    }
+
+    match /offline_messages/{messageId} {
+      allow create: if isVerified() && incoming().senderId == request.auth.uid;
+      allow read: if isVerified() && resource.data.to == request.auth.uid;
+      allow delete: if isVerified() && resource.data.to == request.auth.uid;
     }
 
     function isValidFriendRequest(data) {
