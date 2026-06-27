@@ -453,7 +453,7 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
                 onClick={() => toggleChatAdmin(chat.id, currentUser!.id)}
                 className="mt-2 text-[10px] font-bold text-primary uppercase tracking-widest hover:underline"
               >
-                Become Admin (Demo)
+                Claim Admin Role
               </button>
             )}
           </div>
