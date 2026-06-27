@@ -9,6 +9,7 @@ export default function handler(req, res) {
     'Firebase Cloud': process.env.FIREBASE_CONFIG ? 'Configured' : 'Missing',
     'Gemini AI Engine': process.env.GEMINI_API_KEY ? 'Configured' : 'Missing',
     'Express TURN': process.env.TURN_SERVER_URL ? 'Configured' : 'Missing',
+    'Web Notification Keys': (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) ? 'Configured' : 'Missing',
   };
 
   const status = credentials[service];

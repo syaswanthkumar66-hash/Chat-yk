@@ -2234,6 +2234,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
               {[
                 { name: 'Firebase Cloud', status: 'Operational', latency: '24ms', icon: 'cloud', color: 'bg-amber-500', usage: 45 },
                 { name: 'Gemini AI Engine', status: 'Operational', latency: '142ms', icon: 'psychology', color: 'bg-primary', usage: 78 },
+                { name: 'Web Notification Keys', status: 'Operational', latency: '10ms', icon: 'notifications_active', color: 'bg-emerald-500', usage: 10 },
               ].map((service) => (
                 <Card key={`integration-service-${service.name}`} className="p-5 sm:p-8 space-y-4 sm:space-y-6 bg-white shadow-xl shadow-primary/5 border-none rounded-2xl sm:rounded-[2.5rem] group hover:shadow-2xl hover:shadow-primary/10 transition-all duration-500">
                   <div className="flex items-start justify-between">
