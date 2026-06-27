@@ -37,6 +37,8 @@ export const SocialLayout = () => {
     setFriendRequests,
     acceptFriendRequest,
     rejectFriendRequest,
+    sendFriendRequest,
+    cancelFriendRequest,
     activeGroupCall,
     setActiveGroupCall,
     activeGroupInfoId,
@@ -377,86 +379,185 @@ export const SocialLayout = () => {
             </div>
           )}
 
-          {activeTab === 'friends' && (
-            <div className="p-4 space-y-6">
-              {friendRequests.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary px-1">Friend Requests ({friendRequests.length})</h4>
-                  <div className="space-y-2">
-                    {friendRequests.map(req => (
-                      <Card key={`request-${req.id}`} className="p-3 flex items-center gap-3 bg-primary/5 border-primary/10">
-                        <Avatar 
-                          src={req.avatar} 
-                          className="size-10 cursor-pointer hover:scale-105 transition-transform" 
-                          onClick={() => setViewingUserId(req.userId)} 
-                        />
-                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setViewingUserId(req.userId)}>
-                          <p className="text-xs font-bold text-slate-800 truncate">{req.name}</p>
-                          <p className="text-[8px] text-neutral-muted uppercase tracking-widest">{req.timestamp}</p>
-                        </div>
-                        <div className="flex gap-1">
-                          <button 
-                            onClick={() => rejectFriendRequest(req.id)}
-                            className="size-8 rounded-lg bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-500/20 active:scale-90 transition-all"
-                          >
-                            <Icon name="close" className="text-sm" />
-                          </button>
-                          <button 
-                            onClick={() => acceptFriendRequest(req.id)}
-                            className="size-8 rounded-lg bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20 active:scale-90 transition-all"
-                          >
-                            <Icon name="check" className="text-sm" />
-                          </button>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
+          {activeTab === 'friends' && (() => {
+            const myFriends = users.filter(u => 
+              u.id !== user?.id && 
+              u.isFriend && 
+              !blockedUserIds.includes(u.id) && 
+              !removedFriendIds.includes(u.id)
+            );
+            
+            const sentRequestsUsers = users.filter(u => 
+              u.id !== user?.id && 
+              sentFriendRequests.includes(u.id) &&
+              !blockedUserIds.includes(u.id) && 
+              !removedFriendIds.includes(u.id)
+            );
+            
+            const discoverPeople = users.filter(u => 
+              u.id !== user?.id &&
+              !u.isFriend &&
+              !blockedUserIds.includes(u.id) && 
+              !removedFriendIds.includes(u.id) &&
+              !friendRequests.some(r => r.userId === u.id) &&
+              !sentFriendRequests.includes(u.id)
+            );
 
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  {users.filter(u => 
-                    u.id !== user?.id &&
-                    !blockedUserIds.includes(u.id) && 
-                    !removedFriendIds.includes(u.id) &&
-                    !friendRequests.some(r => r.userId === u.id) &&
-                    !sentFriendRequests.includes(u.id)
-                  ).map(loopUser => (
-                    <div key={`friend-${loopUser.id}`} className="flex items-center gap-4 p-2 cursor-pointer hover:bg-primary/5 rounded-xl transition-colors group" onClick={() => setViewingUserId(loopUser.id)}>
-                      <Avatar src={loopUser.avatar} className="size-12" status={loopUser.isOnline ? 'online' : 'offline'} />
-                      <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
-                        <div>
-                          <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
-                          <p className="text-xs text-neutral-muted">{loopUser.username}</p>
-                        </div>
-                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveGroupCall({ type: 'voice', userId: loopUser.id });
-                            }}
-                            className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm"
-                          >
-                            <Icon name="call" className="text-sm" />
-                          </button>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveGroupCall({ type: 'video', userId: loopUser.id });
-                            }}
-                            className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm"
-                          >
-                            <Icon name="videocam" className="text-sm" />
-                          </button>
-                        </div>
-                      </div>
+            return (
+              <div className="p-4 space-y-6 overflow-y-auto no-scrollbar max-h-full">
+                {/* 1. Incoming Friend Requests */}
+                {friendRequests.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary px-1">Friend Requests Received ({friendRequests.length})</h4>
+                    <div className="space-y-2">
+                      {friendRequests.map(req => (
+                        <Card key={`request-${req.id}`} className="p-3 flex items-center gap-3 bg-primary/5 border-primary/10">
+                          <Avatar 
+                            src={req.avatar} 
+                            className="size-10 cursor-pointer hover:scale-105 transition-transform" 
+                            onClick={() => setViewingUserId(req.userId)} 
+                          />
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setViewingUserId(req.userId)}>
+                            <p className="text-xs font-bold text-slate-800 truncate">{req.name}</p>
+                            <p className="text-[8px] text-neutral-muted uppercase tracking-widest">{req.timestamp}</p>
+                          </div>
+                          <div className="flex gap-1">
+                            <button 
+                              onClick={() => rejectFriendRequest(req.id)}
+                              className="size-8 rounded-lg bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-500/20 active:scale-90 transition-all"
+                            >
+                              <Icon name="close" className="text-sm" />
+                            </button>
+                            <button 
+                              onClick={() => acceptFriendRequest(req.id)}
+                              className="size-8 rounded-lg bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20 active:scale-90 transition-all"
+                            >
+                              <Icon name="check" className="text-sm" />
+                            </button>
+                          </div>
+                        </Card>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                )}
+
+                {/* 2. Sent Requests (Pending "Added") */}
+                {sentRequestsUsers.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 px-1">Sent Requests / Added ({sentRequestsUsers.length})</h4>
+                    <div className="space-y-2">
+                      {sentRequestsUsers.map(loopUser => (
+                        <Card key={`sent-${loopUser.id}`} className="p-3 flex items-center gap-3 bg-slate-50 border-slate-100">
+                          <Avatar 
+                            src={loopUser.avatar} 
+                            className="size-10 cursor-pointer hover:scale-105 transition-transform" 
+                            onClick={() => setViewingUserId(loopUser.id)} 
+                          />
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setViewingUserId(loopUser.id)}>
+                            <p className="text-xs font-bold text-slate-800 truncate">{loopUser.displayName}</p>
+                            <p className="text-[8px] text-neutral-muted uppercase tracking-widest">Pending Acceptance</p>
+                          </div>
+                          <button 
+                            onClick={() => cancelFriendRequest(loopUser.id)}
+                            className="px-3 py-1.5 text-[10px] rounded-lg bg-slate-200 text-slate-600 font-bold hover:bg-red-50 hover:text-red-500 transition-colors active:scale-95"
+                          >
+                            Cancel
+                          </button>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. My Friends */}
+                <div className="space-y-3">
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary px-1">My Friends ({myFriends.length})</h4>
+                  {myFriends.length > 0 ? (
+                    <div className="space-y-1">
+                      {myFriends.map(loopUser => (
+                        <div key={`friend-${loopUser.id}`} className="flex items-center gap-4 p-2 cursor-pointer hover:bg-primary/5 rounded-xl transition-colors group" onClick={() => setViewingUserId(loopUser.id)}>
+                          <Avatar src={loopUser.avatar} className="size-12" status={loopUser.isOnline ? 'online' : 'offline'} />
+                          <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
+                            <div>
+                              <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
+                              <p className="text-xs text-neutral-muted">{loopUser.username}</p>
+                            </div>
+                            <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveChatId(null);
+                                  setActiveRecipientId(loopUser.id);
+                                  setActiveTab('chats');
+                                }}
+                                className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm border border-slate-100"
+                                title="Chat"
+                              >
+                                <Icon name="chat" className="text-sm" />
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveGroupCall({ type: 'voice', userId: loopUser.id });
+                                }}
+                                className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm border border-slate-100"
+                                title="Voice Call"
+                              >
+                                <Icon name="call" className="text-sm" />
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveGroupCall({ type: 'video', userId: loopUser.id });
+                                }}
+                                className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm border border-slate-100"
+                                title="Video Call"
+                              >
+                                <Icon name="videocam" className="text-sm" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <p className="text-xs text-slate-400">No active friends yet. Add some people from the list below!</p>
+                    </div>
+                  )}
                 </div>
+
+                {/* 4. Discover People */}
+                {discoverPeople.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 px-1">Discover People ({discoverPeople.length})</h4>
+                    <div className="space-y-1">
+                      {discoverPeople.map(loopUser => (
+                        <div key={`discover-${loopUser.id}`} className="flex items-center gap-4 p-2 cursor-pointer hover:bg-primary/5 rounded-xl transition-colors group" onClick={() => setViewingUserId(loopUser.id)}>
+                          <Avatar src={loopUser.avatar} className="size-12" status={loopUser.isOnline ? 'online' : 'offline'} />
+                          <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
+                            <div>
+                              <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
+                              <p className="text-xs text-neutral-muted">{loopUser.username}</p>
+                            </div>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                sendFriendRequest(loopUser.id);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-primary text-white text-[10px] font-bold hover:bg-primary-dark transition-all active:scale-95 shadow-md shadow-primary/10"
+                            >
+                              Add Friend
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {activeTab === 'calls' && (
             <div className="p-4 space-y-4">

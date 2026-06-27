@@ -45,6 +45,13 @@ export default function App() {
               joinDate: userData.joinDate
             });
           }
+
+          // Request notification permissions
+          if (typeof window !== 'undefined' && 'Notification' in window) {
+            if (Notification.permission === 'default') {
+              Notification.requestPermission().catch(console.error);
+            }
+          }
           // If no doc exists, they might be mid-onboarding.
           // Onboarding will handle doc creation.
           
@@ -74,6 +81,7 @@ export default function App() {
                         avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
                         description: senderData.description || '',
                         isOnline: senderData.isOnline || false,
+                        isFriend: true,
                         profileVisibility: 'everyone',
                         hasPrivateProfile: false,
                         isAdmin: senderData.isAdmin || false,
@@ -116,6 +124,7 @@ export default function App() {
                         avatar: recipientData.avatar || `https://picsum.photos/seed/${data.toUserId}/200`,
                         description: recipientData.description || '',
                         isOnline: recipientData.isOnline || false,
+                        isFriend: true,
                         profileVisibility: 'everyone',
                         hasPrivateProfile: false,
                         isAdmin: recipientData.isAdmin || false,

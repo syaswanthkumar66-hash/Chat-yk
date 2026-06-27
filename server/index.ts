@@ -158,6 +158,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         if (publicKey) userPublicKeys.set(userId, publicKey);
       }
       
+      (socket as any).userId = userId;
       users.set(userId, socket.id);
       console.log(`User ${userId} registered with socket ${socket.id}`);
       
@@ -168,8 +169,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const deliverAndCleanup = (msgId: string, msgData: any) => {
         socket.emit("receive_message", msgData);
         console.log(`Delivered offline message ${msgId} to ${userId}`);
-        // If it's a file, we DO NOT delete from R2 here because E2EE needs to download it.
-        // It's up to the client to delete or we delete it on a cron job. The prompt says: "forward after immediately delete incase not online" - meaning delete message from store-and-forward.
       };
 
       // Deliver temporary stored messages from Firebase if available
@@ -194,6 +193,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("join_group", (groupId) => {
+      socket.join(`group-${groupId}`);
+      console.log(`Socket ${socket.id} joined group room group-${groupId}`);
+    });
+
     socket.on("get_public_key", ({ userId }, callback) => {
       callback(userPublicKeys.get(userId));
     });
@@ -201,14 +205,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     socket.on("typing", (data) => {
       const { recipientId, isTyping } = data;
       const targetSocketId = users.get(recipientId);
-      
-      let senderId = null;
-      for (const [uid, sid] of users.entries()) {
-        if (sid === socket.id) {
-          senderId = uid;
-          break;
-        }
-      }
+      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
 
       if (targetSocketId && senderId) {
         io.to(targetSocketId).emit("typing", { senderId, isTyping });
@@ -216,16 +213,8 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     });
 
     socket.on("send_message", async (data) => {
-      const { recipientId, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
-      const targetSocketId = users.get(recipientId);
-      
-      let senderId = null;
-      for (const [uid, sid] of users.entries()) {
-        if (sid === socket.id) {
-          senderId = uid;
-          break;
-        }
-      }
+      const { recipientId, groupId, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
+      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
 
       if (!senderId) return;
 
@@ -238,6 +227,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const messageData = {
         id: messageId || `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         senderId,
+        groupId,
         recipientId,
         text, // this is now E2EE encrypted ciphertext
         type: type || 'text',
@@ -248,22 +238,29 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("receive_message", messageData);
-        console.log(`Message sent from ${senderId} to ${recipientId}`);
-      } else {
-        const storeData = { ...messageData, to: recipientId };
-        if (db) {
-          try {
-            await db.collection('offline_messages').doc(messageData.id).set(storeData);
-            console.log(`User ${recipientId} offline. Message saved to Firebase.`);
-          } catch(e) {
-            console.error("Firebase save error", e);
-          }
+      if (groupId) {
+        // Send to everyone in the group room except the sender
+        socket.to(`group-${groupId}`).emit("receive_message", messageData);
+        console.log(`Group message sent from ${senderId} to group-${groupId}`);
+      } else if (recipientId) {
+        const targetSocketId = users.get(recipientId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit("receive_message", messageData);
+          console.log(`Message sent from ${senderId} to ${recipientId}`);
         } else {
-          // Store temporarily in memory if firebase not configured
-          tempStorage.set(messageData.id, storeData);
-          console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
+          const storeData = { ...messageData, to: recipientId };
+          if (db) {
+            try {
+              await db.collection('offline_messages').doc(messageData.id).set(storeData);
+              console.log(`User ${recipientId} offline. Message saved to Firebase.`);
+            } catch(e) {
+              console.error("Firebase save error", e);
+            }
+          } else {
+            // Store temporarily in memory if firebase not configured
+            tempStorage.set(messageData.id, storeData);
+            console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
+          }
         }
       }
     });
@@ -302,13 +299,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     });
 
     socket.on("disconnect", () => {
-      for (const [userId, socketId] of users.entries()) {
-        if (socketId === socket.id) {
-          users.delete(userId);
-          io.emit("user_status", { userId, isOnline: false });
-          console.log(`User ${userId} disconnected`);
-          break;
-        }
+      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
+      if (senderId) {
+        users.delete(senderId);
+        io.emit("user_status", { userId: senderId, isOnline: false });
+        console.log(`User ${senderId} disconnected`);
       }
     });
   });

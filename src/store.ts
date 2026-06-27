@@ -11,6 +11,7 @@ interface UserProfile {
   displayName: string;
   avatar: string;
   description: string;
+  isFriend?: boolean;
   isAdmin?: boolean;
   isBanned?: boolean;
   isReported?: boolean;
@@ -177,6 +178,7 @@ interface AppState {
     activeFeatures: string[];
   };
   updateSystemSettings: (settings: Partial<AppState['systemSettings']>) => void;
+  onlineUserIds: string[];
   users: UserProfile[];
   banUser: (userId: string) => void;
   flagUser: (userId: string, reason: string) => void;
@@ -199,7 +201,15 @@ interface AppState {
   declineTransfer: (transferId: string) => void;
 }
 
+export const DEFAULT_PRESETS: UserProfile[] = [
+  { id: 'u1', username: 'sarah_c', displayName: 'Sarah Chen', avatar: 'https://picsum.photos/seed/sarah/200', description: 'Senior Product Designer & Tech Enthusiast', isAdmin: true, joinDate: new Date('2023-01-15').toISOString() },
+  { id: 'u2', username: 'alex_m', displayName: 'Alex Mercer', avatar: 'https://picsum.photos/seed/alex/200', description: 'Network Security Engineer & P2P Hacker', isAdmin: false, joinDate: new Date('2023-02-20').toISOString() },
+  { id: 'u3', username: 'jordan_v', displayName: 'Jordan Vance', avatar: 'https://picsum.photos/seed/jordan/200', description: 'Lead Systems Architect & Core Developer', isAdmin: false, joinDate: new Date('2023-03-10').toISOString() },
+  { id: 'u4', username: 'taylor_s', displayName: 'Taylor Swift', avatar: 'https://picsum.photos/seed/taylor/200', description: 'Creative Developer & UI Engineer', isAdmin: false, joinDate: new Date('2023-04-05').toISOString() }
+];
+
 export const useAppStore = create<AppState>((set) => ({
+  onlineUserIds: [] as string[],
   devices: [
     { id: 'd1', name: 'MacBook Pro', type: 'desktop', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '45.2 Mbps', totalSent: '12.4 GB', totalReceived: '8.7 GB' },
     { id: 'd2', name: 'iPhone 15 Pro', type: 'mobile', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '32.1 Mbps', totalSent: '4.1 GB', totalReceived: '2.3 GB' },
@@ -322,14 +332,13 @@ export const useAppStore = create<AppState>((set) => ({
       user,
       authMethod,
       friendRequests: [],
-      groupJoinRequests: []
+      groupJoinRequests: [],
+      onlineUserIds: [],
+      users: DEFAULT_PRESETS
     });
     
-    // For google auth, automatically connect on-the-spot connections.
-    // For local auth, start completely standalone and let them connect to spot service manually.
-    if (authMethod === 'google') {
-      useAppStore.getState().initSocket(user.id);
-    }
+    // Automatically connect on-the-spot connections for both login methods.
+    useAppStore.getState().initSocket(user.id);
   },
   logout: () => {
     const state = useAppStore.getState();
@@ -375,6 +384,14 @@ export const useAppStore = create<AppState>((set) => ({
       const { cryptoService } = await import('./services/cryptoService');
       const publicKey = await cryptoService.getMyPublicKeyBase64();
       socket.emit('register', { userId, publicKey });
+      
+      // Auto join group rooms on connect
+      const activeState = useAppStore.getState();
+      activeState.chats.forEach(c => {
+        if (c.isGroup) {
+          socket.emit('join_group', c.id);
+        }
+      });
     });
 
     // === FIREBASE FALLBACK: Listen to offline messages ===
@@ -522,17 +539,24 @@ export const useAppStore = create<AppState>((set) => ({
     });
 
     socket.on('user_status', (data: { userId: string, isOnline: boolean }) => {
+      set((state) => {
+        const nextOnline = data.isOnline
+          ? [...new Set([...state.onlineUserIds, data.userId])]
+          : state.onlineUserIds.filter(id => id !== data.userId);
+        return { onlineUserIds: nextOnline };
+      });
       useAppStore.getState().updateUserByAdmin(data.userId, { isOnline: data.isOnline });
     });
 
     socket.on('online_users', (onlineUserIds: string[]) => {
+      set({ onlineUserIds });
       const state = useAppStore.getState();
       state.users.forEach(u => {
         state.updateUserByAdmin(u.id, { isOnline: onlineUserIds.includes(u.id) });
       });
     });
 
-    socket.on('receive_message', async (data: { senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[] }) => {
+    socket.on('receive_message', async (data: { id?: string, messageId?: string, groupId?: string, senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[] }) => {
       const state = useAppStore.getState();
       const { cryptoService } = await import('./services/cryptoService');
       
@@ -555,7 +579,7 @@ export const useAppStore = create<AppState>((set) => ({
       }
 
       const newMessage: Message = {
-        id: `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        id: data.id || data.messageId || `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         senderId: data.senderId,
         text: decryptedText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -568,19 +592,47 @@ export const useAppStore = create<AppState>((set) => ({
         isOwn: false
       };
 
+      // Play sound and trigger browser Notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const activeState = useAppStore.getState();
+        if (activeState.activeChatId !== (data.groupId || data.senderId)) {
+          const chatInfo = data.groupId 
+            ? activeState.chats.find(c => c.id === data.groupId)
+            : activeState.users.find(u => u.id === data.senderId);
+          const senderName = (chatInfo as any)?.name || (chatInfo as any)?.displayName || 'New Message';
+          try {
+            new Notification(senderName, {
+              body: decryptedText,
+              icon: chatInfo?.avatar || 'https://picsum.photos/seed/default/200',
+              tag: data.groupId || data.senderId,
+              renotify: true
+            } as any);
+          } catch (e) {
+            console.warn('Notification failed:', e);
+          }
+        }
+      }
+
       // Find chat or create one
       set((state) => {
         let updatedChats = [...state.chats];
-        let chat = updatedChats.find(c => !c.isGroup && c.participants.some(p => p.id === data.senderId));
+        let chat = data.groupId
+          ? updatedChats.find(c => c.id === data.groupId)
+          : updatedChats.find(c => !c.isGroup && c.participants.some(p => p.id === data.senderId));
         
         if (chat) {
+          // Guard against duplicates
+          if (chat.messages?.some(m => m.id === newMessage.id)) {
+            return {};
+          }
           updatedChats = updatedChats.map(c => c.id === chat!.id ? {
             ...c,
             messages: [...(c.messages || []), newMessage],
             lastMessage: newMessage,
             unreadCount: state.activeChatId === c.id ? c.unreadCount : (c.unreadCount || 0) + 1
           } : c);
-        } else {
+        } else if (!data.groupId) {
+          // For individual chats only, create if not found
           const sender = state.users.find(u => u.id === data.senderId) || {
             id: data.senderId,
             displayName: 'Unknown User',
@@ -879,6 +931,11 @@ export const useAppStore = create<AppState>((set) => ({
           senderName: 'System'
         }
       };
+      
+      if (state.socket && state.socket.connected) {
+        state.socket.emit('join_group', newId);
+      }
+      
       return { chats: [newGroup, ...state.chats] };
     });
     return newId;
@@ -986,16 +1043,18 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   addUser: (userData) => set((state) => {
     const existingId = (userData as any).id;
+    const isOnline = state.onlineUserIds.includes(existingId) || userData.isOnline || false;
+    const updatedUserData = { ...userData, isOnline };
     if (existingId && state.users.some(u => u.id === existingId)) {
         return {
-            users: state.users.map(u => u.id === existingId ? { ...u, ...userData } : u)
+            users: state.users.map(u => u.id === existingId ? { ...u, ...updatedUserData } : u)
         };
     }
     return {
       users: [
         ...state.users,
         {
-          ...userData,
+          ...updatedUserData,
           id: existingId || `u${Math.random().toString(36).substr(2, 9)}`,
           joinDate: (userData as any).joinDate || new Date().toISOString(),
           profileVisibility: 'everyone',
@@ -1038,11 +1097,13 @@ export const useAppStore = create<AppState>((set) => ({
     }, 2000);
 
     // Emit via socket or fallback to Firebase
-    const targetId = recipientId || state.chats.find(c => c.id === chatId)?.participants.find(p => p.id !== state.user?.id)?.id;
-    if (targetId) {
-      if (state.socket && state.socket.connected) {
+    const chat = state.chats.find(c => c.id === chatId);
+    const isGroup = chat?.isGroup;
+
+    if (state.socket && state.socket.connected) {
+      if (isGroup) {
         state.socket.emit('send_message', {
-          recipientId: targetId,
+          groupId: chatId,
           text: e2eData ? e2eData.encryptedText : text,
           type,
           fileUrl,
@@ -1050,30 +1111,46 @@ export const useAppStore = create<AppState>((set) => ({
           iv: e2eData?.iv,
           encryptedFileKey: e2eData?.encryptedFileKey
         });
-
-        // Also store as temporary file if forwarded and contains a file URL
-        if (isForwarded && fileUrl) {
-          import('./firebase').then(({ db }) => {
-            import('firebase/firestore').then(({ doc, setDoc }) => {
-              setDoc(doc(db, 'offline_messages', newMessage.id), {
-                id: newMessage.id,
-                senderId: state.user?.id,
-                recipientId: targetId,
-                text: e2eData ? e2eData.encryptedText : text,
-                type: type || 'text',
-                fileUrl,
-                fileSize,
-                iv: e2eData?.iv,
-                encryptedFileKey: e2eData?.encryptedFileKey,
-                timestamp: newMessage.timestamp,
-                to: targetId,
-                isTemporaryFile: true,
-                isForwarded: true
-              }).catch(console.error);
-            });
-          });
-        }
       } else {
+        const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
+        if (targetId) {
+          state.socket.emit('send_message', {
+            recipientId: targetId,
+            text: e2eData ? e2eData.encryptedText : text,
+            type,
+            fileUrl,
+            fileSize,
+            iv: e2eData?.iv,
+            encryptedFileKey: e2eData?.encryptedFileKey
+          });
+
+          // Also store as temporary file if forwarded and contains a file URL
+          if (isForwarded && fileUrl) {
+            import('./firebase').then(({ db }) => {
+              import('firebase/firestore').then(({ doc, setDoc }) => {
+                setDoc(doc(db, 'offline_messages', newMessage.id), {
+                  id: newMessage.id,
+                  senderId: state.user?.id,
+                  recipientId: targetId,
+                  text: e2eData ? e2eData.encryptedText : text,
+                  type: type || 'text',
+                  fileUrl,
+                  fileSize,
+                  iv: e2eData?.iv,
+                  encryptedFileKey: e2eData?.encryptedFileKey,
+                  timestamp: newMessage.timestamp,
+                  to: targetId,
+                  isTemporaryFile: true,
+                  isForwarded: true
+                }).catch(console.error);
+              });
+            });
+          }
+        }
+      }
+    } else {
+      const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
+      if (targetId && !isGroup) {
          import('./firebase').then(({ db }) => {
             import('firebase/firestore').then(({ doc, setDoc }) => {
                 setDoc(doc(db, 'offline_messages', newMessage.id), {
