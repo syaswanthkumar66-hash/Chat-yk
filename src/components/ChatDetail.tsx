@@ -57,7 +57,7 @@ const DecryptedMedia = ({ msg, isOwn }: { msg: any; isOwn: boolean }) => {
           <Icon name="description" />
         </div>
         <div className="flex-1 overflow-hidden">
-          <p className={cn("text-sm font-bold truncate", isOwn ? "text-white" : "text-slate-800")}>{msg.text || (msg.fileUrl ? msg.fileUrl.split('/').pop() : 'File')}</p>
+          <p className={cn("text-sm font-bold truncate", isOwn ? "text-white" : "text-slate-800")}>{msg.text || (msg.fileUrl ? (msg.fileUrl.startsWith('data:') ? 'Offline File' : msg.fileUrl.split('/').pop()) : 'File')}</p>
           <div className={cn("text-[10px] font-bold uppercase tracking-widest mt-1 opacity-70", isOwn ? "text-white" : "text-slate-400")}>
             {msg.fileSize || 'FILE'}
           </div>
@@ -108,7 +108,11 @@ export const ChatDetail = () => {
     chats,
     typingUsers,
     sendMessage,
-    users
+    users,
+    deletedMsgIds,
+    globallyDeletedIds,
+    deleteMessageLocally,
+    deleteMessageGlobally
   } = useAppStore();
   const [showMenu, setShowMenu] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -117,8 +121,6 @@ export const ChatDetail = () => {
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [cleared, setCleared] = useState(false);
   const [showForward, setShowForward] = useState(false);
-  const [deletedMsgIds, setDeletedMsgIds] = useState<Set<string>>(new Set());
-  const [globallyDeletedIds, setGloballyDeletedIds] = useState<Set<string>>(new Set());
   const [showDeleteEveryoneConfirm, setShowDeleteEveryoneConfirm] = useState(false);
   const [replyTo, setReplyTo] = useState<{ id: string, text: string, sender: string } | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -313,7 +315,7 @@ export const ChatDetail = () => {
       sendMessage(activeChatId, activeRecipientId, messageText, 'text', undefined, undefined, e2eData);
     }
 
-    // Handle media sending via Cloudflare R2 with Compression & E2EE
+    // Handle media sending via server storage with Compression & E2EE
     for (const media of capturedMedia) {
       try {
         const { compressionService } = await import('../services/compressionService');
@@ -343,36 +345,74 @@ export const ChatDetail = () => {
           }
         }
 
-        const formData = new FormData();
-        formData.append('file', uploadBlob, media.type === 'audio' ? 'voice_note.webm' : (media.type === 'file' ? media.name || 'file.bin' : 'image.jpg'));
-        if (user?.id) formData.append('userId', user.id);
-        
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
+        const fileSizeStr = `${(uploadBlob.size / 1024 / 1024).toFixed(2)} MB`;
+        const isOffline = !navigator.onLine || !useAppStore.getState().socket?.connected;
 
-        if (response.status === 429) {
-          setToast("Daily 100MB quota exceeded!");
-          break;
-        }
+        if (isOffline) {
+          console.log("Offline detected, converting media to base64 data URL for offline Firebase storage...");
+          const base64Url = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(uploadBlob);
+          });
 
-        if (response.ok) {
-          const data = await response.json();
           const e2eData = sharedSecret ? {
             encryptedText: encTextStr,
-            iv: e2eFileIv! // using file iv just as placeholder, actual is inside encTextStr JSON
+            iv: e2eFileIv!
           } : undefined;
 
-          if (media.type === 'audio') {
-            sendMessage(activeChatId, activeRecipientId, originalTextStr, 'audio', data.fileUrl, data.fileSize, e2eData);
-          } else if (media.type === 'image') {
-            sendMessage(activeChatId, activeRecipientId, originalTextStr, 'image', data.fileUrl, data.fileSize, e2eData);
-          } else if (media.type === 'file') {
-            sendMessage(activeChatId, activeRecipientId, originalTextStr, 'file', data.fileUrl, data.fileSize, e2eData);
+          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData);
+          continue;
+        }
+
+        let uploadSuccess = false;
+        try {
+          const formData = new FormData();
+          formData.append('file', uploadBlob, media.type === 'audio' ? 'voice_note.webm' : (media.type === 'file' ? media.name || 'file.bin' : 'image.jpg'));
+          if (user?.id) formData.append('userId', user.id);
+
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (response.status === 429) {
+            setToast("Daily 100MB quota exceeded!");
+            break;
           }
-        } else {
-          console.error("Failed to upload media to server");
+
+          if (response.ok) {
+            const data = await response.json();
+            const e2eData = sharedSecret ? {
+              encryptedText: encTextStr,
+              iv: e2eFileIv! // using file iv just as placeholder, actual is inside encTextStr JSON
+            } : undefined;
+
+            sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData);
+            uploadSuccess = true;
+          } else {
+            console.error("Failed to upload media to server");
+          }
+        } catch (uploadErr) {
+          console.warn("Upload request failed, falling back to offline base64 storage:", uploadErr);
+        }
+
+        if (!uploadSuccess) {
+          console.log("Fallback to offline base64 storage in Firebase...");
+          const base64Url = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(uploadBlob);
+          });
+
+          const e2eData = sharedSecret ? {
+            encryptedText: encTextStr,
+            iv: e2eFileIv!
+          } : undefined;
+
+          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData);
         }
       } catch (error) {
         console.error("Error uploading media:", error);
@@ -389,7 +429,7 @@ export const ChatDetail = () => {
   const forwardMessage = (targetChatId: string) => {
     const selectedMsgs = messages.filter(m => selectedMessageIds.includes(m.id));
     selectedMsgs.forEach(msg => {
-      sendMessage(targetChatId, null, msg.text || '', msg.type, msg.fileUrl, msg.fileSize);
+      sendMessage(targetChatId, null, msg.text || '', msg.type, msg.fileUrl, msg.fileSize, undefined, true);
     });
     setShowForward(false);
     cancelSelection();
@@ -453,11 +493,7 @@ export const ChatDetail = () => {
         cancelSelection();
         break;
       case 'delete_me':
-        setDeletedMsgIds(prev => {
-          const next = new Set(prev);
-          selectedMessageIds.forEach(id => next.add(id));
-          return next;
-        });
+        selectedMessageIds.forEach(id => deleteMessageLocally(id));
         cancelSelection();
         break;
       case 'delete_everyone':
@@ -647,11 +683,7 @@ export const ChatDetail = () => {
                   variant="primary" 
                   className="flex-1 bg-red-500 hover:bg-red-600 shadow-red-500/20" 
                   onClick={() => {
-                    setGloballyDeletedIds(prev => {
-                      const next = new Set(prev);
-                      selectedMessageIds.forEach(id => next.add(id));
-                      return next;
-                    });
+                    selectedMessageIds.forEach(id => deleteMessageGlobally(id));
                     setShowDeleteEveryoneConfirm(false);
                     cancelSelection();
                   }}
@@ -972,8 +1004,8 @@ export const ChatDetail = () => {
 
               {messages.map((msg) => {
                 const isOwn = msg.senderId === user?.id || msg.isOwn;
-                const isDeleted = deletedMsgIds.has(msg.id);
-                const isGloballyDeleted = globallyDeletedIds.has(msg.id);
+                const isDeleted = deletedMsgIds.includes(msg.id);
+                const isGloballyDeleted = globallyDeletedIds.includes(msg.id);
 
                 if (isDeleted) return null;
 

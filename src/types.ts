@@ -67,8 +67,11 @@ export interface Transfer {
   fileName: string;
   fileSize: string;
   progress: number;
-  status: 'ongoing' | 'completed' | 'paused' | 'failed';
+  status: 'pending' | 'ongoing' | 'completed' | 'paused' | 'failed';
   speed?: string;
   eta?: string;
   deviceId: string;
+  senderName?: string;
+  fileType?: 'image' | 'video' | 'audio' | 'pdf' | 'zip' | 'document' | 'presentation' | 'code';
+  previewUrl?: string;
 }

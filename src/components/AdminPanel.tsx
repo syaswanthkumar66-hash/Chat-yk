@@ -2159,7 +2159,6 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                 { name: 'Gemini AI Engine', status: 'Operational', latency: '142ms', icon: 'psychology', color: 'bg-primary', usage: 78 },
                 { name: 'Stripe Gateway', status: 'Operational', latency: '89ms', icon: 'payments', color: 'bg-indigo-500', usage: 12 },
                 { name: 'SendGrid SMTP', status: 'Operational', latency: '15ms', icon: 'mail', color: 'bg-blue-500', usage: 34 },
-                { name: 'Cloudflare CDN', status: 'Operational', latency: '8ms', icon: 'speed', color: 'bg-orange-500', usage: 89 },
                 { name: 'Twilio SMS', status: 'Degraded', latency: '450ms', icon: 'sms', color: 'bg-red-500', usage: 56 },
               ].map((service) => (
                 <Card key={`integration-service-${service.name}`} className="p-5 sm:p-8 space-y-4 sm:space-y-6 bg-white shadow-xl shadow-primary/5 border-none rounded-2xl sm:rounded-[2.5rem] group hover:shadow-2xl hover:shadow-primary/10 transition-all duration-500">

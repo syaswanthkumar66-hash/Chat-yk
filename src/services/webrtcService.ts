@@ -12,7 +12,7 @@ class WebRTCService {
   private localStream: MediaStream | null = null;
   private remoteStreams: Map<string, MediaStream> = new Map();
   private subscribedSessions: Set<string> = new Set();
-  private iceServers: any[] = [{ urls: 'stun:stun.cloudflare.com:3478' }];
+  private iceServers: any[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
   constructor() {
     this.fetchIceConfig();
@@ -37,7 +37,7 @@ class WebRTCService {
       body: body ? JSON.stringify(body) : undefined
     });
     if (!res.ok) {
-      throw new Error(`Cloudflare API error: ${res.statusText}`);
+      throw new Error(`Realtime API error: ${res.statusText}`);
     }
     return res.json();
   }

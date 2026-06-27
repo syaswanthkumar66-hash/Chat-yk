@@ -46,7 +46,11 @@ export const SocialLayout = () => {
     removedFriendIds,
     createGroup,
     user,
-    users
+    users,
+    wssStatus,
+    isWssConnected,
+    connectSpot,
+    disconnectSpot
   } = useAppStore();
 
   const filteredChats = chats.filter(chat => {
@@ -223,11 +227,35 @@ export const SocialLayout = () => {
               </motion.button>
               <div className="flex flex-col">
                 <h1 className="text-2xl font-black tracking-tighter text-slate-900 uppercase italic leading-none">{activeTab}</h1>
-                <div className="flex items-center gap-3 mt-1">
-                  <div className="flex items-center gap-1.5">
-                    <div className="size-2 rounded-full bg-primary shadow-[0_0_8px_rgba(230,126,110,0.5)]" />
-                    <span className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">Live</span>
-                  </div>
+                <div className="flex items-center gap-3 mt-1.5">
+                  <button 
+                    onClick={() => {
+                      if (wssStatus === 'connected') {
+                        disconnectSpot();
+                      } else if (wssStatus === 'disconnected') {
+                        connectSpot();
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-50 border border-slate-100 hover:bg-slate-100 transition-all active:scale-95 text-[9px] font-black tracking-wider uppercase"
+                    title={wssStatus === 'connected' ? "Click to disconnect Spot Connection" : "Click to go live"}
+                  >
+                    <div className={`size-2 rounded-full ${
+                      wssStatus === 'connected' 
+                        ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)] animate-pulse' 
+                        : wssStatus === 'connecting'
+                        ? 'bg-amber-500 animate-pulse'
+                        : 'bg-slate-300'
+                    }`} />
+                    <span className={
+                      wssStatus === 'connected' 
+                        ? 'text-emerald-600' 
+                        : wssStatus === 'connecting'
+                        ? 'text-amber-600 font-black'
+                        : 'text-slate-400 font-medium'
+                    }>
+                      Spot: {wssStatus}
+                    </span>
+                  </button>
                 </div>
               </div>
             </div>

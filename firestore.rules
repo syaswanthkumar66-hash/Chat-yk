@@ -52,7 +52,7 @@ service cloud.firestore {
     match /offline_messages/{messageId} {
       allow create: if isVerified() && incoming().senderId == request.auth.uid;
       allow read: if isVerified() && resource.data.to == request.auth.uid;
-      allow delete: if isVerified() && resource.data.to == request.auth.uid;
+      allow delete: if isVerified() && (resource.data.to == request.auth.uid || resource.data.senderId == request.auth.uid);
     }
 
     function isValidFriendRequest(data) {

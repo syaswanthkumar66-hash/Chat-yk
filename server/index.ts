@@ -5,7 +5,6 @@ import path from "path";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import multer from "multer";
-import { uploadFile, deleteFile } from "../src/services/storageService.js";
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
@@ -22,6 +21,8 @@ if (process.env.FIREBASE_CONFIG) {
     console.error("Failed to initialize Firebase Admin:", e);
   }
 }
+
+const memoryFiles = new Map<string, { name: string, mimeType: string, data: string, size: number }>();
 
 const dailyQuotaLimit = 100 * 1024 * 1024; // 100 MB
 const userQuotas = new Map<string, { date: string, bytes: number }>();
@@ -69,18 +70,76 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         return res.status(429).json({ error: "Daily 100MB quota exceeded" });
       }
 
-      const fileName = `${Date.now()}-${req.file.originalname}`;
-      const fileUrl = await uploadFile(req.file.buffer, fileName, req.file.mimetype);
+      const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const base64Data = req.file.buffer.toString('base64');
+      const fileObj = {
+        name: req.file.originalname,
+        mimeType: req.file.mimetype,
+        data: base64Data,
+        size: req.file.size
+      };
+
+      // Store in memory cache
+      memoryFiles.set(fileId, fileObj);
+
+      // Store in Firestore if available
+      if (db) {
+        try {
+          await db.collection('uploaded_files').doc(fileId).set({
+            id: fileId,
+            name: req.file.originalname,
+            mimeType: req.file.mimetype,
+            data: base64Data,
+            size: req.file.size,
+            createdAt: new Date().toISOString()
+          });
+        } catch (e) {
+          console.error("Failed to store file in Firestore:", e);
+        }
+      }
 
       res.json({ 
         success: true, 
-        fileUrl, 
-        fileName,
+        fileUrl: `/api/files/${fileId}`, 
+        fileName: req.file.originalname,
         fileSize: `${(req.file.size / 1024 / 1024).toFixed(2)} MB`
       });
     } catch (error) {
       console.error("Upload error:", error);
-      res.status(500).json({ error: "Failed to upload file to Cloudflare R2" });
+      res.status(500).json({ error: "Failed to upload file to Firebase" });
+    }
+  });
+
+  // File Retrieval Endpoint
+  app.get("/api/files/:fileId", async (req, res) => {
+    try {
+      const { fileId } = req.params;
+
+      // Check memory cache first
+      if (memoryFiles.has(fileId)) {
+        const file = memoryFiles.get(fileId)!;
+        const buffer = Buffer.from(file.data, 'base64');
+        res.setHeader('Content-Type', file.mimeType);
+        res.setHeader('Content-Disposition', `inline; filename="${file.name}"`);
+        return res.send(buffer);
+      }
+
+      // Check Firestore
+      if (db) {
+        const doc = await db.collection('uploaded_files').doc(fileId).get();
+        if (doc.exists) {
+          const file = doc.data();
+          const buffer = Buffer.from(file.data, 'base64');
+          res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+          res.setHeader('Content-Disposition', `inline; filename="${file.name || 'file'}"`);
+          return res.send(buffer);
+        }
+      }
+
+      res.status(404).json({ error: "File not found" });
+    } catch (error) {
+      console.error("Fetch file error:", error);
+      res.status(500).json({ error: "Failed to retrieve file" });
     }
   });
 
@@ -272,34 +331,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     });
   });
 
-  // Cloudflare Realtime API Proxy
+  // Native Realtime calling API configuration stub (Cloudflare replaced)
   app.all("/api/realtime/*", async (req, res) => {
-    const appId = process.env.CLOUDFLARE_CALLS_APP_ID;
-    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-
-    if (!appId || !apiToken) {
-      return res.status(500).json({ error: "Cloudflare credentials not configured" });
-    }
-
-    const apiPath = req.params[0];
-    const url = `https://rtc.live.cloudflare.com/v1/apps/${appId}/${apiPath}`;
-
-    try {
-      const response = await fetch(url, {
-        method: req.method,
-        headers: {
-          "Authorization": `Bearer ${apiToken}`,
-          "Content-Type": "application/json"
-        },
-        body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined
-      });
-
-      const data = await response.json().catch(() => ({}));
-      res.status(response.status).json(data);
-    } catch (error) {
-      console.error("Cloudflare API error:", error);
-      res.status(500).json({ error: "Failed to communicate with Cloudflare Realtime API" });
-    }
+    res.status(501).json({ error: "Cloudflare Calls integration removed as requested." });
   });
 
   // Integration connection endpoint
@@ -311,10 +345,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       'Gemini AI Engine': process.env.GEMINI_API_KEY ? 'Configured' : 'Missing',
       'Stripe Gateway': process.env.STRIPE_SECRET_KEY ? 'Configured' : 'Missing',
       'SendGrid SMTP': process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing',
-      'Cloudflare CDN': process.env.CLOUDFLARE_API_TOKEN ? 'Configured' : 'Missing',
       'Twilio SMS': process.env.TWILIO_AUTH_TOKEN ? 'Configured' : 'Missing',
-      'Cloudflare Calls': process.env.CLOUDFLARE_CALLS_APP_ID ? 'Configured' : 'Missing',
-      'Cloudflare Storage (R2)': process.env.CLOUDFLARE_R2_BUCKET_NAME ? 'Configured' : 'Missing',
       'Express TURN': process.env.TURN_SERVER_URL ? 'Configured' : 'Missing',
     };
 
@@ -352,7 +383,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 
   if (!process.env.VERCEL) {
-    const port = process.env.PORT || 3000;
+    const port = Number(process.env.PORT || 3000);
     httpServer.listen(port, "0.0.0.0", () => {
       console.log(`Server running on port ${port}`);
     });

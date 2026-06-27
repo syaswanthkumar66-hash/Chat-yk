@@ -85,8 +85,13 @@ interface AppState {
   user: UserProfile | null;
   setUser: (user: UserProfile | null) => void;
   updateUser: (data: Partial<UserProfile>) => void;
-  login: (userData?: UserProfile) => void;
+  login: (userData?: UserProfile, authMethod?: 'google' | 'local') => void;
   logout: () => void;
+  authMethod: 'google' | 'local' | null;
+  wssStatus: 'disconnected' | 'connecting' | 'connected';
+  isWssConnected: boolean;
+  connectSpot: () => void;
+  disconnectSpot: () => void;
   activeChatId: string | null;
   setActiveChatId: (id: string | null) => void;
   activeRecipientId: string | null;
@@ -177,7 +182,11 @@ interface AppState {
   promoteUser: (userId: string) => void;
   updateUserByAdmin: (userId: string, data: Partial<UserProfile>) => void;
   addUser: (user: Partial<UserProfile> & Omit<UserProfile, 'id'>) => void;
-  sendMessage: (chatId: string | null, recipientId: string | null, text: string, type?: Message['type'], fileUrl?: string, fileSize?: string, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }) => void;
+  sendMessage: (chatId: string | null, recipientId: string | null, text: string, type?: Message['type'], fileUrl?: string, fileSize?: string, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean) => void;
+  deletedMsgIds: string[];
+  globallyDeletedIds: string[];
+  deleteMessageLocally: (messageId: string) => void;
+  deleteMessageGlobally: (messageId: string) => void;
   socket: Socket | null;
   initSocket: (userId: string) => void;
   tempMessages: Message[];
@@ -185,11 +194,82 @@ interface AppState {
   clearTempMessages: () => void;
   devices: Device[];
   transfers: Transfer[];
+  acceptTransfer: (transferId: string) => void;
+  declineTransfer: (transferId: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  devices: [],
-  transfers: [],
+  devices: [
+    { id: 'd1', name: 'MacBook Pro', type: 'desktop', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '45.2 Mbps', totalSent: '12.4 GB', totalReceived: '8.7 GB' },
+    { id: 'd2', name: 'iPhone 15 Pro', type: 'mobile', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '32.1 Mbps', totalSent: '4.1 GB', totalReceived: '2.3 GB' },
+    { id: 'd3', name: "Sarah's iPad", type: 'tablet', status: 'offline', connectionType: 'Bluetooth 5.3', transferSpeed: '0 Mbps', totalSent: '1.2 GB', totalReceived: '0.8 GB' }
+  ],
+  transfers: [
+    { id: 't1', fileName: 'vacation_photos.zip', fileSize: '450.2 MB', progress: 68, status: 'ongoing', speed: '12.4 MB/s', eta: '12s', deviceId: 'd2', senderName: 'iPhone 15 Pro', fileType: 'zip' },
+    { id: 't2', fileName: 'marketing_deck_draft.key', fileSize: '45.8 MB', progress: 0, status: 'pending', deviceId: 'd2', senderName: 'iPhone 15 Pro', fileType: 'presentation' },
+    { id: 't3', fileName: 'design_system_preview.png', fileSize: '4.2 MB', progress: 0, status: 'pending', deviceId: 'd2', senderName: 'iPhone 15 Pro', fileType: 'image', previewUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&w=300&q=80' },
+    { id: 't4', fileName: 'invoice_june_2026.pdf', fileSize: '1.1 MB', progress: 0, status: 'pending', deviceId: 'd1', senderName: 'MacBook Pro', fileType: 'pdf' },
+    { id: 't5', fileName: 'intro_teaser.mp4', fileSize: '185.0 MB', progress: 0, status: 'pending', deviceId: 'd1', senderName: 'MacBook Pro', fileType: 'video', previewUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=300&q=80' }
+  ],
+  acceptTransfer: (transferId) => {
+    set((state) => ({
+      transfers: state.transfers.map((t) =>
+        t.id === transferId
+          ? { ...t, status: 'ongoing' as const, progress: 0, speed: '15.4 MB/s', eta: 'Calculating...' }
+          : t
+      ),
+    }));
+
+    // Simulate transfer progress increment
+    const interval = setInterval(() => {
+      let isDone = false;
+      set((state) => {
+        const updated = state.transfers.map((t) => {
+          if (t.id === transferId && t.status === 'ongoing') {
+            const nextProgress = Math.min(t.progress + Math.floor(Math.random() * 15) + 10, 100);
+            if (nextProgress === 100) {
+              isDone = true;
+              return { ...t, progress: 100, status: 'completed' as const, speed: undefined, eta: undefined };
+            }
+            return { ...t, progress: nextProgress, speed: `${(15 + Math.random() * 5).toFixed(1)} MB/s`, eta: `${Math.ceil((100 - nextProgress) / 10)}s` };
+          }
+          return t;
+        });
+        return { transfers: updated };
+      });
+
+      if (isDone) {
+        clearInterval(interval);
+      }
+    }, 500);
+  },
+  declineTransfer: (transferId) => {
+    set((state) => ({
+      transfers: state.transfers.filter((t) => t.id !== transferId),
+    }));
+  },
+  deletedMsgIds: [],
+  globallyDeletedIds: [],
+  deleteMessageLocally: (messageId) => {
+    set((state) => ({
+      deletedMsgIds: [...state.deletedMsgIds, messageId]
+    }));
+    import('./firebase').then(({ db }) => {
+      import('firebase/firestore').then(({ doc, deleteDoc }) => {
+        deleteDoc(doc(db, 'offline_messages', messageId)).catch(console.error);
+      });
+    });
+  },
+  deleteMessageGlobally: (messageId) => {
+    set((state) => ({
+      globallyDeletedIds: [...state.globallyDeletedIds, messageId]
+    }));
+    import('./firebase').then(({ db }) => {
+      import('firebase/firestore').then(({ doc, deleteDoc }) => {
+        deleteDoc(doc(db, 'offline_messages', messageId)).catch(console.error);
+      });
+    });
+  },
   mode: 'hub',
   setMode: (mode) => set({ mode, activeChatId: null, activeRecipientId: null, activeDeviceId: null, viewingUserId: null, joinGroupId: null, selectedMessageIds: [] }),
   isLoggedIn: false,
@@ -198,7 +278,28 @@ export const useAppStore = create<AppState>((set) => ({
   updateUser: (data) => set((state) => ({
     user: state.user ? { ...state.user, ...data } : null
   })),
-  login: (userData) => {
+  authMethod: null,
+  wssStatus: 'disconnected',
+  isWssConnected: false,
+  connectSpot: () => {
+    const state = useAppStore.getState();
+    if (state.user) {
+      set({ wssStatus: 'connecting' });
+      state.initSocket(state.user.id);
+    }
+  },
+  disconnectSpot: () => {
+    const state = useAppStore.getState();
+    if (state.socket) {
+      state.socket.disconnect();
+    }
+    set({ 
+      wssStatus: 'disconnected', 
+      isWssConnected: false,
+      socket: null 
+    });
+  },
+  login: (userData, authMethod = 'google') => {
     const user = userData || {
       id: 'u1',
       username: 'sarah_c',
@@ -218,11 +319,16 @@ export const useAppStore = create<AppState>((set) => ({
     set({ 
       isLoggedIn: true, 
       user,
+      authMethod,
       friendRequests: [],
       groupJoinRequests: []
     });
     
-    useAppStore.getState().initSocket(user.id);
+    // For google auth, automatically connect on-the-spot connections.
+    // For local auth, start completely standalone and let them connect to spot service manually.
+    if (authMethod === 'google') {
+      useAppStore.getState().initSocket(user.id);
+    }
   },
   logout: () => {
     const state = useAppStore.getState();
@@ -236,17 +342,35 @@ export const useAppStore = create<AppState>((set) => ({
       }
     }).catch(err => console.error("Firebase auth sign out failed", err));
 
-    set({ isLoggedIn: false, mode: 'hub', user: null, selectedMessageIds: [], friendRequests: [], sentFriendRequests: [], groupJoinRequests: [], socket: null });
+    set({ 
+      isLoggedIn: false, 
+      mode: 'hub', 
+      user: null, 
+      authMethod: null,
+      wssStatus: 'disconnected',
+      isWssConnected: false,
+      selectedMessageIds: [], 
+      friendRequests: [], 
+      sentFriendRequests: [], 
+      groupJoinRequests: [], 
+      socket: null 
+    });
   },
   socket: null,
   tempMessages: [],
   addTempMessage: (msg) => set((state) => ({ tempMessages: [...state.tempMessages, msg] })),
   clearTempMessages: () => set({ tempMessages: [] }),
   initSocket: (userId) => {
+    const state = useAppStore.getState();
+    if (state.socket && state.socket.connected) {
+      return;
+    }
     const socket = io(window.location.origin);
+    set({ socket, wssStatus: 'connecting' });
     
     socket.on('connect', async () => {
       console.log('Connected to server');
+      set({ wssStatus: 'connected', isWssConnected: true });
       const { cryptoService } = await import('./services/cryptoService');
       const publicKey = await cryptoService.getMyPublicKeyBase64();
       socket.emit('register', { userId, publicKey });
@@ -884,7 +1008,7 @@ export const useAppStore = create<AppState>((set) => ({
       ]
     };
   }),
-  sendMessage: (chatId, recipientId, text, type = 'text', fileUrl, fileSize, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }) => set((state) => {
+  sendMessage: (chatId, recipientId, text, type = 'text', fileUrl, fileSize, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean) => set((state) => {
     const newMessage: Message = {
       id: `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       senderId: state.user?.id || 'u1',
@@ -925,12 +1049,34 @@ export const useAppStore = create<AppState>((set) => ({
           iv: e2eData?.iv,
           encryptedFileKey: e2eData?.encryptedFileKey
         });
+
+        // Also store as temporary file if forwarded and contains a file URL
+        if (isForwarded && fileUrl) {
+          import('./firebase').then(({ db }) => {
+            import('firebase/firestore').then(({ doc, setDoc }) => {
+              setDoc(doc(db, 'offline_messages', newMessage.id), {
+                id: newMessage.id,
+                senderId: state.user?.id,
+                recipientId: targetId,
+                text: e2eData ? e2eData.encryptedText : text,
+                type: type || 'text',
+                fileUrl,
+                fileSize,
+                iv: e2eData?.iv,
+                encryptedFileKey: e2eData?.encryptedFileKey,
+                timestamp: newMessage.timestamp,
+                to: targetId,
+                isTemporaryFile: true,
+                isForwarded: true
+              }).catch(console.error);
+            });
+          });
+        }
       } else {
          import('./firebase').then(({ db }) => {
             import('firebase/firestore').then(({ doc, setDoc }) => {
-                const msgId = `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-                setDoc(doc(db, 'offline_messages', msgId), {
-                    id: msgId,
+                setDoc(doc(db, 'offline_messages', newMessage.id), {
+                    id: newMessage.id,
                     senderId: state.user?.id,
                     recipientId: targetId,
                     text: e2eData ? e2eData.encryptedText : text,
@@ -939,7 +1085,7 @@ export const useAppStore = create<AppState>((set) => ({
                     fileSize,
                     iv: e2eData?.iv,
                     encryptedFileKey: e2eData?.encryptedFileKey,
-                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    timestamp: newMessage.timestamp,
                     to: targetId
                 }).catch(console.error);
             });

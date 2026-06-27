@@ -6,14 +6,14 @@
       "use": "@vercel/static-build"
     },
     {
-      "src": "server/index.ts",
+      "src": "backend/index.ts",
       "use": "@vercel/node"
     }
   ],
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/server/index.ts"
+      "destination": "/backend/index.ts"
     },
     {
       "source": "/(.*)",

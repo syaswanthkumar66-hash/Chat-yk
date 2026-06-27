@@ -10,10 +10,7 @@ export default function handler(req, res) {
     'Gemini AI Engine': process.env.GEMINI_API_KEY ? 'Configured' : 'Missing',
     'Stripe Gateway': process.env.STRIPE_SECRET_KEY ? 'Configured' : 'Missing',
     'SendGrid SMTP': process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing',
-    'Cloudflare CDN': process.env.CLOUDFLARE_API_TOKEN ? 'Configured' : 'Missing',
     'Twilio SMS': process.env.TWILIO_AUTH_TOKEN ? 'Configured' : 'Missing',
-    'Cloudflare Calls': process.env.CLOUDFLARE_CALLS_APP_ID ? 'Configured' : 'Missing',
-    'Cloudflare Storage (R2)': process.env.CLOUDFLARE_R2_BUCKET_NAME ? 'Configured' : 'Missing',
     'Express TURN': process.env.TURN_SERVER_URL ? 'Configured' : 'Missing',
   };
 
