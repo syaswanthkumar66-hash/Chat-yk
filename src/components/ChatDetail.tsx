@@ -7,8 +7,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GroupInfo } from './GroupInfo';
 import { MediaGallery } from './MediaGallery';
 
-const DecryptedMedia = ({ msg, isOwn }: { msg: any; isOwn: boolean }) => {
+const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; onPreview?: (data: { type: 'image' | 'file'; url: string; name: string; size?: string }) => void }) => {
   const [url, setUrl] = useState(msg.fileUrl || msg.url);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   
   useEffect(() => {
     let active = true;
@@ -42,47 +46,105 @@ const DecryptedMedia = ({ msg, isOwn }: { msg: any; isOwn: boolean }) => {
     return () => { active = false; };
   }, [msg, isOwn]);
 
+  useEffect(() => {
+    if (msg.type === 'audio' && url) {
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+      const handleLoadedMetadata = () => setDuration(audio.duration || 0);
+      const handleEnded = () => setIsPlaying(false);
+
+      audio.addEventListener('timeupdate', handleTimeUpdate);
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.addEventListener('ended', handleEnded);
+
+      return () => {
+        audio.pause();
+        audio.removeEventListener('timeupdate', handleTimeUpdate);
+        audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        audio.removeEventListener('ended', handleEnded);
+      };
+    }
+  }, [url, msg.type]);
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play().catch(console.error);
+      setIsPlaying(true);
+    }
+  };
+
+  const formatTime = (secs: number) => {
+    if (isNaN(secs)) return '0:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
   if (msg.type === 'image') {
     return (
-      <div className="space-y-2">
-        <img src={url} className="max-w-full rounded-xl" referrerPolicy="no-referrer" />
-        {msg.text && <p className="text-sm">{msg.text}</p>}
+      <div 
+        className="space-y-2 cursor-pointer group/image" 
+        onClick={() => onPreview?.({ type: 'image', url, name: msg.text || 'Image', size: msg.fileSize })}
+      >
+        <div className="relative rounded-xl overflow-hidden shadow-sm border border-slate-100 hover:border-primary/20 transition-all">
+          <img src={url} className="max-w-full rounded-xl hover:scale-[1.01] transition-transform duration-300" referrerPolicy="no-referrer" />
+          <div className="absolute inset-0 bg-black/0 hover:bg-black/10 flex items-center justify-center transition-colors">
+            <Icon name="zoom_in" className="text-white opacity-0 group-hover/image:opacity-100 transition-opacity text-2xl drop-shadow-md" />
+          </div>
+        </div>
+        {msg.text && <p className="text-sm font-medium leading-relaxed">{msg.text}</p>}
       </div>
     );
   }
   
   if (msg.type === 'file') {
     return (
-      <div className="flex items-center gap-3 min-w-[200px]">
-        <div className={cn("size-10 rounded-xl flex items-center justify-center shrink-0", isOwn ? "bg-white/20" : "bg-primary/10 text-primary")}>
+      <div 
+        className="flex items-center gap-3 min-w-[220px] cursor-pointer hover:bg-black/5 rounded-xl p-1 transition-all"
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('a')) return;
+          onPreview?.({ type: 'file', url, name: msg.text || 'File', size: msg.fileSize });
+        }}
+      >
+        <div className={cn("size-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner", isOwn ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
           <Icon name="description" />
         </div>
         <div className="flex-1 overflow-hidden">
-          <p className={cn("text-sm font-bold truncate", isOwn ? "text-white" : "text-slate-800")}>{msg.text || (msg.fileUrl ? (msg.fileUrl.startsWith('data:') ? 'Offline File' : msg.fileUrl.split('/').pop()) : 'File')}</p>
-          <div className={cn("text-[10px] font-bold uppercase tracking-widest mt-1 opacity-70", isOwn ? "text-white" : "text-slate-400")}>
+          <p className={cn("text-xs font-bold truncate", isOwn ? "text-white" : "text-slate-800")}>{msg.text || (msg.fileUrl ? (msg.fileUrl.startsWith('data:') ? 'Offline File' : msg.fileUrl.split('/').pop()) : 'File')}</p>
+          <div className={cn("text-[9px] font-bold uppercase tracking-widest mt-0.5 opacity-70", isOwn ? "text-white" : "text-slate-400")}>
             {msg.fileSize || 'FILE'}
           </div>
         </div>
-        <a href={url} download={msg.text || 'file'} className={cn("size-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/10 transition-colors", isOwn ? "text-white" : "text-primary")}>
-          <Icon name="download" />
+        <a href={url} download={msg.text || 'file'} className={cn("size-9 rounded-full flex items-center justify-center shrink-0 hover:bg-black/10 transition-colors", isOwn ? "text-white" : "text-primary")}>
+          <Icon name="download" className="text-base" />
         </a>
       </div>
     );
   }
 
   if (msg.type === 'audio') {
+    const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
     return (
-      <div className="flex items-center gap-3 min-w-[200px]">
-        <button className={cn("size-10 rounded-full flex items-center justify-center", isOwn ? "bg-white/20" : "bg-primary/10 text-primary")}>
-          <Icon name="play_arrow" />
+      <div className="flex items-center gap-3 min-w-[220px] py-1">
+        <button 
+          onClick={togglePlay}
+          className={cn("size-10 rounded-full flex items-center justify-center transition-transform active:scale-95 shrink-0 shadow-sm", isOwn ? "bg-white/25 text-white hover:bg-white/35" : "bg-primary/10 text-primary hover:bg-primary/20")}
+        >
+          <Icon name={isPlaying ? "pause" : "play_arrow"} className="text-xl" />
         </button>
-        <div className="flex-1">
-          <div className="h-1 bg-white/20 rounded-full overflow-hidden">
-             <div className="h-full bg-current w-0" />
+        <div className="flex-1 min-w-0">
+          <div className={cn("h-1 rounded-full overflow-hidden", isOwn ? "bg-white/20" : "bg-slate-200")}>
+             <div className="h-full bg-current transition-all duration-100" style={{ width: `${progress}%` }} />
           </div>
-          <div className={cn("text-[10px] mt-1 flex justify-between", isOwn ? "text-white/60" : "text-slate-400")}>
-            <span>0:00</span>
-            <span>{msg.fileSize || 'Voice'}</span>
+          <div className={cn("text-[9px] mt-1 flex justify-between font-bold", isOwn ? "text-white/75" : "text-slate-400")}>
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration) || msg.fileSize || 'Voice'}</span>
           </div>
         </div>
       </div>
@@ -90,7 +152,47 @@ const DecryptedMedia = ({ msg, isOwn }: { msg: any; isOwn: boolean }) => {
   }
   
   return null;
-}
+};
+
+const AudioPreviewPlayer = ({ url }: { url: string }) => {
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    const handleEnded = () => setPlaying(false);
+    audio.addEventListener('ended', handleEnded);
+    return () => {
+      audio.pause();
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [url]);
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!audioRef.current) return;
+    if (playing) {
+      audioRef.current.pause();
+      setPlaying(false);
+    } else {
+      audioRef.current.play().catch(console.error);
+      setPlaying(true);
+    }
+  };
+
+  return (
+    <div className="size-full flex flex-col items-center justify-center text-primary relative bg-primary/5 hover:bg-primary/10 transition-colors p-2">
+      <button 
+        onClick={togglePlay}
+        className="size-8 rounded-full bg-primary text-white flex items-center justify-center shadow-md active:scale-95 transition-transform"
+      >
+        <Icon name={playing ? "pause" : "play_arrow"} className="text-sm" />
+      </button>
+      <span className="text-[8px] font-black uppercase mt-1.5 tracking-wider">Play Voice</span>
+    </div>
+  );
+};
 
 export const ChatDetail = () => {
   const { 
@@ -120,6 +222,7 @@ export const ChatDetail = () => {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showDeleteMenu, setShowDeleteMenu] = useState(false);
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
+  const [previewMedia, setPreviewMedia] = useState<{ type: 'image' | 'file'; url: string; name: string; size?: string } | null>(null);
   const [cleared, setCleared] = useState(false);
   const [showForward, setShowForward] = useState(false);
   const [showDeleteEveryoneConfirm, setShowDeleteEveryoneConfirm] = useState(false);
@@ -144,6 +247,26 @@ export const ChatDetail = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
   const isCurrentlyTyping = useRef(false);
+
+  useEffect(() => {
+    const socket = useAppStore.getState().socket;
+    if (!socket) return;
+
+    const handleMessageReaction = (data: { messageId: string, emoji: string, senderId: string }) => {
+      setReactions(prev => {
+        const current = prev[data.messageId] || [];
+        if (current.includes(data.emoji)) {
+          return { ...prev, [data.messageId]: current.filter(e => e !== data.emoji) };
+        }
+        return { ...prev, [data.messageId]: [...current, data.emoji] };
+      });
+    };
+
+    socket.on('message_reaction', handleMessageReaction);
+    return () => {
+      socket.off('message_reaction', handleMessageReaction);
+    };
+  }, []);
 
   const handleTyping = (text: string) => {
     setMessageText(text);
@@ -484,6 +607,17 @@ export const ChatDetail = () => {
       return { ...prev, [msgId]: [...current, emoji] };
     });
     setShowReactionPicker(null);
+
+    const socket = useAppStore.getState().socket;
+    if (socket && chat) {
+      socket.emit('message_reaction', {
+        messageId: msgId,
+        chatId: chat.id,
+        emoji,
+        recipientId: activeRecipientId || chat.participants.find(p => p.id !== user?.id)?.id,
+        groupId: chat.isGroup ? chat.id : undefined
+      });
+    }
   };
 
   const handleMessageAction = (action: string) => {
@@ -1080,7 +1214,7 @@ export const ChatDetail = () => {
                             {isOwn ? "You deleted this message" : "This message was deleted"}
                           </span>
                         ) : msg.type === 'image' || msg.type === 'audio' || msg.type === 'file' ? (
-                          <DecryptedMedia msg={msg} isOwn={isOwn} />
+                          <DecryptedMedia msg={msg} isOwn={isOwn} onPreview={(data) => setPreviewMedia(data)} />
                         ) : (
                           <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                         )}
@@ -1156,10 +1290,7 @@ export const ChatDetail = () => {
                   {media.type === 'image' ? (
                     <img src={media.url} className="size-full object-cover" referrerPolicy="no-referrer" />
                   ) : media.type === 'audio' ? (
-                    <div className="size-full flex flex-col items-center justify-center text-primary">
-                      <Icon name="mic" className="text-2xl" />
-                      <span className="text-[8px] font-bold uppercase">Audio</span>
-                    </div>
+                    <AudioPreviewPlayer url={media.url} />
                   ) : (
                     <div className="size-full flex flex-col items-center justify-center text-primary">
                       <Icon name="description" className="text-2xl" />
@@ -1319,6 +1450,80 @@ export const ChatDetail = () => {
         </div>
         <AnimatePresence>
           {activeGroupInfoId && <GroupInfo onClose={() => setActiveGroupInfoId(null)} />}
+          {previewMedia && (
+            <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-slate-955/95 backdrop-blur-md"
+                onClick={() => setPreviewMedia(null)}
+              />
+              
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="relative max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[85vh]"
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/50">
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="size-10 rounded-lg bg-primary/20 flex items-center justify-center text-primary shrink-0">
+                      <Icon name={previewMedia.type === 'image' ? 'image' : 'description'} />
+                    </div>
+                    <div className="overflow-hidden">
+                      <h3 className="text-sm font-bold text-white truncate">{previewMedia.name}</h3>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{previewMedia.size || 'Unknown Size'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <a 
+                      href={previewMedia.url} 
+                      download={previewMedia.name} 
+                      className="size-9 rounded-full bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center transition-colors"
+                      title="Download file"
+                    >
+                      <Icon name="download" className="text-lg" />
+                    </a>
+                    <button 
+                      onClick={() => setPreviewMedia(null)} 
+                      className="size-9 rounded-full bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center transition-colors"
+                    >
+                      <Icon name="close" className="text-lg" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-slate-950/30 min-h-[300px]">
+                  {previewMedia.type === 'image' ? (
+                    <img 
+                      src={previewMedia.url} 
+                      alt={previewMedia.name} 
+                      className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-xl"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="text-center max-w-sm p-6 bg-slate-900 border border-slate-800 rounded-xl shadow-lg">
+                      <div className="size-16 rounded-2xl bg-primary/10 text-primary mx-auto flex items-center justify-center mb-4 shadow-inner">
+                        <Icon name="description" className="text-3xl" />
+                      </div>
+                      <h4 className="text-base font-bold text-white mb-2">{previewMedia.name}</h4>
+                      <p className="text-xs text-slate-400 mb-6">This document can be downloaded or previewed natively on your device.</p>
+                      <a 
+                        href={previewMedia.url} 
+                        download={previewMedia.name} 
+                        className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-primary-dark transition-colors shadow-lg shadow-primary/20"
+                      >
+                        <Icon name="download" className="text-sm" /> Download to View
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
         </AnimatePresence>
       </div>
     </div>

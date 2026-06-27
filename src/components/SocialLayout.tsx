@@ -18,6 +18,7 @@ import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firesto
 export const SocialLayout = () => {
   const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'calls' | 'profile'>('chats');
   const [chatFilter, setChatFilter] = useState<'all' | 'individuals' | 'groups'>('all');
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [showScanner, setShowScanner] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
@@ -306,24 +307,45 @@ export const SocialLayout = () => {
           </div>
 
           {activeTab === 'chats' && (
-            <div className="flex gap-2 p-1 bg-primary/5 rounded-2xl">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'individuals', label: 'Friends' },
-                { id: 'groups', label: 'Groups' }
-              ].map(filter => (
-                <button
-                  key={filter.id}
-                  onClick={() => setChatFilter(filter.id as any)}
-                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                    chatFilter === filter.id 
-                      ? 'bg-white text-primary shadow-sm' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  {filter.label}
-                </button>
-              ))}
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-2 p-1 bg-primary/5 rounded-2xl">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'individuals', label: 'Friends' },
+                  { id: 'groups', label: 'Groups' }
+                ].map(filter => (
+                  <button
+                    key={filter.id}
+                    onClick={() => setChatFilter(filter.id as any)}
+                    className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      chatFilter === filter.id 
+                        ? 'bg-white text-primary shadow-sm' 
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="relative flex items-center bg-primary/5 rounded-2xl border border-primary/5 hover:border-primary/10 transition-colors px-1 py-0.5">
+                <Icon name="search" className="absolute left-4 text-slate-400 text-sm" />
+                <input
+                  type="text"
+                  placeholder="Search messages..."
+                  value={messageSearchQuery}
+                  onChange={(e) => setMessageSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-10 py-2 bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-xs text-slate-700 font-medium"
+                />
+                {messageSearchQuery && (
+                  <button
+                    onClick={() => setMessageSearchQuery('')}
+                    className="absolute right-3 p-1 rounded-full text-slate-400 hover:bg-slate-200 transition-colors"
+                  >
+                    <Icon name="close" className="text-xs" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </header>
@@ -332,7 +354,122 @@ export const SocialLayout = () => {
         <main className="flex-1 overflow-y-auto no-scrollbar bg-bg-light">
           {activeTab === 'chats' && (
             <div className="p-4 space-y-2">
-              {filteredChats.map(chat => (
+              {messageSearchQuery ? (
+                (() => {
+                  const queryLower = messageSearchQuery.toLowerCase();
+                  const results: { chat: any; msg: any; senderName: string; chatName: string; avatar: string }[] = [];
+                  
+                  chats.forEach(chat => {
+                    if (chatFilter === 'groups' && !chat.isGroup) return;
+                    if (chatFilter === 'individuals' && chat.isGroup) return;
+
+                    const messages = chat.messages || [];
+                    messages.forEach(msg => {
+                      if (msg.text && msg.text.toLowerCase().includes(queryLower)) {
+                        let senderName = msg.senderName || 'Unknown';
+                        let avatar = msg.avatar || '';
+                        
+                        if (msg.senderId === user?.id) {
+                          senderName = 'You';
+                          avatar = user?.avatar || '';
+                        } else if (!chat.isGroup) {
+                          const partner = chat.participants.find(p => p.id === msg.senderId);
+                          if (partner) {
+                            senderName = partner.name;
+                            avatar = partner.avatar;
+                          }
+                        } else {
+                          const member = chat.participants.find(p => p.id === msg.senderId);
+                          if (member) {
+                            senderName = member.name;
+                            avatar = member.avatar;
+                          }
+                        }
+
+                        const chatName = chat.isGroup 
+                          ? chat.name 
+                          : chat.participants.find(p => p.id !== user?.id)?.name || 'Direct Chat';
+
+                        results.push({
+                          chat,
+                          msg,
+                          senderName,
+                          chatName,
+                          avatar: avatar || chat.avatar || 'https://picsum.photos/seed/default/200'
+                        });
+                      }
+                    });
+                  });
+
+                  if (results.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+                        <div className="size-16 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100">
+                          <Icon name="search_off" className="text-2xl" />
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-700">No messages found</h4>
+                        <p className="text-xs text-slate-400 mt-1 max-w-[220px]">We couldn't find any messages containing "{messageSearchQuery}"</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-2">
+                      <div className="px-2 pb-2 flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Search Results</span>
+                        <span className="text-[10px] font-black bg-primary/10 text-primary px-2 py-0.5 rounded-full">{results.length} found</span>
+                      </div>
+                      {results.map(({ chat, msg, senderName, chatName, avatar }) => (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          key={`search-msg-${msg.id}`}
+                          onClick={() => {
+                            setActiveChatId(chat.id);
+                            setTimeout(() => {
+                              const el = document.getElementById(`msg-${msg.id}`);
+                              if (el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                el.classList.add('ring-4', 'ring-primary/40', 'transition-all');
+                                setTimeout(() => {
+                                  el.classList.remove('ring-4', 'ring-primary/40');
+                                }, 2000);
+                              }
+                            }, 300);
+                          }}
+                          className="flex items-start gap-3 p-3 bg-white rounded-2xl hover:bg-primary/5 cursor-pointer transition-all border border-slate-50 hover:border-primary/10 hover:shadow-md"
+                        >
+                          <Avatar src={avatar} className="size-9 rounded-xl shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-800 truncate">{senderName}</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter shrink-0">{msg.timestamp}</span>
+                            </div>
+                            <p className="text-[9px] font-black text-primary/60 uppercase tracking-wider truncate mt-0.5">{chatName}</p>
+                            <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed whitespace-pre-wrap font-medium">
+                              {(() => {
+                                const index = msg.text.toLowerCase().indexOf(queryLower);
+                                if (index === -1) return msg.text;
+                                const before = msg.text.substring(0, index);
+                                const match = msg.text.substring(index, index + queryLower.length);
+                                const after = msg.text.substring(index + queryLower.length);
+                                return (
+                                  <>
+                                    {before}
+                                    <mark className="bg-yellow-100 text-slate-900 rounded px-0.5 font-medium">{match}</mark>
+                                    {after}
+                                  </>
+                                );
+                              })()}
+                            </p>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  );
+                })()
+              ) : (
+                filteredChats.map(chat => (
                 <motion.div
                   layout
                   initial={{ opacity: 0, y: 10 }}
@@ -382,7 +519,7 @@ export const SocialLayout = () => {
                     </div>
                   )}
                 </motion.div>
-              ))}
+              )))}
             </div>
           )}
 

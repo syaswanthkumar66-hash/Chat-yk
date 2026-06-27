@@ -367,11 +367,21 @@ export const useAppStore = create<AppState>((set) => ({
   clearTempMessages: () => set({ tempMessages: [] }),
   initSocket: (userId) => {
     const state = useAppStore.getState();
-    if (state.socket && state.socket.connected) {
+    if (state.socket) {
       return;
     }
     const socket = io(BACKEND_URL || window.location.origin);
     set({ socket, wssStatus: 'connecting' });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      set({ wssStatus: 'disconnected', isWssConnected: false });
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason);
+      set({ wssStatus: 'disconnected', isWssConnected: false });
+    });
     
     socket.on('connect', async () => {
       console.log('Connected to server');

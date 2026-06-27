@@ -242,6 +242,23 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("message_reaction", (data) => {
+      const { messageId, chatId, emoji, recipientId, groupId } = data;
+      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
+      if (!senderId) return;
+
+      const reactionData = { messageId, chatId, emoji, senderId };
+
+      if (groupId) {
+        socket.to(`group-${groupId}`).emit("message_reaction", reactionData);
+      } else if (recipientId) {
+        const targetSocketId = users.get(recipientId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit("message_reaction", reactionData);
+        }
+      }
+    });
+
     socket.on("send_message", async (data) => {
       const { recipientId, groupId, recipientIds, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
       const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
