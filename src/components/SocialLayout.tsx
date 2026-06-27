@@ -52,6 +52,7 @@ export const SocialLayout = () => {
     users,
     wssStatus,
     isWssConnected,
+    wssMessage,
     connectSpot,
     disconnectSpot,
     initSocket
@@ -258,12 +259,12 @@ export const SocialLayout = () => {
                     }`} />
                     <span className={
                       wssStatus === 'connected' 
-                        ? 'text-emerald-600' 
+                        ? 'text-emerald-600 font-bold' 
                         : wssStatus === 'connecting'
-                        ? 'text-amber-600 font-black'
+                        ? 'text-amber-600 font-black normal-case text-[10px]'
                         : 'text-slate-400 font-medium'
                     }>
-                      Spot: {wssStatus}
+                      {wssStatus === 'connecting' && wssMessage ? wssMessage : `Spot: ${wssStatus}`}
                     </span>
                   </button>
                 </div>

@@ -92,6 +92,7 @@ interface AppState {
   authMethod: 'google' | 'local' | null;
   wssStatus: 'disconnected' | 'connecting' | 'connected';
   isWssConnected: boolean;
+  wssMessage: string;
   connectSpot: () => void;
   disconnectSpot: () => void;
   activeChatId: string | null;
@@ -287,10 +288,11 @@ export const useAppStore = create<AppState>((set) => ({
   authMethod: null,
   wssStatus: 'disconnected',
   isWssConnected: false,
+  wssMessage: '',
   connectSpot: () => {
     const state = useAppStore.getState();
     if (state.user) {
-      set({ wssStatus: 'connecting' });
+      set({ wssStatus: 'connecting', wssMessage: 'Connecting...' });
       state.initSocket(state.user.id);
     }
   },
@@ -302,6 +304,7 @@ export const useAppStore = create<AppState>((set) => ({
     set({ 
       wssStatus: 'disconnected', 
       isWssConnected: false,
+      wssMessage: 'Disconnected',
       socket: null 
     });
   },
@@ -354,6 +357,7 @@ export const useAppStore = create<AppState>((set) => ({
       authMethod: null,
       wssStatus: 'disconnected',
       isWssConnected: false,
+      wssMessage: '',
       selectedMessageIds: [], 
       friendRequests: [], 
       sentFriendRequests: [], 
@@ -370,22 +374,75 @@ export const useAppStore = create<AppState>((set) => ({
     if (state.socket) {
       return;
     }
-    const socket = io(BACKEND_URL || window.location.origin);
-    set({ socket, wssStatus: 'connecting' });
+
+    const targetUrl = BACKEND_URL || window.location.origin;
+    set({ wssStatus: 'connecting', wssMessage: 'Initializing connection...' });
+
+    // Function to wake up backend via HTTP ping
+    const wakeUp = async () => {
+      const maxAttempts = 20;
+      let attempt = 0;
+      
+      while (attempt < maxAttempts) {
+        attempt++;
+        const currentSocket = useAppStore.getState().socket;
+        // If already connected, stop waking up
+        if (useAppStore.getState().wssStatus === 'connected') {
+          return;
+        }
+
+        set({ wssMessage: `Waking up backend server... Attempt ${attempt}/${maxAttempts}` });
+        
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          
+          const response = await fetch(`${targetUrl}/api/health`, {
+            signal: controller.signal,
+            headers: { 'Cache-Control': 'no-cache' }
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            set({ wssMessage: 'Backend is awake! Connecting...' });
+            break;
+          }
+        } catch (err) {
+          console.log(`Wakeup attempt ${attempt} failed:`, err);
+        }
+        
+        // Wait 3 seconds before next ping
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    };
+
+    // Trigger wakeup process in parallel
+    wakeUp().catch(console.error);
+
+    const socket = io(targetUrl, {
+      reconnectionAttempts: 25,
+      reconnectionDelay: 2000,
+      timeout: 10000,
+    });
+    set({ socket });
 
     socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
-      set({ wssStatus: 'disconnected', isWssConnected: false });
+      const currentStatus = useAppStore.getState().wssStatus;
+      if (currentStatus === 'connected') {
+        set({ wssStatus: 'connecting', wssMessage: 'Reconnecting to backend...' });
+      }
     });
 
     socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
-      set({ wssStatus: 'disconnected', isWssConnected: false });
+      set({ wssStatus: 'disconnected', isWssConnected: false, wssMessage: `Disconnected: ${reason}` });
     });
     
     socket.on('connect', async () => {
       console.log('Connected to server');
-      set({ wssStatus: 'connected', isWssConnected: true });
+      set({ wssStatus: 'connected', isWssConnected: true, wssMessage: 'Connected & Secure' });
       const { cryptoService } = await import('./services/cryptoService');
       const publicKey = await cryptoService.getMyPublicKeyBase64();
       socket.emit('register', { userId, publicKey });

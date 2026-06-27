@@ -52,6 +52,11 @@ const io = new Server(httpServer, {
 
 app.use(express.json({ limit: '10mb' }));
 
+// Health Check / Wake Up Endpoint
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const users = new Map<string, string>(); // userId -> socketId

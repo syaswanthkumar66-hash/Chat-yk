@@ -24,6 +24,7 @@ export const FileShareLayout = () => {
     declineTransfer,
     wssStatus,
     isWssConnected,
+    wssMessage,
     connectSpot,
     disconnectSpot
   } = useAppStore();
@@ -100,10 +101,10 @@ export const FileShareLayout = () => {
                   wssStatus === 'connected' 
                     ? 'text-emerald-600 font-bold' 
                     : wssStatus === 'connecting'
-                    ? 'text-amber-600 font-black'
+                    ? 'text-amber-600 font-black normal-case text-[10px]'
                     : 'text-slate-400 font-medium'
                 }>
-                  Spot: {wssStatus}
+                  {wssStatus === 'connecting' && wssMessage ? wssMessage : `Spot: ${wssStatus}`}
                 </span>
               </button>
             </div>
