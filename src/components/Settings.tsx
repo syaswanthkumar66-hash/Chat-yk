@@ -25,9 +25,14 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     feedback,
     addFeedback,
     logout,
-    users
+    users,
+    wssStatus,
+    wssMessage,
+    connectionLogs,
+    connectSpot,
+    disconnectSpot
   } = useAppStore();
-  const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection'>('main');
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [description, setDescription] = useState(user?.description || '');
@@ -566,6 +571,120 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
             </div>
           </div>
         );
+      case 'connection':
+        return (
+          <div className="space-y-6">
+            <header className="flex items-center gap-4 mb-4">
+              <button onClick={() => setActiveView('main')} className="size-10 rounded-full bg-white border border-primary/5 shadow-sm flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all">
+                <Icon name="arrow_back" />
+              </button>
+              <div className="flex flex-col">
+                <h3 className="text-lg font-black text-slate-800 uppercase italic tracking-tight">Backend Connection</h3>
+                <span className="text-[10px] text-neutral-muted uppercase font-bold tracking-widest">Heartbeat & Status Logs</span>
+              </div>
+            </header>
+
+            {/* Connection Status Card */}
+            <div className="p-4 bg-primary/5 rounded-2xl border border-primary/5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <span className="text-xs text-neutral-muted font-bold uppercase tracking-wider">Protocol Status</span>
+                  <span className="text-lg font-black uppercase tracking-tight text-slate-800 mt-0.5">
+                    {wssStatus === 'connected' ? '⚡ Connected & Live' : wssStatus === 'connecting' ? '⏳ Connecting...' : '💤 Disconnected'}
+                  </span>
+                </div>
+                <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                  wssStatus === 'connected' 
+                    ? 'bg-emerald-100 text-emerald-800' 
+                    : wssStatus === 'connecting'
+                    ? 'bg-amber-100 text-amber-800 animate-pulse'
+                    : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {wssStatus}
+                </div>
+              </div>
+
+              {wssMessage && (
+                <div className="text-xs bg-white/60 p-2.5 rounded-xl border border-primary/5 flex items-center gap-2">
+                  <span className="animate-ping size-1.5 rounded-full bg-primary shrink-0" />
+                  <span className="text-slate-600 font-medium">{wssMessage}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                {wssStatus !== 'connected' ? (
+                  <Button 
+                    variant="primary" 
+                    className="flex-1" 
+                    onClick={() => connectSpot()}
+                  >
+                    <Icon name="bolt" className="text-sm mr-1.5" />
+                    Go Live / Wake Up
+                  </Button>
+                ) : (
+                  <Button 
+                    variant="secondary" 
+                    className="flex-1 text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 border-none" 
+                    onClick={() => disconnectSpot()}
+                  >
+                    <Icon name="power_settings_new" className="text-sm mr-1.5" />
+                    Disconnect Spot
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Heartbeat Status */}
+            <div className="p-4 bg-primary/5 rounded-2xl border border-primary/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <span className="text-xs text-slate-700 font-bold">Automatic Heartbeat Keep-Alive</span>
+                  <span className="text-[10px] text-neutral-muted">Pings backend every 30s to bypass free-tier sleep cycles</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className={`size-2.5 rounded-full ${wssStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                  <span className="text-[10px] font-black uppercase text-slate-500">Active</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Connection Logs console */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted">Diagnostics Log Console</span>
+                <button 
+                  onClick={() => {
+                    useAppStore.setState({ connectionLogs: [] });
+                  }}
+                  className="text-[9px] font-black uppercase text-primary hover:underline"
+                >
+                  Clear Console
+                </button>
+              </div>
+              <div className="bg-slate-950 text-slate-200 p-4 rounded-2xl font-mono text-[10px] space-y-1.5 max-h-48 overflow-y-auto shadow-inner border border-slate-800">
+                {connectionLogs.length === 0 ? (
+                  <div className="text-slate-500 italic text-center py-4">No diagnostic events logged yet. Try connecting or waking up.</div>
+                ) : (
+                  connectionLogs.map((log, index) => {
+                    let color = 'text-slate-300';
+                    if (log.includes('FAILED') || log.includes('error') || log.includes('failed') || log.includes('disconnected') || log.includes('Error')) {
+                      color = 'text-rose-400 font-medium';
+                    } else if (log.includes('Successfully') || log.includes('awake') || log.includes('OK') || log.includes('healthy') || log.includes('Live')) {
+                      color = 'text-emerald-400 font-medium';
+                    } else if (log.includes('Waking up') || log.includes('Attempt')) {
+                      color = 'text-amber-400';
+                    }
+                    return (
+                      <div key={index} className={`whitespace-pre-wrap leading-relaxed ${color}`}>
+                        {log}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        );
       default:
         return (
           <>
@@ -647,6 +766,21 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                       <Icon name="lock" />
                     </div>
                     <span className="text-sm font-bold text-slate-700">Privacy & Security</span>
+                  </div>
+                  <Icon name="chevron_right" className="text-slate-400" />
+                </button>
+                <button 
+                  onClick={() => setActiveView('connection')}
+                  className="w-full p-4 rounded-2xl bg-primary/5 flex items-center justify-between hover:bg-primary/10 transition-colors group border border-primary/5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="size-10 rounded-xl bg-white flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors shadow-sm">
+                      <Icon name="wifi" />
+                    </div>
+                    <div className="flex flex-col items-start">
+                      <span className="text-sm font-bold text-slate-700">Connection Diagnostics</span>
+                      <span className="text-[10px] text-neutral-muted">Heartbeat, retry metrics & status logs</span>
+                    </div>
                   </div>
                   <Icon name="chevron_right" className="text-slate-400" />
                 </button>

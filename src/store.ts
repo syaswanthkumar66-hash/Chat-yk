@@ -93,6 +93,8 @@ interface AppState {
   wssStatus: 'disconnected' | 'connecting' | 'connected';
   isWssConnected: boolean;
   wssMessage: string;
+  connectionLogs: string[];
+  addConnectionLog: (log: string) => void;
   connectSpot: () => void;
   disconnectSpot: () => void;
   activeChatId: string | null;
@@ -204,6 +206,8 @@ interface AppState {
 
 export const DEFAULT_PRESETS: UserProfile[] = [];
 
+let heartbeatIntervalId: any = null;
+
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
   devices: [
@@ -289,17 +293,30 @@ export const useAppStore = create<AppState>((set) => ({
   wssStatus: 'disconnected',
   isWssConnected: false,
   wssMessage: '',
+  connectionLogs: [] as string[],
+  addConnectionLog: (log) => set((state) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const formattedLog = `[${timestamp}] ${log}`;
+    console.log(formattedLog);
+    return { connectionLogs: [formattedLog, ...state.connectionLogs].slice(0, 50) };
+  }),
   connectSpot: () => {
     const state = useAppStore.getState();
     if (state.user) {
+      state.addConnectionLog('Connection requested by user. Connecting...');
       set({ wssStatus: 'connecting', wssMessage: 'Connecting...' });
       state.initSocket(state.user.id);
     }
   },
   disconnectSpot: () => {
     const state = useAppStore.getState();
+    state.addConnectionLog('Disconnect requested by user.');
     if (state.socket) {
       state.socket.disconnect();
+    }
+    if (heartbeatIntervalId) {
+      clearInterval(heartbeatIntervalId);
+      heartbeatIntervalId = null;
     }
     set({ 
       wssStatus: 'disconnected', 
@@ -376,6 +393,7 @@ export const useAppStore = create<AppState>((set) => ({
     }
 
     const targetUrl = BACKEND_URL || window.location.origin;
+    state.addConnectionLog(`Initializing connection to backend server at: ${targetUrl}`);
     set({ wssStatus: 'connecting', wssMessage: 'Initializing connection...' });
 
     // Function to wake up backend via HTTP ping
@@ -385,27 +403,51 @@ export const useAppStore = create<AppState>((set) => ({
       
       while (attempt < maxAttempts) {
         attempt++;
-        const currentSocket = useAppStore.getState().socket;
+        const currentStatus = useAppStore.getState().wssStatus;
         // If already connected, stop waking up
-        if (useAppStore.getState().wssStatus === 'connected') {
+        if (currentStatus === 'connected') {
           return;
         }
 
-        set({ wssMessage: `Waking up backend server... Attempt ${attempt}/${maxAttempts}` });
+        const msg = `Waking up backend server... Attempt ${attempt}/${maxAttempts}`;
+        set({ wssMessage: msg });
+        useAppStore.getState().addConnectionLog(msg);
         
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 4000);
           
-          const response = await fetch(`${targetUrl}/api/health`, {
-            signal: controller.signal,
-            headers: { 'Cache-Control': 'no-cache' }
-          });
+          let success = false;
+          try {
+            const response = await fetch(`${targetUrl}/api/health`, {
+              signal: controller.signal,
+              headers: { 'Cache-Control': 'no-cache' }
+            });
+            if (response.ok) {
+              success = true;
+            }
+          } catch (err) {
+            // Fallback to no-cors mode to bypass CORS blocking on external domains
+            try {
+              const noCorsController = new AbortController();
+              const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 4000);
+              await fetch(`${targetUrl}/api/health`, {
+                mode: 'no-cors',
+                signal: noCorsController.signal,
+                headers: { 'Cache-Control': 'no-cache' }
+              });
+              clearTimeout(noCorsTimeoutId);
+              success = true;
+            } catch (noCorsErr) {
+              console.log(`Wakeup no-cors attempt ${attempt} failed:`, noCorsErr);
+            }
+          }
           
           clearTimeout(timeoutId);
           
-          if (response.ok) {
+          if (success) {
             set({ wssMessage: 'Backend is awake! Connecting...' });
+            useAppStore.getState().addConnectionLog('Backend server is awake! Establishing connection...');
             break;
           }
         } catch (err) {
@@ -415,6 +457,72 @@ export const useAppStore = create<AppState>((set) => ({
         // Wait 3 seconds before next ping
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
+    };
+
+    const startHeartbeat = () => {
+      if (heartbeatIntervalId) {
+        clearInterval(heartbeatIntervalId);
+      }
+      
+      heartbeatIntervalId = setInterval(async () => {
+        const currentStatus = useAppStore.getState().wssStatus;
+        if (currentStatus !== 'connected') {
+          return;
+        }
+        
+        useAppStore.getState().addConnectionLog('Heartbeat: Checking backend status...');
+        
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          
+          let success = false;
+          try {
+            const response = await fetch(`${targetUrl}/api/health`, {
+              signal: controller.signal,
+              headers: { 'Cache-Control': 'no-cache' }
+            });
+            if (response.ok) {
+              success = true;
+            }
+          } catch (err) {
+            // Fallback to no-cors
+            try {
+              const noCorsController = new AbortController();
+              const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 4000);
+              await fetch(`${targetUrl}/api/health`, {
+                mode: 'no-cors',
+                signal: noCorsController.signal,
+                headers: { 'Cache-Control': 'no-cache' }
+              });
+              clearTimeout(noCorsTimeoutId);
+              success = true;
+            } catch (noCorsErr) {
+              console.log('Heartbeat no-cors failed:', noCorsErr);
+            }
+          }
+          
+          clearTimeout(timeoutId);
+          
+          if (success) {
+            useAppStore.getState().addConnectionLog('Heartbeat: Connection healthy.');
+          } else {
+            throw new Error('Server not responding to ping');
+          }
+        } catch (err: any) {
+          const errMsg = `Heartbeat: Ping failed: ${err.message || err}. Server might have gone to sleep.`;
+          useAppStore.getState().addConnectionLog(errMsg);
+          
+          const appState = useAppStore.getState();
+          if (appState.wssStatus !== 'connected') {
+            appState.addConnectionLog('Heartbeat: Re-triggering wake up loop...');
+            wakeUp().catch(console.error);
+            if (appState.socket) {
+              appState.socket.connect();
+            }
+          }
+        }
+      }, 30000); // 30 seconds keep-alive & check
     };
 
     // Trigger wakeup process in parallel
@@ -429,6 +537,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
+      useAppStore.getState().addConnectionLog(`Socket connection error: ${error.message || error}`);
       const currentStatus = useAppStore.getState().wssStatus;
       if (currentStatus === 'connected') {
         set({ wssStatus: 'connecting', wssMessage: 'Reconnecting to backend...' });
@@ -437,12 +546,19 @@ export const useAppStore = create<AppState>((set) => ({
 
     socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
+      useAppStore.getState().addConnectionLog(`Socket disconnected: ${reason}`);
       set({ wssStatus: 'disconnected', isWssConnected: false, wssMessage: `Disconnected: ${reason}` });
+      if (heartbeatIntervalId) {
+        clearInterval(heartbeatIntervalId);
+        heartbeatIntervalId = null;
+      }
     });
     
     socket.on('connect', async () => {
       console.log('Connected to server');
+      useAppStore.getState().addConnectionLog('Successfully connected to backend server!');
       set({ wssStatus: 'connected', isWssConnected: true, wssMessage: 'Connected & Secure' });
+      startHeartbeat();
       const { cryptoService } = await import('./services/cryptoService');
       const publicKey = await cryptoService.getMyPublicKeyBase64();
       socket.emit('register', { userId, publicKey });
