@@ -2234,9 +2234,6 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
               {[
                 { name: 'Firebase Cloud', status: 'Operational', latency: '24ms', icon: 'cloud', color: 'bg-amber-500', usage: 45 },
                 { name: 'Gemini AI Engine', status: 'Operational', latency: '142ms', icon: 'psychology', color: 'bg-primary', usage: 78 },
-                { name: 'Stripe Gateway', status: 'Operational', latency: '89ms', icon: 'payments', color: 'bg-indigo-500', usage: 12 },
-                { name: 'SendGrid SMTP', status: 'Operational', latency: '15ms', icon: 'mail', color: 'bg-blue-500', usage: 34 },
-                { name: 'Twilio SMS', status: 'Degraded', latency: '450ms', icon: 'sms', color: 'bg-red-500', usage: 56 },
               ].map((service) => (
                 <Card key={`integration-service-${service.name}`} className="p-5 sm:p-8 space-y-4 sm:space-y-6 bg-white shadow-xl shadow-primary/5 border-none rounded-2xl sm:rounded-[2.5rem] group hover:shadow-2xl hover:shadow-primary/10 transition-all duration-500">
                   <div className="flex items-start justify-between">
@@ -2309,7 +2306,6 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                 <div className="space-y-3 sm:space-y-4">
                   {[
                     { event: 'user.created', url: 'https://api.internal.io/hooks/v1/users', active: true },
-                    { event: 'payment.success', url: 'https://webhooks.stripe.com/v2/payments', active: true },
                     { event: 'system.alert', url: 'https://discord.com/api/webhooks/...', active: false },
                   ].map((hook) => (
                     <div key={`webhook-item-${hook.event}`} className="flex items-center justify-between p-4 sm:p-6 bg-white/5 rounded-xl sm:rounded-2xl border border-white/10 hover:bg-white/10 transition-all">

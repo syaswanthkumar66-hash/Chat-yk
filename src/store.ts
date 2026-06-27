@@ -207,6 +207,8 @@ interface AppState {
 export const DEFAULT_PRESETS: UserProfile[] = [];
 
 let heartbeatIntervalId: any = null;
+let isWakingUp = false;
+let lastSuccessfulWakeUpTime = 0;
 
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
@@ -396,13 +398,25 @@ export const useAppStore = create<AppState>((set) => ({
     state.addConnectionLog(`Initializing connection to backend server at: ${targetUrl}`);
     set({ wssStatus: 'connecting', wssMessage: 'Initializing connection...' });
 
-    let isWakingUp = false;
-
     // Function to wake up backend via HTTP ping with exponential backoff
     const wakeUp = async () => {
+      // If we are already connected, or already in the middle of waking up, do not start again
+      if (useAppStore.getState().wssStatus === 'connected') {
+        return;
+      }
       if (isWakingUp) {
         return;
       }
+      // If we successfully woke up the server very recently (within 60 seconds),
+      // we assume it is still awake and we just let socket.io's built-in reconnection do the job.
+      if (Date.now() - lastSuccessfulWakeUpTime < 60000) {
+        useAppStore.getState().addConnectionLog('Backend was recently verified to be awake. Relying on socket.io automatic reconnection...');
+        if (useAppStore.getState().socket && !useAppStore.getState().isWssConnected) {
+          useAppStore.getState().socket.connect();
+        }
+        return;
+      }
+
       isWakingUp = true;
       
       const maxAttempts = 20;
@@ -413,6 +427,7 @@ export const useAppStore = create<AppState>((set) => ({
         const currentStatus = useAppStore.getState().wssStatus;
         // If already connected, stop waking up
         if (currentStatus === 'connected') {
+          lastSuccessfulWakeUpTime = Date.now();
           isWakingUp = false;
           return;
         }
@@ -455,6 +470,7 @@ export const useAppStore = create<AppState>((set) => ({
           clearTimeout(timeoutId);
           
           if (success) {
+            lastSuccessfulWakeUpTime = Date.now();
             set({ wssMessage: 'Backend is awake! Connecting...' });
             useAppStore.getState().addConnectionLog('Backend server is awake! Establishing socket connection...');
             
@@ -579,6 +595,7 @@ export const useAppStore = create<AppState>((set) => ({
     
     socket.on('connect', async () => {
       console.log('Connected to server');
+      lastSuccessfulWakeUpTime = Date.now();
       useAppStore.getState().addConnectionLog('Successfully connected to backend server!');
       set({ wssStatus: 'connected', isWssConnected: true, wssMessage: 'Connected & Secure' });
       startHeartbeat();

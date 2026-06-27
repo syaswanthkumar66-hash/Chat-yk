@@ -427,9 +427,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const credentials = {
       'Firebase Cloud': process.env.FIREBASE_CONFIG ? 'Configured' : 'Missing',
       'Gemini AI Engine': process.env.GEMINI_API_KEY ? 'Configured' : 'Missing',
-      'Stripe Gateway': process.env.STRIPE_SECRET_KEY ? 'Configured' : 'Missing',
-      'SendGrid SMTP': process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing',
-      'Twilio SMS': process.env.TWILIO_AUTH_TOKEN ? 'Configured' : 'Missing',
       'Express TURN': process.env.TURN_SERVER_URL ? 'Configured' : 'Missing',
     };
 
