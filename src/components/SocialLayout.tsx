@@ -243,7 +243,7 @@ export const SocialLayout = () => {
                     onClick={() => {
                       if (wssStatus === 'connected') {
                         disconnectSpot();
-                      } else if (wssStatus === 'disconnected') {
+                      } else {
                         connectSpot();
                       }
                     }}
@@ -255,16 +255,16 @@ export const SocialLayout = () => {
                         ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)] animate-pulse' 
                         : wssStatus === 'connecting'
                         ? 'bg-amber-500 animate-pulse'
-                        : 'bg-slate-300'
+                        : 'bg-rose-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]'
                     }`} />
                     <span className={
                       wssStatus === 'connected' 
                         ? 'text-emerald-600 font-bold' 
                         : wssStatus === 'connecting'
-                        ? 'text-amber-600 font-black normal-case text-[10px]'
-                        : 'text-slate-400 font-medium'
+                        ? 'text-amber-600 font-bold normal-case text-[10px]'
+                        : 'text-rose-500 font-bold'
                     }>
-                      {wssStatus === 'connecting' && wssMessage ? wssMessage : `Spot: ${wssStatus}`}
+                      {wssStatus === 'connected' ? 'Online' : wssStatus === 'connecting' ? 'Reconnecting...' : 'Offline'}
                     </span>
                   </button>
                 </div>

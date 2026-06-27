@@ -396,21 +396,30 @@ export const useAppStore = create<AppState>((set) => ({
     state.addConnectionLog(`Initializing connection to backend server at: ${targetUrl}`);
     set({ wssStatus: 'connecting', wssMessage: 'Initializing connection...' });
 
-    // Function to wake up backend via HTTP ping
+    let isWakingUp = false;
+
+    // Function to wake up backend via HTTP ping with exponential backoff
     const wakeUp = async () => {
+      if (isWakingUp) {
+        return;
+      }
+      isWakingUp = true;
+      
       const maxAttempts = 20;
       let attempt = 0;
+      let delay = 1000; // Start with 1 second delay
       
       while (attempt < maxAttempts) {
-        attempt++;
         const currentStatus = useAppStore.getState().wssStatus;
         // If already connected, stop waking up
         if (currentStatus === 'connected') {
+          isWakingUp = false;
           return;
         }
 
-        const msg = `Waking up backend server... Attempt ${attempt}/${maxAttempts}`;
-        set({ wssMessage: msg });
+        attempt++;
+        const msg = `Waking up backend server... Attempt ${attempt}/${maxAttempts} (retrying in ${delay / 1000}s)`;
+        set({ wssStatus: 'connecting', wssMessage: msg });
         useAppStore.getState().addConnectionLog(msg);
         
         try {
@@ -447,16 +456,24 @@ export const useAppStore = create<AppState>((set) => ({
           
           if (success) {
             set({ wssMessage: 'Backend is awake! Connecting...' });
-            useAppStore.getState().addConnectionLog('Backend server is awake! Establishing connection...');
+            useAppStore.getState().addConnectionLog('Backend server is awake! Establishing socket connection...');
+            
+            // Connect the socket explicitly
+            if (useAppStore.getState().socket) {
+              useAppStore.getState().socket.connect();
+            }
             break;
           }
         } catch (err) {
           console.log(`Wakeup attempt ${attempt} failed:`, err);
         }
         
-        // Wait 3 seconds before next ping
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Wait with exponential backoff
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 30000); // Exponential backoff up to 30 seconds
       }
+      
+      isWakingUp = false;
     };
 
     const startHeartbeat = () => {
@@ -470,11 +487,11 @@ export const useAppStore = create<AppState>((set) => ({
           return;
         }
         
-        useAppStore.getState().addConnectionLog('Heartbeat: Checking backend status...');
+        useAppStore.getState().addConnectionLog('Heartbeat: Keep-alive ping to prevent server sleep...');
         
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
           
           let success = false;
           try {
@@ -489,7 +506,7 @@ export const useAppStore = create<AppState>((set) => ({
             // Fallback to no-cors
             try {
               const noCorsController = new AbortController();
-              const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 4000);
+              const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 5000);
               await fetch(`${targetUrl}/api/health`, {
                 mode: 'no-cors',
                 signal: noCorsController.signal,
@@ -498,50 +515,56 @@ export const useAppStore = create<AppState>((set) => ({
               clearTimeout(noCorsTimeoutId);
               success = true;
             } catch (noCorsErr) {
-              console.log('Heartbeat no-cors failed:', noCorsErr);
+              console.log('Heartbeat keep-alive failed:', noCorsErr);
             }
           }
           
           clearTimeout(timeoutId);
           
           if (success) {
-            useAppStore.getState().addConnectionLog('Heartbeat: Connection healthy.');
+            useAppStore.getState().addConnectionLog('Heartbeat: Server is alive and warm.');
           } else {
-            throw new Error('Server not responding to ping');
+            throw new Error('Server did not respond to keep-alive ping');
           }
         } catch (err: any) {
-          const errMsg = `Heartbeat: Ping failed: ${err.message || err}. Server might have gone to sleep.`;
+          const errMsg = `Heartbeat: Warning: Keep-alive ping failed: ${err.message || err}. Server might be sleeping.`;
           useAppStore.getState().addConnectionLog(errMsg);
           
+          // Re-trigger wakeup if disconnected or connecting
           const appState = useAppStore.getState();
           if (appState.wssStatus !== 'connected') {
-            appState.addConnectionLog('Heartbeat: Re-triggering wake up loop...');
+            appState.addConnectionLog('Heartbeat: Server seems unreachable, starting exponential backoff wake-up...');
             wakeUp().catch(console.error);
-            if (appState.socket) {
-              appState.socket.connect();
-            }
           }
         }
-      }, 30000); // 30 seconds keep-alive & check
+      }, 30000); // every 30 seconds
     };
 
     // Trigger wakeup process in parallel
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
-      reconnectionAttempts: 25,
-      reconnectionDelay: 2000,
-      timeout: 10000,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 30000,
+      randomizationFactor: 0.5,
+      timeout: 20000,
+      autoConnect: true,
     });
     set({ socket });
 
     socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
-      useAppStore.getState().addConnectionLog(`Socket connection error: ${error.message || error}`);
-      const currentStatus = useAppStore.getState().wssStatus;
-      if (currentStatus === 'connected') {
+      const appState = useAppStore.getState();
+      appState.addConnectionLog(`Socket connection error: ${error.message || error}`);
+      
+      if (appState.wssStatus === 'connected') {
         set({ wssStatus: 'connecting', wssMessage: 'Reconnecting to backend...' });
       }
+      
+      // Trigger exponential backoff wake up to ensure Render spins up
+      wakeUp().catch(console.error);
     });
 
     socket.on('disconnect', (reason) => {
