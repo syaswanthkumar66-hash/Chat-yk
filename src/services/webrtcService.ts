@@ -1,4 +1,5 @@
 import { useAppStore } from '../store';
+import { BACKEND_URL } from '../config';
 
 export interface RemoteTrackInfo {
   sessionId: string;
@@ -20,7 +21,7 @@ class WebRTCService {
 
   private async fetchIceConfig() {
     try {
-      const response = await fetch('/api/webrtc/config');
+      const response = await fetch(`${BACKEND_URL}/api/webrtc/config`);
       if (response.ok) {
         const data = await response.json();
         this.iceServers = data.iceServers;
@@ -31,7 +32,7 @@ class WebRTCService {
   }
 
   private async apiRequest(path: string, method: string = 'POST', body?: any) {
-    const res = await fetch(`/api/realtime/${path}`, {
+    const res = await fetch(`${BACKEND_URL}/api/realtime/${path}`, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined

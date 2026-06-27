@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../store';
+import { BACKEND_URL } from '../config';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 const MOCK_STATS_TODAY = [
@@ -2193,7 +2194,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                     <button 
                       onClick={async () => {
                         try {
-                          const response = await fetch('/api/integrations/connect', {
+                          const response = await fetch(`${BACKEND_URL}/api/integrations/connect`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ service: service.name })

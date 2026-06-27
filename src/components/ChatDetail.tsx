@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import { useAppStore } from '../store';
+import { BACKEND_URL } from '../config';
 import { Icon, Avatar, Button, Card, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GroupInfo } from './GroupInfo';
@@ -372,7 +373,7 @@ export const ChatDetail = () => {
           formData.append('file', uploadBlob, media.type === 'audio' ? 'voice_note.webm' : (media.type === 'file' ? media.name || 'file.bin' : 'image.jpg'));
           if (user?.id) formData.append('userId', user.id);
 
-          const response = await fetch('/api/upload', {
+          const response = await fetch(`${BACKEND_URL}/api/upload`, {
             method: 'POST',
             body: formData,
           });

@@ -1,5 +1,6 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { useAppStore } from '../store';
+import { BACKEND_URL } from '../config';
 import { Button, Icon, Avatar, Card } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db } from '../firebase';
@@ -77,7 +78,7 @@ export const Onboarding = () => {
           
           try {
             const token = await user.getIdToken();
-            await fetch('/api/auth/google', {
+            await fetch(`${BACKEND_URL}/api/auth/google`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ token })
@@ -130,7 +131,7 @@ export const Onboarding = () => {
       
       try {
         const token = await user.getIdToken();
-        await fetch('/api/auth/google', {
+        await fetch(`${BACKEND_URL}/api/auth/google`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token })

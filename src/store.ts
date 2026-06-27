@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Chat, Message, Device, Transfer } from './types';
 import { io, Socket } from 'socket.io-client';
+import { BACKEND_URL } from './config';
 
 export type AppMode = 'social' | 'fileshare' | 'hub' | 'admin';
 
@@ -365,7 +366,7 @@ export const useAppStore = create<AppState>((set) => ({
     if (state.socket && state.socket.connected) {
       return;
     }
-    const socket = io(window.location.origin);
+    const socket = io(BACKEND_URL || window.location.origin);
     set({ socket, wssStatus: 'connecting' });
     
     socket.on('connect', async () => {
