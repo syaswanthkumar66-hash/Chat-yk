@@ -9,13 +9,6 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const TAKEN_USERNAMES = ['sarah_c', 'admin', 'system', 'root'];
 
-const LOCAL_PRESETS = [
-  { id: 'u1', username: 'sarah_c', displayName: 'Sarah Chen', avatar: 'https://picsum.photos/seed/sarah/200', description: 'Senior Product Designer & Tech Enthusiast', isAdmin: true },
-  { id: 'u2', username: 'alex_m', displayName: 'Alex Mercer', avatar: 'https://picsum.photos/seed/alex/200', description: 'Network Security Engineer & P2P Hacker', isAdmin: false },
-  { id: 'u3', username: 'jordan_v', displayName: 'Jordan Vance', avatar: 'https://picsum.photos/seed/jordan/200', description: 'Lead Systems Architect & Core Developer', isAdmin: false },
-  { id: 'u4', username: 'taylor_s', displayName: 'Taylor Swift', avatar: 'https://picsum.photos/seed/taylor/200', description: 'Creative Developer & UI Engineer', isAdmin: false }
-];
-
 const PRELOADED_AVATARS = [
   'https://picsum.photos/seed/avatar1/200',
   'https://picsum.photos/seed/avatar2/200',
@@ -28,9 +21,6 @@ const PRELOADED_AVATARS = [
 export const Onboarding = () => {
   const { login } = useAppStore();
   const [step, setStep] = useState<'login' | 'profile'>('login');
-  const [authTab, setAuthTab] = useState<'cloud' | 'local'>('local');
-  const [customUsername, setCustomUsername] = useState('');
-  const [customDisplayName, setCustomDisplayName] = useState('');
   const [profile, setProfile] = useState({
     username: '',
     displayName: '',
@@ -40,35 +30,6 @@ export const Onboarding = () => {
   const [error, setError] = useState('');
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleLocalLogin = (preset: typeof LOCAL_PRESETS[0]) => {
-    login({
-      id: preset.id,
-      username: preset.username,
-      displayName: preset.displayName,
-      avatar: preset.avatar,
-      description: preset.description,
-      isAdmin: preset.isAdmin,
-      joinDate: new Date().toISOString()
-    }, 'local');
-  };
-
-  const handleCustomLocalLogin = () => {
-    if (!customUsername || !customDisplayName) {
-      setError('Please fill in both fields for custom identity.');
-      return;
-    }
-    const cleanUsername = customUsername.toLowerCase().trim().replace(/\s+/g, '_');
-    login({
-      id: `u-local-${Date.now()}`,
-      username: cleanUsername,
-      displayName: customDisplayName,
-      avatar: `https://picsum.photos/seed/${cleanUsername}/200`,
-      description: 'Local Standalone Developer',
-      isAdmin: cleanUsername === 'admin' || cleanUsername === 'syaswanth',
-      joinDate: new Date().toISOString()
-    }, 'local');
-  };
 
   useEffect(() => {
     getRedirectResult(auth)
@@ -262,32 +223,6 @@ export const Onboarding = () => {
                 </div>
               </div>
 
-              {/* Dual-Tab Auth Switcher */}
-              <div className="flex p-1 bg-slate-50 rounded-2xl border border-slate-100">
-                <button
-                  onClick={() => { setAuthTab('local'); setError(''); }}
-                  className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider italic transition-all ${
-                    authTab === 'local'
-                      ? 'bg-white text-primary shadow-md shadow-slate-100 border border-slate-100'
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  <Icon name="person" className="inline text-xs mr-1.5" />
-                  Local Peer Mode
-                </button>
-                <button
-                  onClick={() => { setAuthTab('cloud'); setError(''); }}
-                  className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider italic transition-all ${
-                    authTab === 'cloud'
-                      ? 'bg-white text-primary shadow-md shadow-slate-100 border border-slate-100'
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  <Icon name="cloud" className="inline text-xs mr-1.5" />
-                  Cloud Sync Mode
-                </button>
-              </div>
-
               {error && (
                 <motion.div 
                   initial={{ opacity: 0, y: -5 }}
@@ -300,74 +235,15 @@ export const Onboarding = () => {
                 </motion.div>
               )}
 
-              {authTab === 'cloud' ? (
-                <div className="space-y-6">
-                  <p className="text-slate-500 text-xs text-center font-medium leading-relaxed px-2">
-                    Authorize via Social Cloud backend for real-time encrypted communication with the global developer network.
-                  </p>
-                  <Button onClick={handleGoogleLogin} className="w-full h-14 rounded-2xl font-black uppercase tracking-widest italic text-xs shadow-xl shadow-primary/20">
-                    <Icon name="mail" className="text-lg mr-2" />
-                    Continue with Google
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  <div className="text-center space-y-1">
-                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Predefined Team Members</h3>
-                    <p className="text-[8px] text-slate-300 uppercase tracking-widest leading-none">Instant static access with zero setup</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {LOCAL_PRESETS.map(preset => (
-                      <button
-                        key={preset.id}
-                        onClick={() => handleLocalLogin(preset)}
-                        className="p-2.5 rounded-2xl bg-slate-50 hover:bg-primary/5 hover:border-primary/20 border border-slate-100/80 text-left transition-all active:scale-95 flex items-center gap-2.5 group"
-                      >
-                        <div className="size-9 rounded-xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform">
-                          <img src={preset.avatar} className="size-full object-cover" referrerPolicy="no-referrer" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[10px] font-black text-slate-800 uppercase tracking-tight truncate leading-tight">{preset.displayName}</p>
-                          <p className="text-[8px] font-black text-primary/60 uppercase tracking-widest mt-0.5 truncate">@{preset.username}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="relative flex items-center justify-center">
-                    <div className="absolute inset-x-0 h-px bg-slate-100" />
-                    <span className="relative bg-white px-3 text-[8px] font-black uppercase tracking-[0.2em] text-slate-300">or custom identity</span>
-                  </div>
-
-                  <div className="space-y-2.5 bg-slate-50 p-3 rounded-[1.5rem] border border-slate-100">
-                    <div className="space-y-1">
-                      <label className="text-[8px] font-black uppercase tracking-widest text-slate-400 px-1">Display Name</label>
-                      <input 
-                        type="text" 
-                        placeholder="E.G. JOHN DOE" 
-                        value={customDisplayName}
-                        onChange={(e) => setCustomDisplayName(e.target.value)}
-                        className="w-full bg-white border border-slate-100 rounded-xl px-4 py-2.5 text-[11px] font-black uppercase tracking-tight italic focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-slate-300"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[8px] font-black uppercase tracking-widest text-slate-400 px-1">Username / Peer ID</label>
-                      <input 
-                        type="text" 
-                        placeholder="E.G. JOHNDOE" 
-                        value={customUsername}
-                        onChange={(e) => setCustomUsername(e.target.value.replace(/\s+/g, '_').toLowerCase())}
-                        className="w-full bg-white border border-slate-100 rounded-xl px-4 py-2.5 text-[11px] font-black uppercase tracking-tight italic focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-slate-300"
-                      />
-                    </div>
-
-                    <Button onClick={handleCustomLocalLogin} className="w-full h-11 rounded-xl font-black uppercase tracking-widest italic text-[10px] shadow-lg shadow-primary/10 mt-1.5">
-                      Initialize Custom Peer
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <div className="space-y-6">
+                <p className="text-slate-500 text-xs text-center font-medium leading-relaxed px-2">
+                  Authorize via Social Cloud backend for real-time encrypted communication with the global developer network.
+                </p>
+                <Button onClick={handleGoogleLogin} className="w-full h-14 rounded-2xl font-black uppercase tracking-widest italic text-xs shadow-xl shadow-primary/20">
+                  <Icon name="mail" className="text-lg mr-2" />
+                  Continue with Google
+                </Button>
+              </div>
 
               <div className="pt-4 border-t border-slate-50 text-center">
                 <p className="text-[8px] font-black uppercase tracking-[0.4em] text-slate-300">Secured by Social Cloud Protocol</p>
