@@ -143,23 +143,41 @@ export const ChatDetail = () => {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
+  const isCurrentlyTyping = useRef(false);
 
   const handleTyping = (text: string) => {
     setMessageText(text);
     
-    // Only emit for 1-to-1 chats for simplicity or both. We can emit via socket.
     const socket = useAppStore.getState().socket;
     const targetId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
     
-    if (socket && targetId && chat && !chat.isGroup) {
-      socket.emit('typing', { recipientId: targetId, isTyping: true });
+    if (socket && chat) {
+      const emitData = chat.isGroup 
+        ? { groupId: chat.id }
+        : { recipientId: targetId };
+
+      if (!isCurrentlyTyping.current) {
+        isCurrentlyTyping.current = true;
+        socket.emit('typing_start', emitData);
+        
+        // Keep fallback typing emit
+        if (targetId && !chat.isGroup) {
+          socket.emit('typing', { recipientId: targetId, isTyping: true });
+        }
+      }
       
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       
       typingTimeoutRef.current = setTimeout(() => {
-        socket.emit('typing', { recipientId: targetId, isTyping: false });
+        isCurrentlyTyping.current = false;
+        socket.emit('typing_stop', emitData);
+        
+        // Keep fallback typing emit
+        if (targetId && !chat.isGroup) {
+          socket.emit('typing', { recipientId: targetId, isTyping: false });
+        }
       }, 2000);
     }
   };
@@ -286,21 +304,24 @@ export const ChatDetail = () => {
   const handleSend = async () => {
     if (!messageText.trim() && capturedMedia.length === 0) return;
     
+    const isGroup = chat?.isGroup;
     const targetId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
-    if (!targetId) return;
+    if (!targetId && !isGroup) return;
 
-    // E2EE Setup
+    // E2EE Setup (Only for 1-to-1 chats)
     let sharedSecret: CryptoKey | null = null;
-    try {
-      const { cryptoService } = await import('../services/cryptoService');
-      const remotePubKeyBase64 = await new Promise<string>((resolve) => {
-        useAppStore.getState().socket?.emit("get_public_key", { userId: targetId }, resolve);
-      });
-      if (remotePubKeyBase64) {
-        sharedSecret = await cryptoService.deriveSharedSecret(targetId, remotePubKeyBase64);
+    if (!isGroup && targetId) {
+      try {
+        const { cryptoService } = await import('../services/cryptoService');
+        const remotePubKeyBase64 = await new Promise<string>((resolve) => {
+          useAppStore.getState().socket?.emit("get_public_key", { userId: targetId }, resolve);
+        });
+        if (remotePubKeyBase64) {
+          sharedSecret = await cryptoService.deriveSharedSecret(targetId, remotePubKeyBase64);
+        }
+      } catch(e) {
+        console.error("Failed to setup E2EE", e);
       }
-    } catch(e) {
-      console.error("Failed to setup E2EE", e);
     }
 
     if (messageText.trim()) {
@@ -417,6 +438,22 @@ export const ChatDetail = () => {
         }
       } catch (error) {
         console.error("Error uploading media:", error);
+      }
+    }
+
+    // Stop typing indicator on message send
+    if (isCurrentlyTyping.current) {
+      isCurrentlyTyping.current = false;
+      const socket = useAppStore.getState().socket;
+      if (socket && chat) {
+        const emitData = chat.isGroup ? { groupId: chat.id } : { recipientId: targetId };
+        socket.emit('typing_stop', emitData);
+        if (targetId && !chat.isGroup) {
+          socket.emit('typing', { recipientId: targetId, isTyping: false });
+        }
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
       }
     }
 

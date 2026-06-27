@@ -201,12 +201,7 @@ interface AppState {
   declineTransfer: (transferId: string) => void;
 }
 
-export const DEFAULT_PRESETS: UserProfile[] = [
-  { id: 'u1', username: 'sarah_c', displayName: 'Sarah Chen', avatar: 'https://picsum.photos/seed/sarah/200', description: 'Senior Product Designer & Tech Enthusiast', isAdmin: true, joinDate: new Date('2023-01-15').toISOString() },
-  { id: 'u2', username: 'alex_m', displayName: 'Alex Mercer', avatar: 'https://picsum.photos/seed/alex/200', description: 'Network Security Engineer & P2P Hacker', isAdmin: false, joinDate: new Date('2023-02-20').toISOString() },
-  { id: 'u3', username: 'jordan_v', displayName: 'Jordan Vance', avatar: 'https://picsum.photos/seed/jordan/200', description: 'Lead Systems Architect & Core Developer', isAdmin: false, joinDate: new Date('2023-03-10').toISOString() },
-  { id: 'u4', username: 'taylor_s', displayName: 'Taylor Swift', avatar: 'https://picsum.photos/seed/taylor/200', description: 'Creative Developer & UI Engineer', isAdmin: false, joinDate: new Date('2023-04-05').toISOString() }
-];
+export const DEFAULT_PRESETS: UserProfile[] = [];
 
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
@@ -265,9 +260,9 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       deletedMsgIds: [...state.deletedMsgIds, messageId]
     }));
-    import('./firebase').then(({ db }) => {
+    import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
       import('firebase/firestore').then(({ doc, deleteDoc }) => {
-        deleteDoc(doc(db, 'offline_messages', messageId)).catch(console.error);
+        deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
       });
     });
   },
@@ -275,9 +270,9 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       globallyDeletedIds: [...state.globallyDeletedIds, messageId]
     }));
-    import('./firebase').then(({ db }) => {
+    import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
       import('firebase/firestore').then(({ doc, deleteDoc }) => {
-        deleteDoc(doc(db, 'offline_messages', messageId)).catch(console.error);
+        deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
       });
     });
   },
@@ -394,146 +389,23 @@ export const useAppStore = create<AppState>((set) => ({
       });
     });
 
-    // === FIREBASE FALLBACK: Listen to offline messages ===
-    import('./firebase').then(({ db }) => {
-      import('firebase/firestore').then(({ collection, onSnapshot, query, where, doc, deleteDoc, getDoc, setDoc }) => {
+    // === FIREBASE USER DETAILS SYNCHRONIZATION (WRITE ONLY, NO LISTENERS) ===
+    import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
+      import('firebase/firestore').then(({ doc, setDoc }) => {
         // Broadcast my public key via Firebase:
         import('./services/cryptoService').then(async ({ cryptoService }) => {
             const publicKey = await cryptoService.getMyPublicKeyBase64();
-            setDoc(doc(db, 'users', userId), { publicKey }, { merge: true }).catch(console.error);
+            setDoc(doc(db, 'users', userId), { publicKey }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
         });
 
-        // Smart fallback logic: only use Firebase listeners when Socket.IO is disconnected
-        let usersUnsubscribe: (() => void) | null = null;
-
-        const startFirebaseFallback = () => {
-           if (!usersUnsubscribe) {
-              usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-                snapshot.docChanges().forEach(change => {
-                   const data = change.doc.data();
-                   if (data.isOnline !== undefined) {
-                      useAppStore.getState().updateUserByAdmin(change.doc.id, { isOnline: data.isOnline, ...(data.publicKey ? { publicKey: data.publicKey } : {}) });
-                   }
-                });
-              });
-           }
-        };
-
-        const stopFirebaseFallback = () => {
-           if (usersUnsubscribe) {
-              usersUnsubscribe();
-              usersUnsubscribe = null;
-           }
-        };
-
         socket.on('disconnect', () => {
-           startFirebaseFallback();
            // Mark self as offline in Firebase
-           import('./firebase').then(({ db }) => {
-              import('firebase/firestore').then(({ doc, setDoc }) => {
-                 setDoc(doc(db, 'users', userId), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch(console.error);
-              });
-           });
+           setDoc(doc(db, 'users', userId), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
         });
 
         socket.on('connect', () => {
-           stopFirebaseFallback();
-           // Mark self as online in Firebase so offline users know
-           import('./firebase').then(({ db }) => {
-              import('firebase/firestore').then(({ doc, setDoc }) => {
-                 setDoc(doc(db, 'users', userId), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch(console.error);
-              });
-           });
-        });
-
-        // Start fallback initially if socket isn't connected within a short time
-        setTimeout(() => {
-           if (!socket.connected) {
-              startFirebaseFallback();
-           }
-        }, 3000);
-
-        // Listen for messages directly in Firebase if sent via fallback
-        onSnapshot(query(collection(db, 'offline_messages'), where('to', '==', userId)), (snapshot) => {
-           snapshot.docChanges().forEach(async (change) => {
-              if (change.type === 'added') {
-                  const data = change.doc.data() as any;
-                  
-                  // If socket is connected, server will deliver them via socket anyway.
-                  // We only consume from Firebase fallback if socket fails or isn't connected.
-                  if (socket.connected) return; 
-                  
-                  const state = useAppStore.getState();
-                  const { cryptoService } = await import('./services/cryptoService');
-                  let decryptedText = data.text;
-                  
-                  if (data.iv && data.text) {
-                     try {
-                        let remotePubKeyBase64 = null;
-                        const userDoc = await getDoc(doc(db, 'users', data.senderId));
-                        if(userDoc.exists()) {
-                           remotePubKeyBase64 = userDoc.data()?.publicKey;
-                        }
-                        if (remotePubKeyBase64) {
-                            const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64);
-                            const encryptedObj = JSON.parse(data.text);
-                            decryptedText = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
-                        }
-                     } catch(e) {
-                        console.error("Decryption fallback failed", e);
-                        decryptedText = "🔒 [Encrypted Message]";
-                     }
-                  }
-
-                  const newMessage: Message = {
-                    id: data.id || `m-${Date.now()}`,
-                    senderId: data.senderId,
-                    text: decryptedText,
-                    timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    type: data.type || 'text',
-                    fileUrl: data.fileUrl,
-                    fileSize: data.fileSize,
-                    encryptedFileKey: data.encryptedFileKey,
-                    iv: data.iv,
-                    isE2E: !!(data.iv || data.encryptedFileKey || (data.text && typeof data.text === 'string' && data.text.includes('"iv"'))),
-                    isOwn: false
-                  };
-
-                  set((state) => {
-                    let updatedChats = [...state.chats];
-                    let chat = updatedChats.find(c => !c.isGroup && c.participants.some(p => p.id === data.senderId));
-                    if (chat) {
-                      updatedChats = updatedChats.map(c => c.id === chat!.id ? {
-                        ...c,
-                        messages: [...(c.messages || []), newMessage],
-                        lastMessage: newMessage,
-                        unreadCount: state.activeChatId === c.id ? c.unreadCount : (c.unreadCount || 0) + 1
-                      } : c);
-                    } else {
-                      const sender = state.users.find(u => u.id === data.senderId) || {
-                        id: data.senderId,
-                        displayName: 'Unknown User',
-                        username: data.senderId,
-                        avatar: `https://picsum.photos/seed/${data.senderId}/200`
-                      };
-                      const newChat: Chat = {
-                        id: `c-${Date.now()}`,
-                        participants: [
-                          { id: sender.id, name: sender.displayName, username: sender.username, avatar: sender.avatar, status: 'online' },
-                          { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
-                        ],
-                        unreadCount: 1,
-                        messages: [newMessage],
-                        lastMessage: newMessage
-                      };
-                      updatedChats.push(newChat);
-                    }
-                    return { chats: updatedChats };
-                  });
-
-                  deleteDoc(doc(db, 'offline_messages', change.doc.id)).catch(console.error);
-              }
-           });
+           // Mark self as online in Firebase so other users can see status in search
+           setDoc(doc(db, 'users', userId), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
         });
       });
     });
@@ -592,26 +464,7 @@ export const useAppStore = create<AppState>((set) => ({
         isOwn: false
       };
 
-      // Play sound and trigger browser Notification
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const activeState = useAppStore.getState();
-        if (activeState.activeChatId !== (data.groupId || data.senderId)) {
-          const chatInfo = data.groupId 
-            ? activeState.chats.find(c => c.id === data.groupId)
-            : activeState.users.find(u => u.id === data.senderId);
-          const senderName = (chatInfo as any)?.name || (chatInfo as any)?.displayName || 'New Message';
-          try {
-            new Notification(senderName, {
-              body: decryptedText,
-              icon: chatInfo?.avatar || 'https://picsum.photos/seed/default/200',
-              tag: data.groupId || data.senderId,
-              renotify: true
-            } as any);
-          } catch (e) {
-            console.warn('Notification failed:', e);
-          }
-        }
-      }
+      // Real-time notifications are now handled by the useNotifications hook in App.tsx
 
       // Find chat or create one
       set((state) => {
@@ -683,10 +536,36 @@ export const useAppStore = create<AppState>((set) => ({
       }));
     });
 
+    socket.on('typing_start', (data: { senderId: string }) => {
+      set((state) => ({
+        typingUsers: {
+          ...state.typingUsers,
+          [data.senderId]: true
+        }
+      }));
+    });
+
+    socket.on('typing_stop', (data: { senderId: string }) => {
+      set((state) => ({
+        typingUsers: {
+          ...state.typingUsers,
+          [data.senderId]: false
+        }
+      }));
+    });
+
     set({ socket });
   },
   activeChatId: null,
-  setActiveChatId: (id) => set({ activeChatId: id, activeRecipientId: null, selectedMessageIds: [] }),
+  setActiveChatId: (id) => set((state) => {
+    if (id && state.socket && state.socket.connected) {
+      const chat = state.chats.find(c => c.id === id);
+      if (chat?.isGroup) {
+        state.socket.emit('join_group', id);
+      }
+    }
+    return { activeChatId: id, activeRecipientId: null, selectedMessageIds: [] };
+  }),
   activeRecipientId: null,
   setActiveRecipientId: (id) => set({ activeRecipientId: id, activeChatId: null, selectedMessageIds: [] }),
   activeDeviceId: null,
@@ -1101,7 +980,7 @@ export const useAppStore = create<AppState>((set) => ({
     const isGroup = chat?.isGroup;
 
     if (state.socket && state.socket.connected) {
-      if (isGroup) {
+      if (isGroup && chat?.participants) {
         state.socket.emit('send_message', {
           groupId: chatId,
           text: e2eData ? e2eData.encryptedText : text,
@@ -1109,7 +988,8 @@ export const useAppStore = create<AppState>((set) => ({
           fileUrl,
           fileSize,
           iv: e2eData?.iv,
-          encryptedFileKey: e2eData?.encryptedFileKey
+          encryptedFileKey: e2eData?.encryptedFileKey,
+          recipientIds: chat.participants.map(p => p.id)
         });
       } else {
         const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
@@ -1126,7 +1006,7 @@ export const useAppStore = create<AppState>((set) => ({
 
           // Also store as temporary file if forwarded and contains a file URL
           if (isForwarded && fileUrl) {
-            import('./firebase').then(({ db }) => {
+            import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
               import('firebase/firestore').then(({ doc, setDoc }) => {
                 setDoc(doc(db, 'offline_messages', newMessage.id), {
                   id: newMessage.id,
@@ -1142,16 +1022,41 @@ export const useAppStore = create<AppState>((set) => ({
                   to: targetId,
                   isTemporaryFile: true,
                   isForwarded: true
-                }).catch(console.error);
+                }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
               });
             });
           }
         }
       }
     } else {
-      const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
-      if (targetId && !isGroup) {
-         import('./firebase').then(({ db }) => {
+      if (isGroup && chat?.participants) {
+        import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
+          import('firebase/firestore').then(({ doc, setDoc }) => {
+            chat.participants.forEach(p => {
+              if (p.id !== state.user?.id) {
+                const uniqueMsgId = `${newMessage.id}-${p.id}`;
+                setDoc(doc(db, 'offline_messages', uniqueMsgId), {
+                  id: uniqueMsgId,
+                  senderId: state.user?.id,
+                  recipientId: p.id,
+                  groupId: chatId,
+                  text: e2eData ? e2eData.encryptedText : text,
+                  type: type || 'text',
+                  fileUrl,
+                  fileSize,
+                  iv: e2eData?.iv,
+                  encryptedFileKey: e2eData?.encryptedFileKey,
+                  timestamp: newMessage.timestamp,
+                  to: p.id
+                }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${uniqueMsgId}`));
+              }
+            });
+          });
+        });
+      } else {
+        const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
+        if (targetId && !isGroup) {
+         import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
             import('firebase/firestore').then(({ doc, setDoc }) => {
                 setDoc(doc(db, 'offline_messages', newMessage.id), {
                     id: newMessage.id,
@@ -1165,10 +1070,11 @@ export const useAppStore = create<AppState>((set) => ({
                     encryptedFileKey: e2eData?.encryptedFileKey,
                     timestamp: newMessage.timestamp,
                     to: targetId
-                }).catch(console.error);
+                }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
             });
          });
       }
+     }
     }
 
     let updatedChats = [...state.chats];

@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useAppStore } from './store';
+import { Message } from './types';
 import { Hub } from './components/Hub';
 import { Onboarding } from './components/Onboarding';
 import { SocialLayout } from './components/SocialLayout';
@@ -23,8 +24,120 @@ async function testConnection() {
 }
 testConnection();
 
+// Custom hook to request and manage system notifications
+function useNotifications() {
+  const socket = useAppStore((state) => state.socket);
+  const user = useAppStore((state) => state.user);
+  const activeChatId = useAppStore((state) => state.activeChatId);
+  const chats = useAppStore((state) => state.chats);
+  const users = useAppStore((state) => state.users);
+
+  // Request system notification permissions on mount/login
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+
+    if (user && Notification.permission === 'default') {
+      Notification.requestPermission()
+        .then((permission) => {
+          console.log(`Notification permission status: ${permission}`);
+        })
+        .catch(console.error);
+    }
+  }, [user]);
+
+  // Listen to socket 'receive_message' to trigger system alerts
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handleReceiveMessage = async (data: {
+      id?: string;
+      messageId?: string;
+      groupId?: string;
+      senderId: string;
+      text: string;
+      type: Message['type'];
+      fileUrl?: string;
+      fileSize?: string;
+      encryptedFileKey?: number[];
+      iv?: number[];
+    }) => {
+      // Don't notify if the message is from ourselves
+      if (data.senderId === user.id) return;
+
+      // Check if user has push notifications enabled in settings
+      const pushEnabled = user.notificationSettings?.pushEnabled !== false;
+      if (!pushEnabled) return;
+
+      // Ensure Notification is supported and granted
+      if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return;
+
+      // Don't show system alerts for the active chat if the tab/document is focused
+      const isChatActive = activeChatId === (data.groupId || data.senderId);
+      if (isChatActive && document.hasFocus()) return;
+
+      let decryptedText = data.text;
+
+      // If encrypted, decrypt the message payload
+      if (data.iv && data.text) {
+        try {
+          const { cryptoService } = await import('./services/cryptoService');
+          const remotePubKeyBase64 = await new Promise<string>((resolve) => {
+            socket.emit("get_public_key", { userId: data.senderId }, resolve);
+          });
+          if (remotePubKeyBase64) {
+            const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64);
+            const encryptedObj = JSON.parse(data.text);
+            decryptedText = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
+          }
+        } catch (e) {
+          console.error("Notification decryption failed", e);
+          decryptedText = "🔒 [Encrypted Message]";
+        }
+      }
+
+      // Determine sender / group name
+      const chatInfo = data.groupId 
+        ? chats.find(c => c.id === data.groupId)
+        : users.find(u => u.id === data.senderId);
+
+      const senderName = (chatInfo as any)?.name || (chatInfo as any)?.displayName || 'New Message';
+
+      // Play system alert sound if enabled
+      if (user.notificationSettings?.soundEnabled) {
+        try {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
+          audio.volume = 0.5;
+          audio.play().catch(() => {});
+        } catch (e) {
+          console.warn('Audio playback failed:', e);
+        }
+      }
+
+      // Trigger the OS/Browser Notification alert
+      try {
+        new Notification(senderName, {
+          body: decryptedText,
+          icon: chatInfo?.avatar || 'https://picsum.photos/seed/default/200',
+          tag: data.groupId || data.senderId,
+          renotify: true
+        } as any);
+      } catch (e) {
+        console.warn('Notification display failed:', e);
+      }
+    };
+
+    socket.on('receive_message', handleReceiveMessage);
+    return () => {
+      socket.off('receive_message', handleReceiveMessage);
+    };
+  }, [socket, user, activeChatId, chats, users]);
+}
+
 export default function App() {
   const { mode, isLoggedIn, joinGroupId, setJoinGroupId, setMode, login, logout, broadcasts, systemSettings, user } = useAppStore();
+
+  // Activate the real-time notification integration hook
+  useNotifications();
 
   useEffect(() => {
     let unsubscribeFirestore = () => {};

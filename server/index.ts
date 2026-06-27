@@ -212,8 +212,38 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("typing_start", (data) => {
+      const { recipientId, groupId } = data;
+      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
+      if (!senderId) return;
+
+      if (groupId) {
+        socket.to(`group-${groupId}`).emit("typing_start", { senderId, groupId });
+      } else if (recipientId) {
+        const targetSocketId = users.get(recipientId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit("typing_start", { senderId });
+        }
+      }
+    });
+
+    socket.on("typing_stop", (data) => {
+      const { recipientId, groupId } = data;
+      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
+      if (!senderId) return;
+
+      if (groupId) {
+        socket.to(`group-${groupId}`).emit("typing_stop", { senderId, groupId });
+      } else if (recipientId) {
+        const targetSocketId = users.get(recipientId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit("typing_stop", { senderId });
+        }
+      }
+    });
+
     socket.on("send_message", async (data) => {
-      const { recipientId, groupId, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
+      const { recipientId, groupId, recipientIds, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
       const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
 
       if (!senderId) return;
@@ -242,6 +272,29 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         // Send to everyone in the group room except the sender
         socket.to(`group-${groupId}`).emit("receive_message", messageData);
         console.log(`Group message sent from ${senderId} to group-${groupId}`);
+
+        // For any group member who is offline, save an offline message
+        if (Array.isArray(recipientIds)) {
+          for (const targetId of recipientIds) {
+            if (targetId === senderId) continue;
+            const targetSocketId = users.get(targetId);
+            if (!targetSocketId) {
+              const storeData = { ...messageData, recipientId: targetId, to: targetId };
+              const offlineMsgId = `${messageData.id}-${targetId}`;
+              if (db) {
+                try {
+                  await db.collection('offline_messages').doc(offlineMsgId).set(storeData);
+                  console.log(`Group member ${targetId} offline. Saved group message to Firestore.`);
+                } catch(e) {
+                  console.error("Firebase save error for group member:", e);
+                }
+              } else {
+                tempStorage.set(offlineMsgId, storeData);
+                console.log(`Group member ${targetId} offline. Message stored temporarily in memory.`);
+              }
+            }
+          }
+        }
       } else if (recipientId) {
         const targetSocketId = users.get(recipientId);
         if (targetSocketId) {
@@ -301,9 +354,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     socket.on("disconnect", () => {
       const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
       if (senderId) {
-        users.delete(senderId);
-        io.emit("user_status", { userId: senderId, isOnline: false });
-        console.log(`User ${senderId} disconnected`);
+        if (users.get(senderId) === socket.id) {
+          users.delete(senderId);
+          io.emit("user_status", { userId: senderId, isOnline: false });
+          console.log(`User ${senderId} disconnected`);
+        }
       }
     });
   });

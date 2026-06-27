@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '../store';
 import { Icon, Avatar, Card, GlassCard, Button } from './UI';
 import { ChatDetail } from './ChatDetail';
@@ -52,8 +52,15 @@ export const SocialLayout = () => {
     wssStatus,
     isWssConnected,
     connectSpot,
-    disconnectSpot
+    disconnectSpot,
+    initSocket
   } = useAppStore();
+
+  useEffect(() => {
+    if (user?.id) {
+      initSocket(user.id);
+    }
+  }, [user?.id, initSocket]);
 
   const filteredChats = chats.filter(chat => {
     // Filter out blocked users
