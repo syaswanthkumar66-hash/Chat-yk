@@ -12,8 +12,7 @@ import { Settings } from './Settings';
 import { GroupCall } from './GroupCall';
 import { GroupInfo } from './GroupInfo';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from '../firebase';
-import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
+import { db, collection, query, where, getDocs, getDoc, doc } from '../firebase';
 
 function formatLastSeen(lastSeen?: string | null): string {
   if (!lastSeen) return 'Offline';
@@ -73,7 +72,8 @@ export const SocialLayout = () => {
     wssMessage,
     connectSpot,
     disconnectSpot,
-    initSocket
+    initSocket,
+    typingUsers
   } = useAppStore();
 
   useEffect(() => {
@@ -525,11 +525,40 @@ export const SocialLayout = () => {
                       </h3>
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{chat.lastMessage?.timestamp}</span>
                     </div>
-                    <p className="text-sm text-slate-500 truncate leading-tight">
-                      {chat.isGroup && chat.lastMessage?.senderName && (
-                        <span className="font-bold text-primary/80">{chat.lastMessage.senderName}: </span>
-                      )}
-                      {chat.lastMessage?.text}
+                    <p className="text-sm text-slate-500 truncate leading-tight flex items-center min-h-[1.25rem]">
+                      {(() => {
+                        const typingParticipants = chat.isGroup
+                          ? chat.participants.filter(p => p.id !== user?.id && typingUsers[p.id])
+                          : [];
+                        const isDirectTyping = !chat.isGroup && typingUsers[chat.participants[0]?.id];
+                        
+                        if (chat.isGroup && typingParticipants.length > 0) {
+                          const names = typingParticipants.map(p => p.name);
+                          const typingText = names.length === 1 
+                            ? `${names[0]} is typing...` 
+                            : `${names[0]} & others are typing...`;
+                          return (
+                            <span className="text-green-500 font-bold animate-pulse text-xs flex items-center gap-1">
+                              {typingText}
+                            </span>
+                          );
+                        } else if (!chat.isGroup && isDirectTyping) {
+                          return (
+                            <span className="text-green-500 font-bold animate-pulse text-xs flex items-center gap-1">
+                              Typing...
+                            </span>
+                          );
+                        }
+                        
+                        return (
+                          <span className="truncate">
+                            {chat.isGroup && chat.lastMessage?.senderName && (
+                              <span className="font-bold text-primary/80">{chat.lastMessage.senderName}: </span>
+                            )}
+                            {chat.lastMessage?.text}
+                          </span>
+                        );
+                      })()}
                     </p>
                   </div>
                   {chat.unreadCount > 0 && (

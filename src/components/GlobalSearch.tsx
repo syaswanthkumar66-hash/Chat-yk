@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Avatar, Card, Button } from './UI';
 import { useAppStore } from '../store';
-import { db } from '../firebase';
-import { collection, query as firestoreQuery, where, getDocs } from 'firebase/firestore';
+import { db, collection, query as firestoreQuery, where, getDocs } from '../firebase';
 
 interface SearchResult {
   type: 'friend' | 'message' | 'file' | 'group' | 'device';
@@ -104,7 +103,7 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
         if (!isActive) return;
 
         const remoteResults: SearchResult[] = [];
-        querySnapshot.forEach((doc) => {
+        querySnapshot.forEach((doc: any) => {
           const userData = doc.data();
           if (doc.id === useAppStore.getState().user?.id) return; // Skip self
           

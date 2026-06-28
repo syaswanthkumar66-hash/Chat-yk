@@ -82,8 +82,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
       
       // Try to fetch the latest state from Firestore
       try {
-        const { db } = await import('../firebase');
-        const { doc, getDoc } = await import('firebase/firestore');
+        const { db, doc, getDoc } = await import('../firebase');
         const userDoc = await getDoc(doc(db, 'users', userId));
         if (userDoc.exists() && isActive) {
           const userData = userDoc.data();

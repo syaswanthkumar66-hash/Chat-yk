@@ -301,20 +301,16 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       deletedMsgIds: [...state.deletedMsgIds, messageId]
     }));
-    import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-      import('firebase/firestore').then(({ doc, deleteDoc }) => {
-        deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
-      });
+    import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, deleteDoc }) => {
+      deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
     });
   },
   deleteMessageGlobally: (messageId) => {
     set((state) => ({
       globallyDeletedIds: [...state.globallyDeletedIds, messageId]
     }));
-    import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-      import('firebase/firestore').then(({ doc, deleteDoc }) => {
-        deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
-      });
+    import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, deleteDoc }) => {
+      deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
     });
   },
   mode: 'hub',
@@ -338,11 +334,9 @@ export const useAppStore = create<AppState>((set) => ({
     }
     // Also update in Firestore in background if available
     if (state.user) {
-      import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-        import('firebase/firestore').then(({ doc, updateDoc }) => {
-          updateDoc(doc(db, 'users', state.user!.id), data).catch(err => {
-            console.error("Failed to sync user profile update to Firestore:", err);
-          });
+      import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, updateDoc }) => {
+        updateDoc(doc(db, 'users', state.user!.id), data).catch(err => {
+          console.error("Failed to sync user profile update to Firestore:", err);
         });
       });
     }
@@ -699,8 +693,7 @@ export const useAppStore = create<AppState>((set) => ({
     });
 
     // === FIREBASE USER DETAILS SYNCHRONIZATION (WRITE ONLY, NO LISTENERS) ===
-    import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-      import('firebase/firestore').then(({ doc, setDoc }) => {
+    import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
         // Broadcast my public key via Firebase:
         import('./services/cryptoService').then(async ({ cryptoService }) => {
             const publicKey = await cryptoService.getMyPublicKeyBase64();
@@ -716,7 +709,6 @@ export const useAppStore = create<AppState>((set) => ({
            // Mark self as online in Firebase so other users can see status in search
            setDoc(doc(db, 'users', userId), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
         });
-      });
     });
 
     socket.on('user_status', (data: { userId: string, isOnline: boolean }) => {
@@ -909,8 +901,7 @@ export const useAppStore = create<AppState>((set) => ({
     });
     
     try {
-      const { db } = await import('./firebase');
-      const { updateDoc, doc } = await import('firebase/firestore');
+      const { db, updateDoc, doc } = await import('./firebase');
       await updateDoc(doc(db, 'friendRequests', requestId), { status: 'accepted' });
     } catch (err) {
       console.error("Error accepting request in db:", err);
@@ -922,8 +913,7 @@ export const useAppStore = create<AppState>((set) => ({
     }));
     
     try {
-      const { db } = await import('./firebase');
-      const { deleteDoc, doc } = await import('firebase/firestore');
+      const { db, deleteDoc, doc } = await import('./firebase');
       await deleteDoc(doc(db, 'friendRequests', requestId));
     } catch (err) {
       console.error("Error rejecting request in db:", err);
@@ -938,8 +928,7 @@ export const useAppStore = create<AppState>((set) => ({
     
     if (state.user) {
       try {
-        const { db } = await import('./firebase');
-        const { addDoc, collection, serverTimestamp, query, where, getDocs } = await import('firebase/firestore');
+        const { db, addDoc, collection, serverTimestamp, query, where, getDocs } = await import('./firebase');
         const requestsRef = collection(db, 'friendRequests');
         
         // Prevent dupes
@@ -966,8 +955,7 @@ export const useAppStore = create<AppState>((set) => ({
     const state = useAppStore.getState();
     if (state.user) {
       try {
-        const { db } = await import('./firebase');
-        const { deleteDoc, doc, collection, query, where, getDocs } = await import('firebase/firestore');
+        const { db, deleteDoc, doc, collection, query, where, getDocs } = await import('./firebase');
         const requestsRef = collection(db, 'friendRequests');
         const q = query(requestsRef, where('fromUserId', '==', state.user.id), where('toUserId', '==', userId));
         const existing = await getDocs(q);
@@ -1011,8 +999,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db } = await import('./firebase');
-        const { collection, query, where, getDocs, deleteDoc, doc, updateDoc } = await import('firebase/firestore');
+        const { db, collection, query, where, getDocs, deleteDoc, doc, updateDoc } = await import('./firebase');
         
         // Find and delete the accepted friend requests where this user and userId are participants
         const requestsRef = collection(db, 'friendRequests');
@@ -1053,8 +1040,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db } = await import('./firebase');
-        const { doc, updateDoc } = await import('firebase/firestore');
+        const { db, doc, updateDoc } = await import('./firebase');
         const nextRemoved = useAppStore.getState().removedFriendIds;
         await updateDoc(doc(db, 'users', currentUserId), { removedFriendIds: nextRemoved });
       } catch (err) {
@@ -1086,8 +1072,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db } = await import('./firebase');
-        const { doc, updateDoc } = await import('firebase/firestore');
+        const { db, doc, updateDoc } = await import('./firebase');
         const nextBlocked = useAppStore.getState().blockedUserIds;
         await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked });
       } catch (err) {
@@ -1111,8 +1096,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db } = await import('./firebase');
-        const { doc, updateDoc } = await import('firebase/firestore');
+        const { db, doc, updateDoc } = await import('./firebase');
         const nextBlocked = useAppStore.getState().blockedUserIds;
         await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked });
       } catch (err) {
@@ -1416,8 +1400,7 @@ export const useAppStore = create<AppState>((set) => ({
 
           // Also store as temporary file if forwarded and contains a file URL
           if (isForwarded && fileUrl) {
-            import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-              import('firebase/firestore').then(({ doc, setDoc }) => {
+            import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
                 setDoc(doc(db, 'offline_messages', newMessage.id), {
                   id: newMessage.id,
                   senderId: state.user?.id,
@@ -1433,7 +1416,6 @@ export const useAppStore = create<AppState>((set) => ({
                   isTemporaryFile: true,
                   isForwarded: true
                 }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
-              });
             });
           }
         }
@@ -1442,8 +1424,7 @@ export const useAppStore = create<AppState>((set) => ({
       // Only store offline messages if they are plain text messages
       if (type === 'text' && !fileUrl) {
         if (isGroup && chat?.participants) {
-          import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-            import('firebase/firestore').then(({ doc, setDoc }) => {
+          import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
               chat.participants.forEach(p => {
                 if (p.id !== state.user?.id) {
                   const uniqueMsgId = `${newMessage.id}-${p.id}`;
@@ -1464,12 +1445,10 @@ export const useAppStore = create<AppState>((set) => ({
                 }
               });
             });
-          });
         } else {
           const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
           if (targetId && !isGroup) {
-           import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-              import('firebase/firestore').then(({ doc, setDoc }) => {
+           import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
                   setDoc(doc(db, 'offline_messages', newMessage.id), {
                       id: newMessage.id,
                       senderId: state.user?.id,
@@ -1484,7 +1463,6 @@ export const useAppStore = create<AppState>((set) => ({
                       to: targetId
                   }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
               });
-           });
           }
         }
       }

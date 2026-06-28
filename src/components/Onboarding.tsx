@@ -3,9 +3,8 @@ import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
 import { Button, Icon, Avatar, Card } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth, db } from '../firebase';
+import { auth, db, doc, getDoc, setDoc } from '../firebase';
 import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const TAKEN_USERNAMES = ['sarah_c', 'admin', 'system', 'root'];
 

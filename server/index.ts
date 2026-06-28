@@ -547,6 +547,118 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     res.json({ status: "ok" });
   });
 
+  // === FIRESTORE PROXY API ENDPOINTS ===
+  // To allow clients behind strict iframe sandboxes/proxies to query/write Firestore reliably
+  app.get("/api/firestore/get", async (req, res) => {
+    const { path: docPath } = req.query;
+    if (!docPath || typeof docPath !== 'string') {
+      return res.status(400).json({ error: "Missing or invalid path parameter" });
+    }
+    if (!db) {
+      return res.status(503).json({ error: "Firestore database not initialized on backend" });
+    }
+    try {
+      const docRef = db.doc(docPath);
+      const docSnap = await docRef.get();
+      if (docSnap.exists) {
+        res.json({ exists: true, data: docSnap.data() });
+      } else {
+        res.json({ exists: false, data: null });
+      }
+    } catch (err: any) {
+      console.error(`Backend getDoc error for ${docPath}:`, err);
+      res.status(500).json({ error: err.message || "Failed to fetch document" });
+    }
+  });
+
+  app.post("/api/firestore/set", async (req, res) => {
+    const { path: docPath, data, merge } = req.body;
+    if (!docPath || typeof docPath !== 'string' || !data) {
+      return res.status(400).json({ error: "Missing path or data in request body" });
+    }
+    if (!db) {
+      return res.status(503).json({ error: "Firestore database not initialized on backend" });
+    }
+    try {
+      const docRef = db.doc(docPath);
+      await docRef.set(data, { merge: merge !== false });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(`Backend setDoc error for ${docPath}:`, err);
+      res.status(500).json({ error: err.message || "Failed to set document" });
+    }
+  });
+
+  app.post("/api/firestore/update", async (req, res) => {
+    const { path: docPath, data } = req.body;
+    if (!docPath || typeof docPath !== 'string' || !data) {
+      return res.status(400).json({ error: "Missing path or data in request body" });
+    }
+    if (!db) {
+      return res.status(503).json({ error: "Firestore database not initialized on backend" });
+    }
+    try {
+      const docRef = db.doc(docPath);
+      await docRef.update(data);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(`Backend updateDoc error for ${docPath}:`, err);
+      res.status(500).json({ error: err.message || "Failed to update document" });
+    }
+  });
+
+  app.post("/api/firestore/delete", async (req, res) => {
+    const { path: docPath } = req.body;
+    if (!docPath || typeof docPath !== 'string') {
+      return res.status(400).json({ error: "Missing path parameter" });
+    }
+    if (!db) {
+      return res.status(503).json({ error: "Firestore database not initialized on backend" });
+    }
+    try {
+      const docRef = db.doc(docPath);
+      await docRef.delete();
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(`Backend deleteDoc error for ${docPath}:`, err);
+      res.status(500).json({ error: err.message || "Failed to delete document" });
+    }
+  });
+
+  app.post("/api/firestore/query", async (req, res) => {
+    const { collection: colName, where: whereFilters, limit: limitVal } = req.body;
+    if (!colName || typeof colName !== 'string') {
+      return res.status(400).json({ error: "Missing collection in request body" });
+    }
+    if (!db) {
+      return res.status(503).json({ error: "Firestore database not initialized on backend" });
+    }
+    try {
+      let queryRef: any = db.collection(colName);
+      if (Array.isArray(whereFilters)) {
+        for (const filter of whereFilters) {
+          const { field, op, value } = filter;
+          let adminOp = op;
+          // Map firestore operators if they differ in admin sdk
+          if (op === '==') adminOp = '==';
+          queryRef = queryRef.where(field, adminOp, value);
+        }
+      }
+      if (typeof limitVal === 'number' && limitVal > 0) {
+        queryRef = queryRef.limit(limitVal);
+      }
+      const snapshot = await queryRef.get();
+      const results: any[] = [];
+      snapshot.forEach((doc: any) => {
+        results.push({ id: doc.id, data: doc.data() });
+      });
+      res.json({ success: true, results });
+    } catch (err: any) {
+      console.error(`Backend query error for collection ${colName}:`, err);
+      res.status(500).json({ error: err.message || "Failed to run query" });
+    }
+  });
+
   app.post("/api/auth/google", async (req, res) => {
     const { token } = req.body || {};
     if (!token) {

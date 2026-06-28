@@ -9,9 +9,8 @@ import { JoinGroupView } from './components/JoinGroupView';
 import { AdminPanel } from './components/AdminPanel';
 import { Icon, cn } from './components/UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, getDocFromServer, collection, query, where, onSnapshot } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, getDocFromServer, collection, query, where, onSnapshot } from 'firebase/firestore';
 
 async function testConnection() {
   try {

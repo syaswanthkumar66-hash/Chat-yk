@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
@@ -742,6 +742,38 @@ export const ChatDetail = () => {
     ? (chat.canStartCall === 'everyone' || isAdmin) 
     : isOnline;
 
+  const typingUsersInChat = useMemo(() => {
+    if (chat) {
+      if (chat.isGroup) {
+        return chat.participants
+          .filter(p => p.id !== user?.id && typingUsers[p.id])
+          .map(p => p.name);
+      } else {
+        const partnerId = activeRecipientId || chat.participants.find(p => p.id !== user?.id)?.id;
+        return partnerId && typingUsers[partnerId] ? [chat.participants.find(p => p.id === partnerId)?.name || 'Typing'] : [];
+      }
+    } else if (recipient) {
+      return typingUsers[recipient.id] ? [recipient.displayName || 'Typing'] : [];
+    }
+    return [];
+  }, [chat, activeRecipientId, recipient, typingUsers, user?.id]);
+
+  const isRecipientTyping = typingUsersInChat.length > 0;
+  const typingText = useMemo(() => {
+    if (typingUsersInChat.length === 0) return '';
+    if (chat?.isGroup) {
+      if (typingUsersInChat.length === 1) {
+        return `${typingUsersInChat[0]} is typing...`;
+      } else if (typingUsersInChat.length === 2) {
+        return `${typingUsersInChat[0]} & ${typingUsersInChat[1]} are typing...`;
+      } else {
+        return 'Several people are typing...';
+      }
+    } else {
+      return 'Typing...';
+    }
+  }, [typingUsersInChat, chat?.isGroup]);
+
   return (
     <div className="flex flex-col h-screen bg-bg-light relative overflow-hidden">
       <AnimatePresence>
@@ -1058,8 +1090,12 @@ export const ChatDetail = () => {
                           <h3 className="font-black text-slate-900 truncate tracking-tight italic uppercase text-xs sm:text-base">{chatName}</h3>
                           {isMuted && <Icon name="notifications_off" className="text-[10px] text-slate-400" />}
                         </div>
-                        <p className={`text-[10px] font-black uppercase tracking-widest ${isOnline ? 'text-primary' : 'text-slate-400'}`}>
-                          {chat?.isGroup ? `${memberCount} members` : (isOnline ? 'Live Now' : (lastSeenVal ? `Last seen: ${formatLastSeen(lastSeenVal)}` : 'Offline'))}
+                        <p className={`text-[10px] font-black uppercase tracking-widest transition-colors duration-200 ${isRecipientTyping ? 'text-green-500 animate-pulse' : (isOnline ? 'text-primary' : 'text-slate-400')}`}>
+                          {isRecipientTyping ? (
+                            <span>{typingText}</span>
+                          ) : (
+                            chat?.isGroup ? `${memberCount} members` : (isOnline ? 'Live Now' : (lastSeenVal ? `Last seen: ${formatLastSeen(lastSeenVal)}` : 'Offline'))
+                          )}
                         </p>
                       </div>
                     </div>
