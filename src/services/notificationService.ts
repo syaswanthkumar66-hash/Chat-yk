@@ -12,14 +12,37 @@ export async function registerPushNotifications(userId: string) {
     // Ensure the service worker is active before subscribing
     await navigator.serviceWorker.ready;
 
-    // 2. Request notification permission
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      console.log("Notification permission not granted:", permission);
+    // 2. Check if a push subscription already exists in this browser
+    let subscription = await registration.pushManager.getSubscription();
+
+    if (subscription) {
+      console.log("Existing VAPID subscription found. Syncing silently with backend...");
+      // Store the subscription object by sending it to the backend
+      await fetch('/api/save-subscription', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId,
+          subscription: JSON.parse(JSON.stringify(subscription))
+        })
+      });
+      console.log("VAPID subscription successfully synced with backend");
       return;
     }
 
-    // 3. Fetch Public VAPID Key from backend
+    // 3. Since no active subscription is found, check if permission is already granted.
+    // If it is NOT granted, then show the permission prompt.
+    if (Notification.permission !== 'granted') {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        console.log("Notification permission not granted:", permission);
+        return;
+      }
+    }
+
+    // 4. Fetch Public VAPID Key from backend
     const response = await fetch('/api/vapid-public-key');
     if (!response.ok) {
       throw new Error(`Failed to fetch public VAPID key: ${response.statusText}`);
@@ -38,15 +61,15 @@ export async function registerPushNotifications(userId: string) {
       outputArray[i] = rawData.charCodeAt(i);
     }
 
-    // 4. Subscribe the user
-    const subscription = await registration.pushManager.subscribe({
+    // 5. Subscribe the user silently (since permission is already granted)
+    subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: outputArray
     });
 
     console.log("Successfully subscribed to Web Push Notifications");
 
-    // 5. Store the subscription object by sending it to the backend
+    // 6. Store the subscription object by sending it to the backend
     const saveResponse = await fetch('/api/save-subscription', {
       method: 'POST',
       headers: {
