@@ -210,6 +210,33 @@ let heartbeatIntervalId: any = null;
 let isWakingUp = false;
 let lastSuccessfulWakeUpTime = 0;
 
+const getLocalStorageItem = (key: string, defaultValue: string = ''): string => {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem(key) || defaultValue;
+  }
+  return defaultValue;
+};
+
+const getLocalStorageJSON = <T>(key: string, defaultValue: T): T => {
+  if (typeof window !== 'undefined') {
+    const item = localStorage.getItem(key);
+    if (item) {
+      try {
+        return JSON.parse(item) as T;
+      } catch (e) {
+        console.error("Error parsing localStorage key", key, e);
+      }
+    }
+  }
+  return defaultValue;
+};
+
+const cachedUser = getLocalStorageJSON<any>('proto_user', null);
+const cachedIsLoggedIn = getLocalStorageItem('proto_isLoggedIn', 'false') === 'true';
+const cachedAuthMethod = getLocalStorageItem('proto_authMethod', '') || null;
+const cachedBlockedUserIds = getLocalStorageJSON<string[]>('proto_blockedUserIds', []);
+const cachedRemovedFriendIds = getLocalStorageJSON<string[]>('proto_removedFriendIds', []);
+
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
   devices: [
@@ -285,13 +312,36 @@ export const useAppStore = create<AppState>((set) => ({
   },
   mode: 'hub',
   setMode: (mode) => set({ mode, activeChatId: null, activeRecipientId: null, activeDeviceId: null, viewingUserId: null, joinGroupId: null, selectedMessageIds: [] }),
-  isLoggedIn: false,
-  user: null,
-  setUser: (user) => set({ user }),
-  updateUser: (data) => set((state) => ({
-    user: state.user ? { ...state.user, ...data } : null
-  })),
-  authMethod: null,
+  isLoggedIn: cachedIsLoggedIn,
+  user: cachedUser,
+  setUser: (user) => {
+    set({ user });
+    if (typeof window !== 'undefined') {
+      if (user) {
+        localStorage.setItem('proto_user', JSON.stringify(user));
+      } else {
+        localStorage.removeItem('proto_user');
+      }
+    }
+  },
+  updateUser: (data) => set((state) => {
+    const updatedUser = state.user ? { ...state.user, ...data } : null;
+    if (typeof window !== 'undefined' && updatedUser) {
+      localStorage.setItem('proto_user', JSON.stringify(updatedUser));
+    }
+    // Also update in Firestore in background if available
+    if (state.user) {
+      import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
+        import('firebase/firestore').then(({ doc, updateDoc }) => {
+          updateDoc(doc(db, 'users', state.user!.id), data).catch(err => {
+            console.error("Failed to sync user profile update to Firestore:", err);
+          });
+        });
+      });
+    }
+    return { user: updatedUser };
+  }),
+  authMethod: cachedAuthMethod as any,
   wssStatus: 'disconnected',
   isWssConnected: false,
   wssMessage: '',
@@ -354,6 +404,12 @@ export const useAppStore = create<AppState>((set) => ({
       users: DEFAULT_PRESETS
     });
     
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('proto_user', JSON.stringify(user));
+      localStorage.setItem('proto_isLoggedIn', 'true');
+      localStorage.setItem('proto_authMethod', authMethod);
+    }
+    
     // Automatically connect on-the-spot connections for both login methods.
     useAppStore.getState().initSocket(user.id);
   },
@@ -368,6 +424,14 @@ export const useAppStore = create<AppState>((set) => ({
         auth.signOut();
       }
     }).catch(err => console.error("Firebase auth sign out failed", err));
+
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('proto_user');
+      localStorage.removeItem('proto_isLoggedIn');
+      localStorage.removeItem('proto_authMethod');
+      localStorage.removeItem('proto_blockedUserIds');
+      localStorage.removeItem('proto_removedFriendIds');
+    }
 
     set({ 
       isLoggedIn: false, 
@@ -898,41 +962,138 @@ export const useAppStore = create<AppState>((set) => ({
   setTypingUser: (userId, isTyping) => set(state => ({ typingUsers: { ...state.typingUsers, [userId]: isTyping } })),
   activeGroupCall: null,
   setActiveGroupCall: (call) => set({ activeGroupCall: call }),
-  blockedUserIds: [],
-  removedFriendIds: [],
-  removeFriend: (userId) => {
-    set((state) => ({
-      removedFriendIds: [...state.removedFriendIds, userId],
-      chats: state.chats.filter(c => {
-        if (!c.isGroup && c.participants.some(p => p.id === userId)) {
-          return false;
-        }
-        return true;
-      })
-    }));
+  blockedUserIds: cachedBlockedUserIds,
+  removedFriendIds: cachedRemovedFriendIds,
+  removeFriend: async (userId) => {
+    const state = useAppStore.getState();
+    const currentUserId = state.user?.id;
+    
+    set((state) => {
+      const nextRemoved = [...state.removedFriendIds, userId];
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('proto_removedFriendIds', JSON.stringify(nextRemoved));
+      }
+      return {
+        removedFriendIds: nextRemoved,
+        chats: state.chats.filter(c => {
+          if (!c.isGroup && c.participants.some(p => p.id === userId)) {
+            return false;
+          }
+          return true;
+        })
+      };
+    });
+
+    if (currentUserId) {
+      try {
+        const { db } = await import('./firebase');
+        const { collection, query, where, getDocs, deleteDoc, doc, updateDoc } = await import('firebase/firestore');
+        
+        // Find and delete the accepted friend requests where this user and userId are participants
+        const requestsRef = collection(db, 'friendRequests');
+        
+        const q1 = query(requestsRef, where('fromUserId', '==', currentUserId), where('toUserId', '==', userId));
+        const s1 = await getDocs(q1);
+        s1.forEach(async (d) => {
+          await deleteDoc(doc(db, 'friendRequests', d.id));
+        });
+
+        const q2 = query(requestsRef, where('fromUserId', '==', userId), where('toUserId', '==', currentUserId));
+        const s2 = await getDocs(q2);
+        s2.forEach(async (d) => {
+          await deleteDoc(doc(db, 'friendRequests', d.id));
+        });
+
+        // Save removedFriendIds to users profile in Firestore
+        const nextRemoved = useAppStore.getState().removedFriendIds;
+        await updateDoc(doc(db, 'users', currentUserId), { removedFriendIds: nextRemoved });
+      } catch (err) {
+        console.error("Error removing friend in Firestore:", err);
+      }
+    }
   },
-  restoreFriend: (userId) => {
-    set((state) => ({
-      removedFriendIds: state.removedFriendIds.filter(id => id !== userId)
-    }));
+  restoreFriend: async (userId) => {
+    const state = useAppStore.getState();
+    const currentUserId = state.user?.id;
+
+    set((state) => {
+      const nextRemoved = state.removedFriendIds.filter(id => id !== userId);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('proto_removedFriendIds', JSON.stringify(nextRemoved));
+      }
+      return {
+        removedFriendIds: nextRemoved
+      };
+    });
+
+    if (currentUserId) {
+      try {
+        const { db } = await import('./firebase');
+        const { doc, updateDoc } = await import('firebase/firestore');
+        const nextRemoved = useAppStore.getState().removedFriendIds;
+        await updateDoc(doc(db, 'users', currentUserId), { removedFriendIds: nextRemoved });
+      } catch (err) {
+        console.error("Error restoring friend in Firestore:", err);
+      }
+    }
   },
-  blockUser: (userId) => {
-    set((state) => ({
-      blockedUserIds: [...state.blockedUserIds, userId],
-      activeChatId: state.chats.find(c => !c.isGroup && c.participants.some(p => p.id === userId))?.id === state.activeChatId ? null : state.activeChatId,
-      activeRecipientId: state.activeRecipientId === userId ? null : state.activeRecipientId,
-      chats: state.chats.filter(c => {
-        if (!c.isGroup && c.participants.some(p => p.id === userId)) {
-          return false;
-        }
-        return true;
-      })
-    }));
+  blockUser: async (userId) => {
+    const state = useAppStore.getState();
+    const currentUserId = state.user?.id;
+
+    set((state) => {
+      const nextBlocked = [...state.blockedUserIds, userId];
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('proto_blockedUserIds', JSON.stringify(nextBlocked));
+      }
+      return {
+        blockedUserIds: nextBlocked,
+        activeChatId: state.chats.find(c => !c.isGroup && c.participants.some(p => p.id === userId))?.id === state.activeChatId ? null : state.activeChatId,
+        activeRecipientId: state.activeRecipientId === userId ? null : state.activeRecipientId,
+        chats: state.chats.filter(c => {
+          if (!c.isGroup && c.participants.some(p => p.id === userId)) {
+            return false;
+          }
+          return true;
+        })
+      };
+    });
+
+    if (currentUserId) {
+      try {
+        const { db } = await import('./firebase');
+        const { doc, updateDoc } = await import('firebase/firestore');
+        const nextBlocked = useAppStore.getState().blockedUserIds;
+        await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked });
+      } catch (err) {
+        console.error("Error blocking user in Firestore:", err);
+      }
+    }
   },
-  unblockUser: (userId) => {
-    set((state) => ({
-      blockedUserIds: state.blockedUserIds.filter(id => id !== userId)
-    }));
+  unblockUser: async (userId) => {
+    const state = useAppStore.getState();
+    const currentUserId = state.user?.id;
+
+    set((state) => {
+      const nextBlocked = state.blockedUserIds.filter(id => id !== userId);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('proto_blockedUserIds', JSON.stringify(nextBlocked));
+      }
+      return {
+        blockedUserIds: nextBlocked
+      };
+    });
+
+    if (currentUserId) {
+      try {
+        const { db } = await import('./firebase');
+        const { doc, updateDoc } = await import('firebase/firestore');
+        const nextBlocked = useAppStore.getState().blockedUserIds;
+        await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked });
+      } catch (err) {
+        console.error("Error unblocking user in Firestore:", err);
+      }
+    }
   },
   updateChatAvatar: (chatId, avatar) => {
     set((state) => ({

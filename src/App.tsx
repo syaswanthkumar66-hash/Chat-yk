@@ -201,8 +201,19 @@ export default function App() {
               avatar: userData.avatar,
               description: userData.description,
               isAdmin: userData.isAdmin,
-              joinDate: userData.joinDate
+              joinDate: userData.joinDate,
+              profileVisibility: userData.profileVisibility,
+              notificationSettings: userData.notificationSettings
             });
+
+            // Sync blocked and removed friends lists from Firestore
+            const blocked = userData.blockedUserIds || [];
+            const removed = userData.removedFriendIds || [];
+            useAppStore.setState({ blockedUserIds: blocked, removedFriendIds: removed });
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('proto_blockedUserIds', JSON.stringify(blocked));
+              localStorage.setItem('proto_removedFriendIds', JSON.stringify(removed));
+            }
           }
 
           // Request notification permissions and register Web Push notifications subscription (VAPID)

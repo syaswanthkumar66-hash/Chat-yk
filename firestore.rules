@@ -40,12 +40,12 @@ service cloud.firestore {
       allow create: if isOwner(userId) &&
         isValidId(userId) &&
         isValidUserConfig(incoming()) &&
-        incoming().keys().size() <= 10;
+        incoming().keys().size() <= 15;
         
       allow update: if isOwner(userId) &&
         isValidId(userId) &&
         isValidUserConfig(incoming()) && (
-           isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'avatar', 'description', 'isOnline', 'lastSeen', 'publicKey'])
+           isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'avatar', 'description', 'isOnline', 'lastSeen', 'publicKey', 'blockedUserIds', 'removedFriendIds', 'profileVisibility', 'notificationSettings'])
         );
     }
 
