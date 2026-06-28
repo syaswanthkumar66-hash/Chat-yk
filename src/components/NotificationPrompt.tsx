@@ -72,7 +72,7 @@ export function NotificationPrompt() {
     localStorage.setItem('notification_prompt_dismissed', 'true');
   };
 
-  const triggerTestNotification = () => {
+  const triggerTestNotification = async () => {
     if (typeof window === 'undefined') return;
     
     // Play sound
@@ -99,6 +99,31 @@ export function NotificationPrompt() {
         } as any);
       } catch (e) {
         console.warn('System Notification failed:', e);
+      }
+    }
+
+    // Trigger a real backend VAPID push notification
+    if (user) {
+      try {
+        console.log("Triggering real server-side VAPID web push notification for user:", user.id);
+        const res = await fetch('/api/send-test-push', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            userId: user.id,
+            title: "🔔 Real VAPID Push Alert",
+            body: "Amazing! This notification is dispatched securely using VAPID keys directly from our backend server!"
+          })
+        });
+        if (!res.ok) {
+          console.warn("Backend failed to deliver VAPID test push:", await res.text());
+        } else {
+          console.log("Real VAPID test push request successfully queued!");
+        }
+      } catch (err) {
+        console.error("Failed to request server VAPID push:", err);
       }
     }
 

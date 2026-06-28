@@ -733,6 +733,31 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
   });
 
+  app.post("/api/send-test-push", async (req, res) => {
+    try {
+      const { userId, title, body } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+
+      const notificationTitle = title || "🔔 Server Push Alert (VAPID)";
+      const notificationBody = body || "This is a real Web Push notification sent securely from the Express backend server using VAPID!";
+
+      console.log(`Sending manual VAPID test push notification to user ${userId}...`);
+      await sendPushNotification(userId, {
+        title: notificationTitle,
+        body: notificationBody,
+        icon: 'https://picsum.photos/seed/default/200',
+        data: { url: '/' }
+      });
+
+      res.json({ success: true, message: "Test push notification dispatched via VAPID" });
+    } catch (err: any) {
+      console.error("Error sending test push notification:", err);
+      res.status(500).json({ error: err.message || "Failed to send test push notification" });
+    }
+  });
+
   app.get("/api/webrtc/config", (req, res) => {
     res.json({
       iceServers: [
