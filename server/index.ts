@@ -63,7 +63,11 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
-      callback(null, origin || "*");
+      // If there is no origin (e.g., server-to-server, mobile, or direct curl), allow it
+      if (!origin) {
+        return callback(null, true);
+      }
+      callback(null, origin);
     },
     methods: ["GET", "POST"],
     credentials: true
