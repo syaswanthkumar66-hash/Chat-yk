@@ -212,6 +212,7 @@ export const ChatDetail = () => {
     typingUsers,
     sendMessage,
     users,
+    onlineUserIds,
     deletedMsgIds,
     globallyDeletedIds,
     deleteMessageLocally,
@@ -460,6 +461,20 @@ export const ChatDetail = () => {
       sendMessage(activeChatId, activeRecipientId, messageText, 'text', undefined, undefined, e2eData);
     }
 
+    if (capturedMedia.length > 0) {
+      const isSelfOnline = navigator.onLine && useAppStore.getState().socket?.connected;
+      const otherParticipantId = chat ? (chat.isGroup ? null : chat.participants[0]?.id) : recipient?.id;
+      const isRecipientOnline = chat 
+        ? (chat.isGroup || users.find(u => u.id === otherParticipantId)?.isOnline || (otherParticipantId && onlineUserIds.includes(otherParticipantId)))
+        : (recipient?.isOnline || (recipient?.id && onlineUserIds.includes(recipient.id)));
+      
+      if (!isSelfOnline || !isRecipientOnline) {
+        setToast("Files and media can only be transferred when both users are online.");
+        setTimeout(() => setToast(null), 3000);
+        return;
+      }
+    }
+
     // Handle media sending via server storage with Compression & E2EE
     for (const media of capturedMedia) {
       try {
@@ -693,14 +708,17 @@ export const ChatDetail = () => {
   const canAdd = chat?.isGroup && (isAdmin || chat?.canAddMembers);
   const chatName = chat ? (chat.isGroup ? chat.name : chat.participants[0].name) : recipient?.displayName;
   const chatAvatar = chat ? (chat.isGroup ? chat.avatar! : chat.participants[0].avatar) : recipient?.avatar;
-  const isOnline = chat ? (!chat.isGroup && users.find(u => u.id === chat.participants[0].id)?.isOnline) : recipient?.isOnline;
+  const otherParticipantId = chat ? (chat.isGroup ? null : chat.participants[0]?.id) : recipient?.id;
+  const isOnline = chat 
+    ? (!chat.isGroup && (users.find(u => u.id === otherParticipantId)?.isOnline || (otherParticipantId && onlineUserIds.includes(otherParticipantId))))
+    : (recipient?.isOnline || (recipient?.id && onlineUserIds.includes(recipient.id)));
   const memberCount = chat?.isGroup ? chat.participants.length : null;
   const canSendMessages = chat?.isGroup 
     ? (chat.canSendMessage === 'everyone' || isAdmin) 
     : true;
   const canStartCalls = chat?.isGroup 
     ? (chat.canStartCall === 'everyone' || isAdmin) 
-    : true;
+    : isOnline;
 
   return (
     <div className="flex flex-col h-screen bg-bg-light relative overflow-hidden">

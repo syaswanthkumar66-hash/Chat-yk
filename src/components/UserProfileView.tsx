@@ -53,6 +53,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
   const [activeModal, setActiveModal] = useState<'block' | 'report' | 'remove' | null>(null);
   const [reportReason, setReportReason] = useState('');
   const [showReportSuccess, setShowReportSuccess] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -105,8 +106,22 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
       setActiveRecipientId(user.id);
       onBack();
     } else if (action === 'voice_call') {
+      const state = useAppStore.getState();
+      const isOnline = state.onlineUserIds.includes(user.id) || user.status === 'online';
+      if (!isOnline) {
+        setToast("Voice calls are only available when the recipient is online.");
+        setTimeout(() => setToast(null), 3000);
+        return;
+      }
       setActiveGroupCall({ type: 'voice', userId: user.id });
     } else if (action === 'video_call') {
+      const state = useAppStore.getState();
+      const isOnline = state.onlineUserIds.includes(user.id) || user.status === 'online';
+      if (!isOnline) {
+        setToast("Video calls are only available when the recipient is online.");
+        setTimeout(() => setToast(null), 3000);
+        return;
+      }
       setActiveGroupCall({ type: 'video', userId: user.id });
     } else if (action === 'remove_friend') {
       setActiveModal('remove');
@@ -594,6 +609,18 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
           >
             <Icon name="check_circle" className="text-green-400" />
             Report submitted successfully
+          </motion.div>
+        )}
+
+        {toast && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[120] bg-slate-800 text-white px-6 py-3 rounded-2xl font-bold shadow-2xl flex items-center gap-3"
+          >
+            <Icon name="check_circle" className="text-green-400" />
+            {toast}
           </motion.div>
         )}
 

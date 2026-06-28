@@ -1253,39 +1253,19 @@ export const useAppStore = create<AppState>((set) => ({
         }
       }
     } else {
-      if (isGroup && chat?.participants) {
-        import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
-          import('firebase/firestore').then(({ doc, setDoc }) => {
-            chat.participants.forEach(p => {
-              if (p.id !== state.user?.id) {
-                const uniqueMsgId = `${newMessage.id}-${p.id}`;
-                setDoc(doc(db, 'offline_messages', uniqueMsgId), {
-                  id: uniqueMsgId,
-                  senderId: state.user?.id,
-                  recipientId: p.id,
-                  groupId: chatId,
-                  text: e2eData ? e2eData.encryptedText : text,
-                  type: type || 'text',
-                  fileUrl,
-                  fileSize,
-                  iv: e2eData?.iv,
-                  encryptedFileKey: e2eData?.encryptedFileKey,
-                  timestamp: newMessage.timestamp,
-                  to: p.id
-                }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${uniqueMsgId}`));
-              }
-            });
-          });
-        });
-      } else {
-        const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
-        if (targetId && !isGroup) {
-         import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
+      // Only store offline messages if they are plain text messages
+      if (type === 'text' && !fileUrl) {
+        if (isGroup && chat?.participants) {
+          import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
             import('firebase/firestore').then(({ doc, setDoc }) => {
-                setDoc(doc(db, 'offline_messages', newMessage.id), {
-                    id: newMessage.id,
+              chat.participants.forEach(p => {
+                if (p.id !== state.user?.id) {
+                  const uniqueMsgId = `${newMessage.id}-${p.id}`;
+                  setDoc(doc(db, 'offline_messages', uniqueMsgId), {
+                    id: uniqueMsgId,
                     senderId: state.user?.id,
-                    recipientId: targetId,
+                    recipientId: p.id,
+                    groupId: chatId,
                     text: e2eData ? e2eData.encryptedText : text,
                     type: type || 'text',
                     fileUrl,
@@ -1293,12 +1273,35 @@ export const useAppStore = create<AppState>((set) => ({
                     iv: e2eData?.iv,
                     encryptedFileKey: e2eData?.encryptedFileKey,
                     timestamp: newMessage.timestamp,
-                    to: targetId
-                }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
+                    to: p.id
+                  }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${uniqueMsgId}`));
+                }
+              });
             });
-         });
+          });
+        } else {
+          const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
+          if (targetId && !isGroup) {
+           import('./firebase').then(({ db, handleFirestoreError, OperationType }) => {
+              import('firebase/firestore').then(({ doc, setDoc }) => {
+                  setDoc(doc(db, 'offline_messages', newMessage.id), {
+                      id: newMessage.id,
+                      senderId: state.user?.id,
+                      recipientId: targetId,
+                      text: e2eData ? e2eData.encryptedText : text,
+                      type: type || 'text',
+                      fileUrl,
+                      fileSize,
+                      iv: e2eData?.iv,
+                      encryptedFileKey: e2eData?.encryptedFileKey,
+                      timestamp: newMessage.timestamp,
+                      to: targetId
+                  }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
+              });
+           });
+          }
+        }
       }
-     }
     }
 
     let updatedChats = [...state.chats];

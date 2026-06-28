@@ -53,7 +53,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization, Accept, Origin');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -62,8 +62,16 @@ app.use((req, res, next) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: (origin, callback) => {
+      // Dynamic origin fallback to support credentials handshakes correctly in all deployment stages
+      if (!origin) {
+        callback(null, "*");
+      } else {
+        callback(null, origin);
+      }
+    },
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -104,19 +112,23 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       // Store in memory cache
       memoryFiles.set(fileId, fileObj);
 
-      // Store in Firestore if available
+      // Store in Firestore if available and file is small enough (Firestore document limit is 1MB)
       if (db) {
-        try {
-          await db.collection('uploaded_files').doc(fileId).set({
-            id: fileId,
-            name: req.file.originalname,
-            mimeType: req.file.mimetype,
-            data: base64Data,
-            size: req.file.size,
-            createdAt: new Date().toISOString()
-          });
-        } catch (e) {
-          console.error("Failed to store file in Firestore:", e);
+        if (req.file.size < 750 * 1024) {
+          try {
+            await db.collection('uploaded_files').doc(fileId).set({
+              id: fileId,
+              name: req.file.originalname,
+              mimeType: req.file.mimetype,
+              data: base64Data,
+              size: req.file.size,
+              createdAt: new Date().toISOString()
+            });
+          } catch (e) {
+            console.error("Failed to store file in Firestore:", e);
+          }
+        } else {
+          console.log(`File size (${(req.file.size / 1024).toFixed(1)} KB) exceeds Firestore 1MB document limit (with base64 overhead). Storing in-memory only.`);
         }
       }
 
@@ -312,12 +324,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         socket.to(`group-${groupId}`).emit("receive_message", messageData);
         console.log(`Group message sent from ${senderId} to group-${groupId}`);
 
-        // For any group member who is offline, save an offline message
+        // For any group member who is offline, save an offline message (only for text messages)
         if (Array.isArray(recipientIds)) {
           for (const targetId of recipientIds) {
             if (targetId === senderId) continue;
             const targetSocketId = users.get(targetId);
             if (!targetSocketId) {
+              if (type !== 'text' || fileUrl) {
+                console.log(`Skipping offline group message storage for ${targetId} as it is a media/file transfer.`);
+                continue;
+              }
               const storeData = { ...messageData, recipientId: targetId, to: targetId };
               const offlineMsgId = `${messageData.id}-${targetId}`;
               if (db) {
@@ -340,18 +356,23 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           io.to(targetSocketId).emit("receive_message", messageData);
           console.log(`Message sent from ${senderId} to ${recipientId}`);
         } else {
-          const storeData = { ...messageData, to: recipientId };
-          if (db) {
-            try {
-              await db.collection('offline_messages').doc(messageData.id).set(storeData);
-              console.log(`User ${recipientId} offline. Message saved to Firebase.`);
-            } catch(e) {
-              console.error("Firebase save error", e);
-            }
+          // Only store text messages offline
+          if (type !== 'text' || fileUrl) {
+            console.log(`Recipient ${recipientId} is offline. Skipping offline message storage for media/file transfer.`);
           } else {
-            // Store temporarily in memory if firebase not configured
-            tempStorage.set(messageData.id, storeData);
-            console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
+            const storeData = { ...messageData, to: recipientId };
+            if (db) {
+              try {
+                await db.collection('offline_messages').doc(messageData.id).set(storeData);
+                console.log(`User ${recipientId} offline. Message saved to Firebase.`);
+              } catch(e) {
+                console.error("Firebase save error", e);
+              }
+            } else {
+              // Store temporarily in memory if firebase not configured
+              tempStorage.set(messageData.id, storeData);
+              console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
+            }
           }
         }
       }
@@ -411,10 +432,21 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     res.json({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:openrelay.metered.ca:80' },
         { 
-          urls: process.env.TURN_SERVER_URL || 'turn:your-turn-server.com', 
-          username: process.env.TURN_SERVER_USERNAME || 'user', 
-          credential: process.env.TURN_SERVER_PASSWORD || 'password' 
+          urls: process.env.TURN_SERVER_URL || 'turn:openrelay.metered.ca:80?transport=udp', 
+          username: process.env.TURN_SERVER_USERNAME || 'openrelayproject', 
+          credential: process.env.TURN_SERVER_PASSWORD || 'openrelayproject' 
+        },
+        { 
+          urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
+          username: 'openrelayproject', 
+          credential: 'openrelayproject' 
+        },
+        { 
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp', 
+          username: 'openrelayproject', 
+          credential: 'openrelayproject' 
         }
       ]
     });
