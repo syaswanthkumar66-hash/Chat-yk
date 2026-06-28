@@ -123,6 +123,39 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 );
               })}
             </div>
+
+            {/* Notification Testing & Diagnostics */}
+            <div className="mt-6 pt-6 border-t border-slate-100 space-y-3">
+              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest italic">
+                Diagnostics & Testing
+              </h4>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    if (typeof window !== 'undefined' && (window as any).triggerTestNotification) {
+                      (window as any).triggerTestNotification();
+                    }
+                  }}
+                  className="w-full p-4 bg-primary text-white font-black text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-primary/10 hover:brightness-105 active:scale-98 transition-all"
+                >
+                  <Icon name="notifications_active" /> Send Test Notification
+                </button>
+                
+                <button
+                  onClick={() => {
+                    if (typeof window !== 'undefined' && (window as any).showNotificationPrompt) {
+                      (window as any).showNotificationPrompt();
+                    }
+                  }}
+                  className="w-full p-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 active:scale-98 transition-all"
+                >
+                  <Icon name="restart_alt" /> Re-trigger Request Banner
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 text-center leading-normal mt-2 px-4">
+                Note: Standard browser notifications require permission to be allowed in your browser address bar settings.
+              </p>
+            </div>
           </div>
         );
       case 'privacy':

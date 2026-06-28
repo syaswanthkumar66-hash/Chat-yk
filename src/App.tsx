@@ -8,6 +8,7 @@ import { FileShareLayout } from './components/FileShareLayout';
 import { JoinGroupView } from './components/JoinGroupView';
 import { AdminPanel } from './components/AdminPanel';
 import { Icon, cn } from './components/UI';
+import { NotificationPrompt } from './components/NotificationPrompt';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, getDocFromServer, collection, query, where, onSnapshot } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -555,6 +556,8 @@ export default function App() {
           ))}
         </AnimatePresence>
       </div>
+
+      <NotificationPrompt />
     </div>
   );
 }
