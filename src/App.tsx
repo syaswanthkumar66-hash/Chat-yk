@@ -9,7 +9,7 @@ import { JoinGroupView } from './components/JoinGroupView';
 import { AdminPanel } from './components/AdminPanel';
 import { Icon, cn } from './components/UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth, db } from './firebase';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, getDocFromServer, collection, query, where, onSnapshot } from 'firebase/firestore';
 
@@ -31,6 +31,8 @@ function useNotifications() {
   const activeChatId = useAppStore((state) => state.activeChatId);
   const chats = useAppStore((state) => state.chats);
   const users = useAppStore((state) => state.users);
+  const mode = useAppStore((state) => state.mode);
+  const addInAppToast = useAppStore((state) => state.addInAppToast);
 
   // Request system notification permissions on mount/login
   useEffect(() => {
@@ -68,12 +70,11 @@ function useNotifications() {
       const pushEnabled = user.notificationSettings?.pushEnabled !== false;
       if (!pushEnabled) return;
 
-      // Ensure Notification is supported and granted
-      if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return;
-
       // Don't show system alerts for the active chat if the tab/document is focused
       const isChatActive = activeChatId === (data.groupId || data.senderId);
-      if (isChatActive && document.hasFocus()) return;
+      const isChatPage = mode === 'social';
+      const shouldAlert = !isChatPage || !isChatActive || !document.hasFocus();
+      if (!shouldAlert) return;
 
       let decryptedText = data.text;
 
@@ -101,9 +102,10 @@ function useNotifications() {
         : users.find(u => u.id === data.senderId);
 
       const senderName = (chatInfo as any)?.name || (chatInfo as any)?.displayName || 'New Message';
+      const avatarUrl = chatInfo?.avatar || `https://picsum.photos/seed/${data.senderId}/200`;
 
       // Play system alert sound if enabled
-      if (user.notificationSettings?.soundEnabled) {
+      if (user.notificationSettings?.soundEnabled !== false) {
         try {
           const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
           audio.volume = 0.5;
@@ -113,16 +115,26 @@ function useNotifications() {
         }
       }
 
-      // Trigger the OS/Browser Notification alert
-      try {
-        new Notification(senderName, {
-          body: decryptedText,
-          icon: chatInfo?.avatar || 'https://picsum.photos/seed/default/200',
-          tag: data.groupId || data.senderId,
-          renotify: true
-        } as any);
-      } catch (e) {
-        console.warn('Notification display failed:', e);
+      // Add custom in-app Toast notification so they ALWAYS get a beautiful floating banner
+      addInAppToast({
+        title: senderName,
+        body: decryptedText,
+        avatar: avatarUrl,
+        chatId: data.groupId || data.senderId
+      });
+
+      // Trigger the OS/Browser Notification alert if permitted
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(senderName, {
+            body: decryptedText,
+            icon: avatarUrl,
+            tag: data.groupId || data.senderId,
+            renotify: true
+          } as any);
+        } catch (e) {
+          console.warn('Notification display failed:', e);
+        }
       }
     };
 
@@ -130,7 +142,7 @@ function useNotifications() {
     return () => {
       socket.off('receive_message', handleReceiveMessage);
     };
-  }, [socket, user, activeChatId, chats, users]);
+  }, [socket, user, activeChatId, chats, users, mode, addInAppToast]);
 
   // Listen to socket 'user_status' to trigger alerts when a friend comes online
   useEffect(() => {
@@ -180,7 +192,22 @@ function useNotifications() {
 }
 
 export default function App() {
-  const { mode, isLoggedIn, joinGroupId, setJoinGroupId, setMode, login, logout, broadcasts, systemSettings, user } = useAppStore();
+  const { 
+    mode, 
+    isLoggedIn, 
+    joinGroupId, 
+    setJoinGroupId, 
+    setMode, 
+    login, 
+    logout, 
+    broadcasts, 
+    systemSettings, 
+    user,
+    inAppToasts,
+    removeInAppToast,
+    setActiveChatId,
+    setActiveRecipientId
+  } = useAppStore();
 
   // Activate the real-time notification integration hook
   useNotifications();
@@ -268,6 +295,7 @@ export default function App() {
                         avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
                         description: senderData.description || '',
                         isOnline: senderData.isOnline || false,
+                        lastSeen: senderData.lastSeen || null,
                         isFriend: true,
                         profileVisibility: 'everyone',
                         hasPrivateProfile: false,
@@ -290,6 +318,9 @@ export default function App() {
               }
             }
             useAppStore.getState().setFriendRequests(fullRequests);
+          }, (err) => {
+            console.error("Error in friendRequests onSnapshot:", err);
+            handleFirestoreError(err, OperationType.LIST, 'friendRequests');
           });
 
           // Fetch sent requests too
@@ -311,6 +342,7 @@ export default function App() {
                         avatar: recipientData.avatar || `https://picsum.photos/seed/${data.toUserId}/200`,
                         description: recipientData.description || '',
                         isOnline: recipientData.isOnline || false,
+                        lastSeen: recipientData.lastSeen || null,
                         isFriend: true,
                         profileVisibility: 'everyone',
                         hasPrivateProfile: false,
@@ -327,6 +359,9 @@ export default function App() {
                }
              }
              useAppStore.setState({ sentFriendRequests: sentIds });
+          }, (err) => {
+            console.error("Error in sent friendRequests onSnapshot:", err);
+            handleFirestoreError(err, OperationType.LIST, 'friendRequests');
           });
 
           unsubscribeFirestore = () => {
@@ -470,6 +505,55 @@ export default function App() {
             <AdminPanel onClose={() => setMode('hub')} />
           </motion.div>
         )}
+        </AnimatePresence>
+      </div>
+
+      {/* Floating In-App Notifications Container */}
+      <div className="fixed top-4 right-4 z-[400] max-w-sm w-full pointer-events-none flex flex-col gap-3">
+        <AnimatePresence>
+          {inAppToasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              layout
+              initial={{ opacity: 0, y: -20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.2 } }}
+              className="w-full bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-primary/10 flex gap-3 pointer-events-auto cursor-pointer hover:bg-slate-50 transition-all active:scale-98"
+              onClick={() => {
+                // Remove the toast
+                removeInAppToast(toast.id);
+                // Bring them to the social mode and open the chat!
+                setMode('social');
+                setActiveChatId(toast.chatId);
+                setActiveRecipientId(null);
+              }}
+              onAnimationComplete={() => {
+                // Automatically dismiss toast after 5 seconds
+                setTimeout(() => {
+                  removeInAppToast(toast.id);
+                }, 5000);
+              }}
+            >
+              <div className="size-11 rounded-xl overflow-hidden border border-slate-100 flex-shrink-0">
+                <img src={toast.avatar} alt={toast.title} className="size-full object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-black text-slate-800 text-xs uppercase tracking-tight truncate">{toast.title}</h4>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeInAppToast(toast.id);
+                    }}
+                    className="size-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"
+                  >
+                    <Icon name="close" className="text-xs" />
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{toast.body}</p>
+              </div>
+            </motion.div>
+          ))}
         </AnimatePresence>
       </div>
     </div>

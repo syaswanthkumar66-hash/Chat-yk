@@ -15,6 +15,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
 
+function formatLastSeen(lastSeen?: string | null): string {
+  if (!lastSeen) return 'Offline';
+  try {
+    const date = new Date(lastSeen);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return 'Offline';
+  }
+}
+
 export const SocialLayout = () => {
   const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'calls' | 'profile'>('chats');
   const [chatFilter, setChatFilter] = useState<'all' | 'individuals' | 'groups'>('all');
@@ -625,7 +643,12 @@ export const SocialLayout = () => {
                           <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
                             <div>
                               <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
-                              <p className="text-xs text-neutral-muted">{loopUser.username}</p>
+                              <p className="text-xs text-neutral-muted flex items-center gap-1.5 flex-wrap">
+                                <span>@{loopUser.username}</span>
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  • {loopUser.isOnline ? 'Online' : (loopUser.lastSeen ? `last seen ${formatLastSeen(loopUser.lastSeen)}` : 'Offline')}
+                                </span>
+                              </p>
                             </div>
                             <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button 
@@ -683,7 +706,12 @@ export const SocialLayout = () => {
                           <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
                             <div>
                               <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
-                              <p className="text-xs text-neutral-muted">{loopUser.username}</p>
+                              <p className="text-xs text-neutral-muted flex items-center gap-1.5 flex-wrap">
+                                <span>@{loopUser.username}</span>
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  • {loopUser.isOnline ? 'Online' : (loopUser.lastSeen ? `last seen ${formatLastSeen(loopUser.lastSeen)}` : 'Offline')}
+                                </span>
+                              </p>
                             </div>
                             <button 
                               onClick={(e) => {

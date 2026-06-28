@@ -25,6 +25,24 @@ interface UserData {
 
 const MOCK_PROFILES: Record<string, UserData> = {};
 
+function formatLastSeen(lastSeen?: string | null): string {
+  if (!lastSeen) return 'Offline';
+  try {
+    const date = new Date(lastSeen);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return 'Offline';
+  }
+}
+
 export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
   const { 
     setActiveChatId, 
@@ -56,9 +74,40 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
+    let isActive = true;
     setLoading(true);
-    setTimeout(() => {
-      const storeUser = users.find(u => u.id === userId);
+    
+    const loadUserProfile = async () => {
+      let storeUser = users.find(u => u.id === userId);
+      
+      // Try to fetch the latest state from Firestore
+      try {
+        const { db } = await import('../firebase');
+        const { doc, getDoc } = await import('firebase/firestore');
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (userDoc.exists() && isActive) {
+          const userData = userDoc.data();
+          // Update store user state so other components also get the fresh details!
+          useAppStore.getState().addUser({
+            id: userId,
+            username: userData.username,
+            displayName: userData.displayName || userData.username,
+            avatar: userData.avatar || `https://picsum.photos/seed/${userId}/200`,
+            description: userData.description || '',
+            isAdmin: userData.isAdmin || false,
+            joinDate: userData.joinDate || new Date().toISOString(),
+            isOnline: userData.isOnline || false,
+            lastSeen: userData.lastSeen || null
+          });
+          // Retrieve updated store user
+          storeUser = useAppStore.getState().users.find(u => u.id === userId);
+        }
+      } catch (err) {
+        console.error("Error fetching fresh user profile from Firestore:", err);
+      }
+
+      if (!isActive) return;
+
       if (storeUser) {
         let relationship: Relationship = 'not_friend';
         if (blockedUserIds.includes(userId)) {
@@ -72,6 +121,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
         } else {
           relationship = 'friend';
         }
+        
         setUser({ 
           id: storeUser.id,
           name: storeUser.displayName,
@@ -80,14 +130,20 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
           bio: storeUser.description || '',
           status: storeUser.isOnline ? 'online' : (storeUser.isInactive ? 'away' : 'offline'),
           relationship,
-          joinedDate: new Date(storeUser.joinDate).toLocaleDateString(),
+          joinedDate: storeUser.joinDate ? new Date(storeUser.joinDate).toLocaleDateString() : 'Recently',
           lastSeen: storeUser.lastSeen
         });
       } else {
         setUser(null);
       }
       setLoading(false);
-    }, 600);
+    };
+
+    loadUserProfile();
+
+    return () => {
+      isActive = false;
+    };
   }, [userId, blockedUserIds, removedFriendIds, friendRequests, sentFriendRequests, users]);
 
   const handleCopyUsername = () => {
@@ -293,7 +349,18 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
             </div>
 
             <div className="text-center space-y-2">
-              <h2 className="text-2xl font-black text-slate-800 tracking-tight">{user.name}</h2>
+              <div className="flex flex-col items-center gap-1">
+                <h2 className="text-2xl font-black text-slate-800 tracking-tight">{user.name}</h2>
+                <div className="flex items-center gap-1.5 justify-center">
+                  <span className={cn(
+                    "inline-block size-2.5 rounded-full border border-white shadow-sm animate-pulse",
+                    user.status === 'online' ? 'bg-green-500' : 'bg-slate-400'
+                  )} />
+                  <span className="font-bold text-neutral-muted uppercase tracking-widest text-[9px]">
+                    {user.status === 'online' ? 'Online' : (user.lastSeen ? `last seen ${formatLastSeen(user.lastSeen)}` : 'Offline')}
+                  </span>
+                </div>
+              </div>
               <div className="flex flex-col items-center gap-2">
                 <button 
                   onClick={handleCopyUsername}
@@ -433,7 +500,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
                 <div className="flex items-center gap-3 text-right">
                   <div>
                     <p className="text-[10px] font-bold text-neutral-muted uppercase tracking-widest">Last Seen</p>
-                    <p className="text-sm font-bold text-slate-700">{user.lastSeen}</p>
+                    <p className="text-sm font-bold text-slate-700">{formatLastSeen(user.lastSeen)}</p>
                   </div>
                   <div className="size-10 rounded-xl bg-primary/5 flex items-center justify-center text-primary">
                     <Icon name="schedule" className="text-sm" />

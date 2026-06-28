@@ -129,6 +129,8 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
                description: userData.description || '',
                isAdmin: userData.isAdmin || false,
                joinDate: userData.joinDate || new Date().toISOString(),
+               isOnline: userData.isOnline || false,
+               lastSeen: userData.lastSeen || null,
              });
              
              if (!useAppStore.getState().removedFriendIds.includes(doc.id)) {

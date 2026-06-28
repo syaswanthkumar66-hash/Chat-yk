@@ -198,6 +198,9 @@ interface AppState {
   tempMessages: Message[];
   addTempMessage: (msg: Message) => void;
   clearTempMessages: () => void;
+  inAppToasts: { id: string; title: string; body: string; avatar: string; chatId: string }[];
+  addInAppToast: (toast: { title: string; body: string; avatar: string; chatId: string }) => void;
+  removeInAppToast: (id: string) => void;
   devices: Device[];
   transfers: Transfer[];
   acceptTransfer: (transferId: string) => void;
@@ -236,6 +239,10 @@ const cachedIsLoggedIn = getLocalStorageItem('proto_isLoggedIn', 'false') === 't
 const cachedAuthMethod = getLocalStorageItem('proto_authMethod', '') || null;
 const cachedBlockedUserIds = getLocalStorageJSON<string[]>('proto_blockedUserIds', []);
 const cachedRemovedFriendIds = getLocalStorageJSON<string[]>('proto_removedFriendIds', []);
+const cachedUsers = getLocalStorageJSON<any[]>('proto_users', []);
+const cachedChats = getLocalStorageJSON<any[]>('proto_chats', []);
+const cachedFriendRequests = getLocalStorageJSON<any[]>('proto_friendRequests', []);
+const cachedSentFriendRequests = getLocalStorageJSON<string[]>('proto_sentFriendRequests', []);
 
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
@@ -431,6 +438,10 @@ export const useAppStore = create<AppState>((set) => ({
       localStorage.removeItem('proto_authMethod');
       localStorage.removeItem('proto_blockedUserIds');
       localStorage.removeItem('proto_removedFriendIds');
+      localStorage.removeItem('proto_users');
+      localStorage.removeItem('proto_chats');
+      localStorage.removeItem('proto_friendRequests');
+      localStorage.removeItem('proto_sentFriendRequests');
     }
 
     set({ 
@@ -452,6 +463,16 @@ export const useAppStore = create<AppState>((set) => ({
   tempMessages: [],
   addTempMessage: (msg) => set((state) => ({ tempMessages: [...state.tempMessages, msg] })),
   clearTempMessages: () => set({ tempMessages: [] }),
+  inAppToasts: [],
+  addInAppToast: (toast) => set((state) => {
+    const id = `toast-${Math.random().toString(36).substr(2, 9)}`;
+    return {
+      inAppToasts: [...state.inAppToasts, { ...toast, id }]
+    };
+  }),
+  removeInAppToast: (id) => set((state) => ({
+    inAppToasts: state.inAppToasts.filter(t => t.id !== id)
+  })),
   initSocket: (userId) => {
     const state = useAppStore.getState();
     if (state.socket) {
@@ -699,13 +720,17 @@ export const useAppStore = create<AppState>((set) => ({
     });
 
     socket.on('user_status', (data: { userId: string, isOnline: boolean }) => {
+      const nowStr = new Date().toISOString();
       set((state) => {
         const nextOnline = data.isOnline
           ? [...new Set([...state.onlineUserIds, data.userId])]
           : state.onlineUserIds.filter(id => id !== data.userId);
         return { onlineUserIds: nextOnline };
       });
-      useAppStore.getState().updateUserByAdmin(data.userId, { isOnline: data.isOnline });
+      useAppStore.getState().updateUserByAdmin(data.userId, { 
+        isOnline: data.isOnline,
+        lastSeen: data.isOnline ? undefined : nowStr
+      });
     });
 
     socket.on('online_users', (onlineUserIds: string[]) => {
@@ -871,7 +896,7 @@ export const useAppStore = create<AppState>((set) => ({
       ? state.selectedMessageIds.filter(mid => mid !== id)
       : [...state.selectedMessageIds, id]
   })),
-  friendRequests: [],
+  friendRequests: cachedFriendRequests,
   setFriendRequests: (requests) => set({ friendRequests: requests }),
   acceptFriendRequest: async (requestId) => {
     set((state) => {
@@ -904,7 +929,7 @@ export const useAppStore = create<AppState>((set) => ({
       console.error("Error rejecting request in db:", err);
     }
   },
-  sentFriendRequests: [],
+  sentFriendRequests: cachedSentFriendRequests,
   sendFriendRequest: async (userId) => {
     const state = useAppStore.getState();
     if (state.sentFriendRequests.includes(userId)) return;
@@ -956,7 +981,7 @@ export const useAppStore = create<AppState>((set) => ({
   },
   groupJoinRequests: [],
   setGroupJoinRequests: (requests) => set({ groupJoinRequests: requests }),
-  chats: [],
+  chats: cachedChats,
   setChats: (chats) => set({ chats }),
   typingUsers: {},
   setTypingUser: (userId, isTyping) => set(state => ({ typingUsers: { ...state.typingUsers, [userId]: isTyping } })),
@@ -1284,7 +1309,7 @@ export const useAppStore = create<AppState>((set) => ({
   updateSystemSettings: (settings) => set((state) => ({
     systemSettings: { ...state.systemSettings, ...settings }
   })),
-  users: [],
+  users: cachedUsers,
   banUser: (userId) => set((state) => ({
     users: state.users.map(u => u.id === userId ? { ...u, isBanned: !u.isBanned } : u)
   })),
@@ -1511,3 +1536,16 @@ export const useAppStore = create<AppState>((set) => ({
     return { chats: updatedChats };
   }),
 }));
+
+if (typeof window !== 'undefined') {
+  useAppStore.subscribe((state) => {
+    try {
+      localStorage.setItem('proto_users', JSON.stringify(state.users));
+      localStorage.setItem('proto_chats', JSON.stringify(state.chats));
+      localStorage.setItem('proto_friendRequests', JSON.stringify(state.friendRequests));
+      localStorage.setItem('proto_sentFriendRequests', JSON.stringify(state.sentFriendRequests));
+    } catch (e) {
+      console.error("Error subscribing to persist state:", e);
+    }
+  });
+}

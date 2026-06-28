@@ -7,6 +7,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GroupInfo } from './GroupInfo';
 import { MediaGallery } from './MediaGallery';
 
+function formatLastSeen(lastSeen?: string | null): string {
+  if (!lastSeen) return 'Offline';
+  try {
+    const date = new Date(lastSeen);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return 'Offline';
+  }
+}
+
 const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; onPreview?: (data: { type: 'image' | 'file'; url: string; name: string; size?: string }) => void }) => {
   const [url, setUrl] = useState(msg.fileUrl || msg.url);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -712,6 +730,10 @@ export const ChatDetail = () => {
   const isOnline = chat 
     ? (!chat.isGroup && (users.find(u => u.id === otherParticipantId)?.isOnline || (otherParticipantId && onlineUserIds.includes(otherParticipantId))))
     : (recipient?.isOnline || (recipient?.id && onlineUserIds.includes(recipient.id)));
+  const otherParticipant = chat
+    ? (!chat.isGroup ? users.find(u => u.id === otherParticipantId) : null)
+    : recipient;
+  const lastSeenVal = otherParticipant?.lastSeen;
   const memberCount = chat?.isGroup ? chat.participants.length : null;
   const canSendMessages = chat?.isGroup 
     ? (chat.canSendMessage === 'everyone' || isAdmin) 
@@ -1037,7 +1059,7 @@ export const ChatDetail = () => {
                           {isMuted && <Icon name="notifications_off" className="text-[10px] text-slate-400" />}
                         </div>
                         <p className={`text-[10px] font-black uppercase tracking-widest ${isOnline ? 'text-primary' : 'text-slate-400'}`}>
-                          {chat?.isGroup ? `${memberCount} members` : (isOnline ? 'Live Now' : 'Offline')}
+                          {chat?.isGroup ? `${memberCount} members` : (isOnline ? 'Live Now' : (lastSeenVal ? `Last seen: ${formatLastSeen(lastSeenVal)}` : 'Offline'))}
                         </p>
                       </div>
                     </div>
