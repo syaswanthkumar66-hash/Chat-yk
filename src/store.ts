@@ -560,6 +560,7 @@ export const useAppStore = create<AppState>((set) => ({
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
+      transports: ["polling", "websocket"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
