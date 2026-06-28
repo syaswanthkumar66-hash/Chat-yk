@@ -1,11 +1,16 @@
+import dotenv from "dotenv";
 import express from "express";
 import path from "path";
+
+// Load environment variables from .env file
+dotenv.config();
 
 import { createServer } from "http";
 import { Server } from "socket.io";
 import multer from "multer";
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 
 
@@ -540,6 +545,51 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  app.post("/api/auth/google", async (req, res) => {
+    const { token } = req.body || {};
+    if (!token) {
+      return res.status(400).json({ error: "No token provided" });
+    }
+
+    try {
+      let uid = null;
+      let email = null;
+      let name = null;
+      let picture = null;
+      let verified = false;
+
+      // If Firebase Admin is initialized, verify the ID token
+      if (process.env.FIREBASE_CONFIG) {
+        try {
+          const decodedToken = await getAuth().verifyIdToken(token);
+          uid = decodedToken.uid;
+          email = decodedToken.email || null;
+          name = decodedToken.name || null;
+          picture = decodedToken.picture || null;
+          verified = true;
+          console.log(`Successfully verified Google Auth ID token in Express for uid: ${uid}`);
+        } catch (authErr) {
+          console.error("Firebase ID token verification failed in Express:", authErr);
+          return res.status(401).json({ error: "Invalid or expired token" });
+        }
+      }
+
+      res.json({
+        success: true,
+        message: verified 
+          ? "Google Auth token successfully verified by Express server."
+          : "Google Auth token received by Express server (local mock verification).",
+        uid,
+        email,
+        name,
+        picture
+      });
+    } catch (error: any) {
+      console.error("Error in /api/auth/google handler:", error);
+      res.status(500).json({ error: error.message || "Failed to process auth token" });
+    }
   });
 
   app.get("/api/vapid-public-key", (req, res) => {
