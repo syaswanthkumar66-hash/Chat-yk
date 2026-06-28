@@ -485,33 +485,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   });
 
   async function startServer() {
-    // Vite middleware for development
-    if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
-      try {
-        const { createServer: createViteServer } = await import("vite");
-        const vite = await createViteServer({
-          server: { middlewareMode: true },
-          appType: "spa",
-        });
-        app.use(vite.middlewares);
-      } catch (e) {
-        console.warn("Vite could not be loaded dynamically for development:", e);
-      }
-    } else if (!process.env.VERCEL) {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (!process.env.VERCEL) {
+      const port = Number(process.env.PORT || 3000);
+      httpServer.listen(port, "0.0.0.0", () => {
+        console.log(`Pure backend server running on port ${port}`);
+      });
+    }
   }
-
-  if (!process.env.VERCEL) {
-    const port = Number(process.env.PORT || 3000);
-    httpServer.listen(port, "0.0.0.0", () => {
-      console.log(`Server running on port ${port}`);
-    });
-  }
-}
 
 startServer();
 
