@@ -486,13 +486,23 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
   async function startServer() {
     if (!process.env.VERCEL) {
-      const port = Number(process.env.PORT || 3000);
+      const isProd = process.env.NODE_ENV === "production";
+      const port = isProd ? Number(process.env.PORT || 3000) : 3001;
+
+      if (isProd) {
+        const distPath = path.join(process.cwd(), 'dist');
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(distPath, 'index.html'));
+        });
+      }
+
       httpServer.listen(port, "0.0.0.0", () => {
-        console.log(`Pure backend server running on port ${port}`);
+        console.log(`Backend server running on port ${port} (production: ${isProd})`);
       });
     }
   }
 
-startServer();
+  startServer();
 
 export default app;
