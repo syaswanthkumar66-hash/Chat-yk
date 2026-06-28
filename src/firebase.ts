@@ -117,22 +117,8 @@ function convertTimestamps(val: any): any {
   return val;
 }
 
-// Global flag helper
-function isProxyEnabled(): boolean {
-  return typeof window !== 'undefined' && (window as any).__useFirestoreProxy === true;
-}
-
-function enableProxy() {
-  if (typeof window !== 'undefined') {
-    (window as any).__useFirestoreProxy = true;
-  }
-}
-
 // Wrapped execution functions
 export async function getDoc(docRef: any) {
-  if (isProxyEnabled()) {
-    return fetchDocViaProxy(docRef);
-  }
   try {
     return await firestoreGetDoc(docRef);
   } catch (err: any) {
@@ -140,15 +126,21 @@ export async function getDoc(docRef: any) {
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {
-      enableProxy();
-      return fetchDocViaProxy(docRef);
+      const proxySnap = await fetchDocViaProxy(docRef);
+      if (proxySnap.exists()) {
+        // Backport to local cache so next time standard client can read it locally
+        firestoreSetDoc(docRef, proxySnap.data(), { merge: true }).catch(e => {
+          console.warn("Failed to backport proxy getDoc to local cache:", e);
+        });
+      }
+      return proxySnap;
     }
     throw err;
   }
 }
 
 async function fetchDocViaProxy(docRef: any) {
-  console.warn("Client-side Firestore offline, proxying getDoc:", docRef.path);
+  console.warn("Client-side Firestore offline/unavailable, proxying getDoc:", docRef.path);
   const response = await fetch(`/api/firestore/get?path=${encodeURIComponent(docRef.path)}`);
   if (!response.ok) throw new Error(await response.text());
   const result = await response.json();
@@ -161,9 +153,6 @@ async function fetchDocViaProxy(docRef: any) {
 }
 
 export async function getDocFromServer(docRef: any) {
-  if (isProxyEnabled()) {
-    return fetchDocViaProxy(docRef);
-  }
   try {
     return await firestoreGetDocFromServer(docRef);
   } catch (err: any) {
@@ -171,33 +160,36 @@ export async function getDocFromServer(docRef: any) {
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {
-      enableProxy();
-      return fetchDocViaProxy(docRef);
+      const proxySnap = await fetchDocViaProxy(docRef);
+      if (proxySnap.exists()) {
+        firestoreSetDoc(docRef, proxySnap.data(), { merge: true }).catch(e => {
+          console.warn("Failed to backport proxy getDocFromServer to local cache:", e);
+        });
+      }
+      return proxySnap;
     }
     throw err;
   }
 }
 
 export async function setDoc(docRef: any, data: any, options?: any) {
-  if (isProxyEnabled()) {
-    return setDocViaProxy(docRef, data, options);
-  }
+  // Always write to local Firestore client (so local cache has it immediately)
   try {
-    return await firestoreSetDoc(docRef, data, options);
+    await firestoreSetDoc(docRef, data, options);
   } catch (err: any) {
-    const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
-                           err.message?.toLowerCase().includes('offline') || 
-                           err.message?.toLowerCase().includes('could not reach');
-    if (isNetworkError) {
-      enableProxy();
-      return setDocViaProxy(docRef, data, options);
-    }
-    throw err;
+    console.warn("Local setDoc write failed/delayed:", err);
+  }
+
+  // Also write to server proxy to guarantee backend synchronization immediately
+  try {
+    await setDocViaProxy(docRef, data, options);
+  } catch (err: any) {
+    console.error("setDocViaProxy failed:", err);
   }
 }
 
 async function setDocViaProxy(docRef: any, data: any, options?: any) {
-  console.warn("Client-side Firestore offline, proxying setDoc:", docRef.path);
+  console.warn("Client-side Firestore offline/unavailable, proxying setDoc:", docRef.path);
   const response = await fetch(`/api/firestore/set`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -211,25 +203,21 @@ async function setDocViaProxy(docRef: any, data: any, options?: any) {
 }
 
 export async function updateDoc(docRef: any, data: any) {
-  if (isProxyEnabled()) {
-    return updateDocViaProxy(docRef, data);
-  }
   try {
-    return await firestoreUpdateDoc(docRef, data);
+    await firestoreUpdateDoc(docRef, data);
   } catch (err: any) {
-    const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
-                           err.message?.toLowerCase().includes('offline') || 
-                           err.message?.toLowerCase().includes('could not reach');
-    if (isNetworkError) {
-      enableProxy();
-      return updateDocViaProxy(docRef, data);
-    }
-    throw err;
+    console.warn("Local updateDoc write failed/delayed:", err);
+  }
+
+  try {
+    await updateDocViaProxy(docRef, data);
+  } catch (err: any) {
+    console.error("updateDocViaProxy failed:", err);
   }
 }
 
 async function updateDocViaProxy(docRef: any, data: any) {
-  console.warn("Client-side Firestore offline, proxying updateDoc:", docRef.path);
+  console.warn("Client-side Firestore offline/unavailable, proxying updateDoc:", docRef.path);
   const response = await fetch(`/api/firestore/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -242,25 +230,21 @@ async function updateDocViaProxy(docRef: any, data: any) {
 }
 
 export async function deleteDoc(docRef: any) {
-  if (isProxyEnabled()) {
-    return deleteDocViaProxy(docRef);
-  }
   try {
-    return await firestoreDeleteDoc(docRef);
+    await firestoreDeleteDoc(docRef);
   } catch (err: any) {
-    const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
-                           err.message?.toLowerCase().includes('offline') || 
-                           err.message?.toLowerCase().includes('could not reach');
-    if (isNetworkError) {
-      enableProxy();
-      return deleteDocViaProxy(docRef);
-    }
-    throw err;
+    console.warn("Local deleteDoc write failed/delayed:", err);
+  }
+
+  try {
+    await deleteDocViaProxy(docRef);
+  } catch (err: any) {
+    console.error("deleteDocViaProxy failed:", err);
   }
 }
 
 async function deleteDocViaProxy(docRef: any) {
-  console.warn("Client-side Firestore offline, proxying deleteDoc:", docRef.path);
+  console.warn("Client-side Firestore offline/unavailable, proxying deleteDoc:", docRef.path);
   const response = await fetch(`/api/firestore/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -272,9 +256,6 @@ async function deleteDocViaProxy(docRef: any) {
 }
 
 export async function addDoc(collectionRef: any, data: any) {
-  if (isProxyEnabled()) {
-    return addDocViaProxy(collectionRef, data);
-  }
   try {
     return await firestoreAddDoc(collectionRef, data);
   } catch (err: any) {
@@ -282,8 +263,12 @@ export async function addDoc(collectionRef: any, data: any) {
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {
-      enableProxy();
-      return addDocViaProxy(collectionRef, data);
+      const res = await addDocViaProxy(collectionRef, data);
+      const docRef = firestoreDoc(db, collectionRef.path, res.id);
+      firestoreSetDoc(docRef, data, { merge: true }).catch(e => {
+        console.warn("Failed to backport proxy addDoc to local cache:", e);
+      });
+      return res;
     }
     throw err;
   }
@@ -292,7 +277,7 @@ export async function addDoc(collectionRef: any, data: any) {
 async function addDocViaProxy(collectionRef: any, data: any) {
   const randomId = `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const docPath = `${collectionRef.path}/${randomId}`;
-  console.warn("Client-side Firestore offline, proxying addDoc via setDoc:", docPath);
+  console.warn("Client-side Firestore offline/unavailable, proxying addDoc via setDoc:", docPath);
   const response = await fetch(`/api/firestore/set`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -306,9 +291,6 @@ async function addDocViaProxy(collectionRef: any, data: any) {
 }
 
 export async function getDocs(queryObj: any) {
-  if (isProxyEnabled()) {
-    return fetchDocsViaProxy(queryObj);
-  }
   try {
     return await firestoreGetDocs(queryObj);
   } catch (err: any) {
@@ -316,8 +298,18 @@ export async function getDocs(queryObj: any) {
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {
-      enableProxy();
-      return fetchDocsViaProxy(queryObj);
+      const proxySnap = await fetchDocsViaProxy(queryObj);
+      // Backport results to local cache
+      const pathSegs = queryObj.path || queryObj._query?.path?.toString() || '';
+      proxySnap.docs.forEach((docSnap: any) => {
+        if (pathSegs) {
+          const docRef = firestoreDoc(db, pathSegs, docSnap.id);
+          firestoreSetDoc(docRef, docSnap.data(), { merge: true }).catch(e => {
+            console.warn("Failed to backport proxy getDocs to local cache:", e);
+          });
+        }
+      });
+      return proxySnap;
     }
     throw err;
   }
@@ -380,34 +372,45 @@ async function fetchDocsViaProxy(queryObj: any) {
 }
 
 export function onSnapshot(queryRef: any, onNext: (snapshot: any) => void, onError?: (error: any) => void) {
-  if (isProxyEnabled()) {
-    return setupPollingOnSnapshot(queryRef, onNext, onError);
-  }
-  
+  let activeUnsubscribe: (() => void) | null = null;
+  let isUnsubscribed = false;
+
+  const handleUnsubscribe = () => {
+    isUnsubscribed = true;
+    if (activeUnsubscribe) {
+      activeUnsubscribe();
+    }
+  };
+
   try {
-    return firestoreOnSnapshot(queryRef, onNext, (err) => {
+    const origUnsubscribe = firestoreOnSnapshot(queryRef, (snap) => {
+      if (!isUnsubscribed) onNext(snap);
+    }, (err) => {
       const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
                              err.message?.toLowerCase().includes('offline') || 
                              err.message?.toLowerCase().includes('could not reach');
-      if (isNetworkError) {
-        enableProxy();
+      if (isNetworkError && !isUnsubscribed) {
         console.warn("Client-side onSnapshot connection failed, dynamically switching to polling proxy listener...");
-        setupPollingOnSnapshot(queryRef, onNext, onError);
+        if (activeUnsubscribe) activeUnsubscribe();
+        activeUnsubscribe = setupPollingOnSnapshot(queryRef, onNext, onError);
       } else {
         if (onError) onError(err);
       }
     });
+
+    activeUnsubscribe = origUnsubscribe;
   } catch (err: any) {
     const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
-    if (isNetworkError) {
-      enableProxy();
-      return setupPollingOnSnapshot(queryRef, onNext, onError);
+    if (isNetworkError && !isUnsubscribed) {
+      activeUnsubscribe = setupPollingOnSnapshot(queryRef, onNext, onError);
+    } else {
+      if (onError) onError(err);
     }
-    if (onError) onError(err);
-    return () => {};
   }
+
+  return handleUnsubscribe;
 }
 
 function setupPollingOnSnapshot(queryRef: any, onNext: (snapshot: any) => void, onError?: (error: any) => void) {
