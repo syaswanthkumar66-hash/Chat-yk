@@ -49,6 +49,10 @@ service cloud.firestore {
         );
     }
 
+    match /pushSubscriptions/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
     match /offline_messages/{messageId} {
       allow create: if isVerified() && incoming().senderId == request.auth.uid;
       allow read: if isVerified() && resource.data.to == request.auth.uid;

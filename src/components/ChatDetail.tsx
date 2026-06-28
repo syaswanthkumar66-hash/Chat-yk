@@ -962,7 +962,7 @@ export const ChatDetail = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="flex flex-col flex-1 h-full relative">
-          <header className="px-6 py-4 bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-40">
+          <header className="px-3 py-2 sm:px-6 sm:py-4 bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-40">
             <AnimatePresence mode="wait">
               {isSelectionMode ? (
                 <motion.div 
@@ -1010,9 +1010,9 @@ export const ChatDetail = () => {
                   </div>
                 </motion.div>
               ) : (
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-4">
-                    <button onClick={handleBack} className="size-10 rounded-xl bg-white flex items-center justify-center text-slate-600 md:hidden shadow-sm border border-white">
+                <div className="flex items-center justify-between w-full gap-2">
+                  <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+                    <button onClick={handleBack} className="size-9 sm:size-10 rounded-xl bg-white flex-shrink-0 flex items-center justify-center text-slate-600 md:hidden shadow-sm border border-white">
                       <Icon name="chevron_left" />
                     </button>
                     <div 
@@ -1024,16 +1024,16 @@ export const ChatDetail = () => {
                           if (userId) useAppStore.getState().setViewingUserId(userId);
                         }
                       }}
-                      className="flex items-center gap-3 flex-1 cursor-pointer group"
+                      className="flex items-center gap-2 sm:gap-3 flex-1 cursor-pointer group min-w-0"
                     >
                       <Avatar 
                         src={chatAvatar!} 
-                        className="size-11 group-hover:scale-105 transition-transform" 
+                        className="size-9 sm:size-11 flex-shrink-0 group-hover:scale-105 transition-transform" 
                         status={!chat?.isGroup ? (isOnline ? 'online' : 'offline') : undefined} 
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <h3 className="font-black text-slate-900 truncate tracking-tight italic uppercase">{chatName}</h3>
+                          <h3 className="font-black text-slate-900 truncate tracking-tight italic uppercase text-xs sm:text-base">{chatName}</h3>
                           {isMuted && <Icon name="notifications_off" className="text-[10px] text-slate-400" />}
                         </div>
                         <p className={`text-[10px] font-black uppercase tracking-widest ${isOnline ? 'text-primary' : 'text-slate-400'}`}>
@@ -1042,7 +1042,7 @@ export const ChatDetail = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="flex gap-2 relative">
+                  <div className="flex gap-1.5 sm:gap-2 relative flex-shrink-0">
                     <button 
                       onClick={() => {
                         if (!canStartCalls) return;
@@ -1054,7 +1054,7 @@ export const ChatDetail = () => {
                         }
                       }}
                       disabled={!canStartCalls}
-                      className={`size-11 rounded-2xl bg-white flex items-center justify-center transition-all active:scale-95 border border-white shadow-sm ${!canStartCalls ? 'opacity-50 grayscale cursor-not-allowed' : 'text-primary hover:bg-primary hover:text-white'}`}
+                      className={`size-9 sm:size-11 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center transition-all active:scale-95 border border-white shadow-sm ${!canStartCalls ? 'opacity-50 grayscale cursor-not-allowed' : 'text-primary hover:bg-primary hover:text-white'}`}
                     >
                       <Icon name="call" />
                     </button>
@@ -1069,7 +1069,7 @@ export const ChatDetail = () => {
                         }
                       }}
                       disabled={!canStartCalls}
-                      className={`size-11 rounded-2xl bg-white flex items-center justify-center transition-all active:scale-95 border border-white shadow-sm ${!canStartCalls ? 'opacity-50 grayscale cursor-not-allowed' : 'text-primary hover:bg-primary hover:text-white'}`}
+                      className={`size-9 sm:size-11 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center transition-all active:scale-95 border border-white shadow-sm ${!canStartCalls ? 'opacity-50 grayscale cursor-not-allowed' : 'text-primary hover:bg-primary hover:text-white'}`}
                     >
                       <Icon name="videocam" />
                     </button>
@@ -1077,7 +1077,7 @@ export const ChatDetail = () => {
                     <div className="relative">
                       <button 
                         onClick={() => setShowMenu(!showMenu)}
-                        className="size-11 rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm"
+                        className="size-9 sm:size-11 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm"
                       >
                         <Icon name="more_vert" />
                       </button>
@@ -1294,7 +1294,7 @@ export const ChatDetail = () => {
         )}
       </main>
 
-      <footer className="p-4 bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex flex-col gap-3 sticky bottom-0 z-30">
+      <footer className="p-2 sm:p-4 bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex flex-col gap-2 sm:gap-3 sticky bottom-0 z-30">
         <AnimatePresence>
           {capturedMedia.length > 0 && (
             <motion.div 
@@ -1381,19 +1381,19 @@ export const ChatDetail = () => {
             </motion.div>
           )}
         </AnimatePresence>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             <button 
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
               disabled={!canSendMessages}
-              className={`size-10 rounded-full flex items-center justify-center transition-colors ${!canSendMessages ? 'opacity-50 grayscale cursor-not-allowed' : showEmojiPicker ? 'text-primary bg-primary/10' : 'text-neutral-muted hover:bg-slate-50'}`}
+              className={`size-9 sm:size-10 rounded-full flex items-center justify-center transition-colors ${!canSendMessages ? 'opacity-50 grayscale cursor-not-allowed' : showEmojiPicker ? 'text-primary bg-primary/10' : 'text-neutral-muted hover:bg-slate-50'}`}
             >
               <Icon name="mood" />
             </button>
             {!messageText && canSendMessages && (
               <button 
                 onClick={() => cameraInputRef.current?.click()}
-                className="size-10 rounded-full flex items-center justify-center text-neutral-muted hover:bg-slate-50 transition-colors"
+                className="size-9 sm:size-10 rounded-full flex items-center justify-center text-neutral-muted hover:bg-slate-50 transition-colors"
               >
                 <Icon name="photo_camera" />
                 <input 
@@ -1407,7 +1407,7 @@ export const ChatDetail = () => {
               </button>
             )}
           </div>
-          <div className="flex-1 bg-white rounded-2xl px-4 py-2 flex items-center gap-2 shadow-sm border border-white">
+          <div className="flex-1 bg-white rounded-xl sm:rounded-2xl px-2.5 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 shadow-sm border border-white">
             {!canSendMessages ? (
               <p className="flex-1 text-xs text-neutral-muted text-center py-2 font-bold uppercase tracking-widest">Only admins can send messages</p>
             ) : (
@@ -1419,11 +1419,11 @@ export const ChatDetail = () => {
                   value={messageText}
                   onChange={(e) => handleTyping(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                  className="flex-1 bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-sm" 
+                  className="flex-1 bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-xs sm:text-sm" 
                 />
                 <button 
                   onClick={() => fileInputRef.current?.click()} 
-                  className="text-neutral-muted hover:text-primary transition-colors"
+                  className="text-neutral-muted hover:text-primary transition-colors flex-shrink-0"
                 >
                   <Icon name="attach_file" />
                   <input 
@@ -1448,7 +1448,7 @@ export const ChatDetail = () => {
               <button 
                 onClick={handleSend}
                 disabled={isRecording}
-                className="size-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-xl shadow-primary/30 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                className="size-10 sm:size-12 rounded-xl sm:rounded-2xl bg-primary text-white flex-shrink-0 flex items-center justify-center shadow-xl shadow-primary/30 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
               >
                 <Icon name="send" />
               </button>
@@ -1457,7 +1457,7 @@ export const ChatDetail = () => {
                 onPointerDown={startRecording}
                 onPointerUp={stopRecording}
                 onPointerLeave={stopRecording}
-                className={`size-12 rounded-2xl flex items-center justify-center transition-all ${isRecording ? 'text-white bg-red-500 scale-110 shadow-lg shadow-red-500/30' : 'text-white bg-primary shadow-xl shadow-primary/30 hover:brightness-110'}`}
+                className={`size-10 sm:size-12 rounded-xl sm:rounded-2xl flex-shrink-0 flex items-center justify-center transition-all ${isRecording ? 'text-white bg-red-500 scale-110 shadow-lg shadow-red-500/30' : 'text-white bg-primary shadow-xl shadow-primary/30 hover:brightness-110'}`}
               >
                 <Icon name="mic" />
               </button>

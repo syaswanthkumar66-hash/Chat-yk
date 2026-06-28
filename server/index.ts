@@ -21,6 +21,115 @@ if (process.env.FIREBASE_CONFIG) {
   }
 }
 
+import webpush from "web-push";
+
+let vapidKeys = {
+  publicKey: "",
+  privateKey: ""
+};
+
+async function initVapid() {
+  if (db) {
+    try {
+      const vapidDoc = await db.collection('system_config').doc('vapid').get();
+      if (vapidDoc.exists) {
+        const data = vapidDoc.data();
+        vapidKeys = {
+          publicKey: data.publicKey,
+          privateKey: data.privateKey
+        };
+        console.log("Loaded existing VAPID keys from Firestore");
+      } else {
+        const generated = webpush.generateVAPIDKeys();
+        vapidKeys = {
+          publicKey: generated.publicKey,
+          privateKey: generated.privateKey
+        };
+        await db.collection('system_config').doc('vapid').set(vapidKeys);
+        console.log("Generated and saved new VAPID keys in Firestore");
+      }
+    } catch (err) {
+      console.warn("Could not load/save VAPID keys from/to Firestore, generating in-memory ones:", err);
+      const generated = webpush.generateVAPIDKeys();
+      vapidKeys = {
+        publicKey: generated.publicKey,
+        privateKey: generated.privateKey
+      };
+    }
+  } else {
+    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+      vapidKeys = {
+        publicKey: process.env.VAPID_PUBLIC_KEY,
+        privateKey: process.env.VAPID_PRIVATE_KEY
+      };
+      console.log("Loaded VAPID keys from environment variables");
+    } else {
+      console.log("No Firebase DB or environment VAPID keys found. Generating in-memory VAPID keys.");
+      const generated = webpush.generateVAPIDKeys();
+      vapidKeys = {
+        publicKey: generated.publicKey,
+        privateKey: generated.privateKey
+      };
+    }
+  }
+
+  try {
+    webpush.setVapidDetails(
+      'mailto:syaswanthkumar66@gmail.com',
+      vapidKeys.publicKey,
+      vapidKeys.privateKey
+    );
+  } catch (err) {
+    console.error("Failed to set VAPID details:", err);
+  }
+}
+
+initVapid();
+
+const memorySubscriptions = new Map<string, any>();
+
+async function sendPushNotification(recipientId: string, payload: { title: string, body: string, icon?: string, data?: any }) {
+  let subscription: any = null;
+  if (db) {
+    try {
+      const subDoc = await db.collection('pushSubscriptions').doc(recipientId).get();
+      if (subDoc.exists) {
+        subscription = subDoc.data();
+      }
+    } catch (err) {
+      console.error(`Error fetching push subscription from Firestore for ${recipientId}:`, err);
+    }
+  }
+
+  // Fallback or read from memory if not in db or db is null
+  if (!subscription) {
+    subscription = memorySubscriptions.get(recipientId);
+  }
+
+  if (subscription && subscription.endpoint) {
+    try {
+      console.log(`Sending Web Push Notification to user ${recipientId}`);
+      await webpush.sendNotification(subscription, JSON.stringify(payload));
+      console.log(`Successfully sent Web Push Notification to user ${recipientId}`);
+    } catch (err: any) {
+      console.error(`Error sending push notification to user ${recipientId}:`, err);
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        console.log(`Subscription for user ${recipientId} has expired or is invalid. Deleting.`);
+        memorySubscriptions.delete(recipientId);
+        if (db) {
+          try {
+            await db.collection('pushSubscriptions').doc(recipientId).delete();
+          } catch (deleteErr) {
+            console.error("Error deleting expired subscription from Firestore:", deleteErr);
+          }
+        }
+      }
+    }
+  } else {
+    console.log(`No active Web Push subscription found for user ${recipientId}`);
+  }
+}
+
 const memoryFiles = new Map<string, { name: string, mimeType: string, data: string, size: number }>();
 
 const dailyQuotaLimit = 100 * 1024 * 1024; // 100 MB
@@ -323,16 +432,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         socket.to(`group-${groupId}`).emit("receive_message", messageData);
         console.log(`Group message sent from ${senderId} to group-${groupId}`);
 
-        // For any group member who is offline, save an offline message (only for text messages)
+        // For any group member who is offline, save an offline message and send a push notification
         if (Array.isArray(recipientIds)) {
           for (const targetId of recipientIds) {
             if (targetId === senderId) continue;
             const targetSocketId = users.get(targetId);
             if (!targetSocketId) {
-              if (type !== 'text' || fileUrl) {
-                console.log(`Skipping offline group message storage for ${targetId} as it is a media/file transfer.`);
-                continue;
-              }
               const storeData = { ...messageData, recipientId: targetId, to: targetId };
               const offlineMsgId = `${messageData.id}-${targetId}`;
               if (db) {
@@ -346,6 +451,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
                 tempStorage.set(offlineMsgId, storeData);
                 console.log(`Group member ${targetId} offline. Message stored temporarily in memory.`);
               }
+              // Send web push notification
+              sendPushNotification(targetId, {
+                title: data.senderName || "New Group Message",
+                body: messageData.type === 'text' ? messageData.text : `📎 Shared a ${messageData.type}`,
+                icon: 'https://picsum.photos/seed/default/200',
+                data: { url: '/' }
+              });
             }
           }
         }
@@ -355,24 +467,27 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           io.to(targetSocketId).emit("receive_message", messageData);
           console.log(`Message sent from ${senderId} to ${recipientId}`);
         } else {
-          // Only store text messages offline
-          if (type !== 'text' || fileUrl) {
-            console.log(`Recipient ${recipientId} is offline. Skipping offline message storage for media/file transfer.`);
-          } else {
-            const storeData = { ...messageData, to: recipientId };
-            if (db) {
-              try {
-                await db.collection('offline_messages').doc(messageData.id).set(storeData);
-                console.log(`User ${recipientId} offline. Message saved to Firebase.`);
-              } catch(e) {
-                console.error("Firebase save error", e);
-              }
-            } else {
-              // Store temporarily in memory if firebase not configured
-              tempStorage.set(messageData.id, storeData);
-              console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
+          // Store any message type offline in Firestore/Memory and send push notification
+          const storeData = { ...messageData, to: recipientId };
+          if (db) {
+            try {
+              await db.collection('offline_messages').doc(messageData.id).set(storeData);
+              console.log(`User ${recipientId} offline. Message saved to Firebase.`);
+            } catch(e) {
+              console.error("Firebase save error", e);
             }
+          } else {
+            // Store temporarily in memory if firebase not configured
+            tempStorage.set(messageData.id, storeData);
+            console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
           }
+          // Send web push notification
+          sendPushNotification(recipientId, {
+            title: data.senderName || "New Message",
+            body: messageData.type === 'text' ? messageData.text : `📎 Shared a ${messageData.type}`,
+            icon: 'https://picsum.photos/seed/default/200',
+            data: { url: '/' }
+          });
         }
       }
     });
@@ -425,6 +540,35 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  app.get("/api/vapid-public-key", (req, res) => {
+    res.json({ publicKey: vapidKeys.publicKey });
+  });
+
+  app.post("/api/save-subscription", async (req, res) => {
+    try {
+      const { userId, subscription } = req.body;
+      if (!userId || !subscription) {
+        return res.status(400).json({ error: "Missing userId or subscription in request body" });
+      }
+
+      // Always save to memory cache
+      memorySubscriptions.set(userId, subscription);
+
+      // Save to Firestore if available
+      if (db) {
+        await db.collection('pushSubscriptions').doc(userId).set(subscription);
+        console.log(`Saved push subscription to Firestore for user: ${userId}`);
+      } else {
+        console.log(`Saved push subscription to local memory cache for user: ${userId}`);
+      }
+
+      res.json({ success: true, message: "Subscription saved successfully" });
+    } catch (err: any) {
+      console.error("Error saving subscription on backend:", err);
+      res.status(500).json({ error: err.message || "Failed to save subscription" });
+    }
   });
 
   app.get("/api/webrtc/config", (req, res) => {

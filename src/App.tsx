@@ -131,6 +131,52 @@ function useNotifications() {
       socket.off('receive_message', handleReceiveMessage);
     };
   }, [socket, user, activeChatId, chats, users]);
+
+  // Listen to socket 'user_status' to trigger alerts when a friend comes online
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handleUserStatus = (data: { userId: string, isOnline: boolean }) => {
+      if (data.userId === user.id) return;
+      if (!data.isOnline) return;
+
+      // Find the user in our list
+      const targetUser = users.find(u => u.id === data.userId);
+      if (!targetUser || !targetUser.isFriend) return;
+
+      const friendName = targetUser.displayName || targetUser.username || 'Your friend';
+
+      // Play system alert sound if enabled
+      if (user.notificationSettings?.soundEnabled) {
+        try {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
+          audio.volume = 0.4;
+          audio.play().catch(() => {});
+        } catch (e) {
+          console.warn('Audio playback failed:', e);
+        }
+      }
+
+      // Trigger standard web notification
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(`${friendName} is back online!`, {
+            body: `${friendName} is now active on Chat.`,
+            icon: targetUser.avatar || 'https://picsum.photos/seed/default/200',
+            tag: `online-${data.userId}`,
+            renotify: true
+          } as any);
+        } catch (e) {
+          console.warn('Friend online notification failed:', e);
+        }
+      }
+    };
+
+    socket.on('user_status', handleUserStatus);
+    return () => {
+      socket.off('user_status', handleUserStatus);
+    };
+  }, [socket, user, users]);
 }
 
 export default function App() {
@@ -159,11 +205,11 @@ export default function App() {
             });
           }
 
-          // Request notification permissions
-          if (typeof window !== 'undefined' && 'Notification' in window) {
-            if (Notification.permission === 'default') {
-              Notification.requestPermission().catch(console.error);
-            }
+          // Request notification permissions and register Web Push notifications subscription (VAPID)
+          if (typeof window !== 'undefined') {
+            import('./services/notificationService').then(({ registerPushNotifications }) => {
+              registerPushNotifications(firebaseUser.uid);
+            }).catch(console.error);
           }
           // If no doc exists, they might be mid-onboarding.
           // Onboarding will handle doc creation.
