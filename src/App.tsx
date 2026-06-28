@@ -216,11 +216,28 @@ export default function App() {
             }
           }
 
-          // Request notification permissions and register Web Push notifications subscription (VAPID)
+          // Request notification permissions first and then register Web Push notifications subscription (VAPID)
           if (typeof window !== 'undefined') {
-            import('./services/notificationService').then(({ registerPushNotifications }) => {
-              registerPushNotifications(firebaseUser.uid);
-            }).catch(console.error);
+            const triggerPushRegistration = () => {
+              import('./services/notificationService').then(({ registerPushNotifications }) => {
+                registerPushNotifications(firebaseUser.uid);
+              }).catch(console.error);
+            };
+
+            if ('Notification' in window && Notification.permission === 'default') {
+              console.log("Prompting for notification permission immediately after login...");
+              Notification.requestPermission()
+                .then((perm) => {
+                  console.log("Notification permission received after login:", perm);
+                  triggerPushRegistration();
+                })
+                .catch((err) => {
+                  console.error("Error requesting notification permission immediately after login:", err);
+                  triggerPushRegistration();
+                });
+            } else {
+              triggerPushRegistration();
+            }
           }
           // If no doc exists, they might be mid-onboarding.
           // Onboarding will handle doc creation.
