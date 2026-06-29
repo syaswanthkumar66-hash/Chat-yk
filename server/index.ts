@@ -930,7 +930,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   async function startServer() {
     if (!process.env.VERCEL) {
       const isProd = process.env.NODE_ENV === "production";
-      const port = isProd ? Number(process.env.PORT || 3000) : 3001;
+      const port = isProd ? 3000 : 3001;
 
       if (isProd) {
         const distPath = path.join(process.cwd(), 'dist');
