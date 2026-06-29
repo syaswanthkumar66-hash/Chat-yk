@@ -175,15 +175,23 @@ async function initVapid() {
 
 initVapid();
 
-const memorySubscriptions = new Map<string, any>();
+const memorySubscriptions = new Map<string, any[]>();
 
 async function sendPushNotification(recipientId: string, payload: { title: string, body: string, icon?: string, data?: any }) {
-  let subscription: any = null;
+  let subscriptions: any[] = [];
   if (db) {
     try {
       const subDoc = await db.collection('pushSubscriptions').doc(recipientId).get();
       if (subDoc.exists) {
-        subscription = subDoc.data();
+        const data = subDoc.data();
+        if (data) {
+          if (Array.isArray(data.subscriptions)) {
+            subscriptions = data.subscriptions;
+          } else if (data.endpoint) {
+            // Old format migration
+            subscriptions = [data];
+          }
+        }
       }
     } catch (err) {
       console.error(`Error fetching push subscription from Firestore for ${recipientId}:`, err);
@@ -191,26 +199,75 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
   }
 
   // Fallback or read from memory if not in db or db is null
-  if (!subscription) {
-    subscription = memorySubscriptions.get(recipientId);
+  if (subscriptions.length === 0) {
+    const memSubs = memorySubscriptions.get(recipientId);
+    if (Array.isArray(memSubs)) {
+      subscriptions = memSubs;
+    } else if (memSubs && (memSubs as any).endpoint) {
+      subscriptions = [memSubs];
+    }
   }
 
-  if (subscription && subscription.endpoint) {
-    try {
-      console.log(`Sending Web Push Notification to user ${recipientId}`);
-      await webpush.sendNotification(subscription, JSON.stringify(payload));
-      console.log(`Successfully sent Web Push Notification to user ${recipientId}`);
-    } catch (err: any) {
-      console.error(`Error sending push notification to user ${recipientId}:`, err);
-      if (err.statusCode === 410 || err.statusCode === 404) {
-        console.log(`Subscription for user ${recipientId} has expired or is invalid. Deleting.`);
+  if (subscriptions.length > 0) {
+    console.log(`Sending Web Push Notification to user ${recipientId} across ${subscriptions.length} devices...`);
+    const expiredEndpoints = new Set<string>();
+
+    const sendPromises = subscriptions.map(async (subscription) => {
+      if (!subscription || !subscription.endpoint) return;
+      try {
+        await webpush.sendNotification(subscription, JSON.stringify(payload));
+        console.log(`Successfully sent Web Push Notification to user ${recipientId} endpoint ${subscription.endpoint.slice(-20)}`);
+      } catch (err: any) {
+        console.error(`Error sending push notification to user ${recipientId} endpoint ${subscription.endpoint.slice(-20)}:`, err);
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          console.log(`Subscription for user ${recipientId} has expired or is invalid: ${subscription.endpoint.slice(-20)}`);
+          expiredEndpoints.add(subscription.endpoint);
+        }
+      }
+    });
+
+    await Promise.all(sendPromises);
+
+    // If any endpoints are expired/invalid, clean them up from Firestore and memory
+    if (expiredEndpoints.size > 0) {
+      // 1. Clean up memory
+      const memSubs = memorySubscriptions.get(recipientId);
+      if (Array.isArray(memSubs)) {
+        const updatedMem = memSubs.filter((s: any) => !expiredEndpoints.has(s.endpoint));
+        if (updatedMem.length > 0) {
+          memorySubscriptions.set(recipientId, updatedMem);
+        } else {
+          memorySubscriptions.delete(recipientId);
+        }
+      } else {
         memorySubscriptions.delete(recipientId);
-        if (db) {
-          try {
-            await db.collection('pushSubscriptions').doc(recipientId).delete();
-          } catch (deleteErr) {
-            console.error("Error deleting expired subscription from Firestore:", deleteErr);
+      }
+
+      // 2. Clean up Firestore
+      if (db) {
+        try {
+          const docRef = db.collection('pushSubscriptions').doc(recipientId);
+          const docSnap = await docRef.get();
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            let currentSubs: any[] = [];
+            if (data) {
+              if (Array.isArray(data.subscriptions)) {
+                currentSubs = data.subscriptions;
+              } else if (data.endpoint) {
+                currentSubs = [data];
+              }
+            }
+            const updatedSubs = currentSubs.filter((s: any) => !expiredEndpoints.has(s.endpoint));
+            if (updatedSubs.length > 0) {
+              await docRef.set({ subscriptions: updatedSubs });
+            } else {
+              await docRef.delete();
+            }
+            console.log(`Cleaned up ${expiredEndpoints.size} expired subscriptions for user ${recipientId} in Firestore`);
           }
+        } catch (cleanErr) {
+          console.error("Error cleaning up expired subscriptions in Firestore:", cleanErr);
         }
       }
     }
@@ -842,23 +899,52 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   app.post("/api/save-subscription", async (req, res) => {
     try {
       const { userId, subscription } = req.body;
-      if (!userId || !subscription) {
-        return res.status(400).json({ error: "Missing userId or subscription in request body" });
+      if (!userId || !subscription || !subscription.endpoint) {
+        return res.status(400).json({ error: "Missing userId or valid subscription in request body" });
       }
 
-      // Always save to memory cache
-      memorySubscriptions.set(userId, subscription);
+      // Update memory cache
+      let userMemSubs = memorySubscriptions.get(userId) || [];
+      if (!Array.isArray(userMemSubs)) {
+        userMemSubs = [];
+      }
+      userMemSubs = userMemSubs.filter((s: any) => s.endpoint !== subscription.endpoint);
+      userMemSubs.push(subscription);
+      memorySubscriptions.set(userId, userMemSubs);
 
       // Save to Firestore if available
       if (db) {
         try {
-          await db.collection('pushSubscriptions').doc(userId).set(subscription);
-          console.log(`Saved push subscription to Firestore for user: ${userId}`);
+          const docRef = db.collection('pushSubscriptions').doc(userId);
+          const docSnap = await docRef.get();
+          let subscriptions: any[] = [];
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            if (data) {
+              if (Array.isArray(data.subscriptions)) {
+                subscriptions = data.subscriptions;
+              } else if (data.endpoint) {
+                // Migration from old single-subscription format
+                subscriptions = [data];
+              }
+            }
+          }
+          // Filter out existing one with the same endpoint
+          subscriptions = subscriptions.filter((s: any) => s.endpoint !== subscription.endpoint);
+          subscriptions.push(subscription);
+
+          // Enforce maximum of 10 devices
+          if (subscriptions.length > 10) {
+            subscriptions = subscriptions.slice(-10);
+          }
+
+          await docRef.set({ subscriptions });
+          console.log(`Saved push subscription to Firestore for user: ${userId} (Total: ${subscriptions.length})`);
         } catch (dbErr: any) {
           console.warn("Failed to save push subscription to Firestore, using memory fallback:", dbErr.message);
         }
       } else {
-        console.log(`Saved push subscription to local memory cache for user: ${userId}`);
+        console.log(`Saved push subscription to local memory cache for user: ${userId} (Total: ${userMemSubs.length})`);
       }
 
       res.json({ success: true, message: "Subscription saved successfully" });

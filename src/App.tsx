@@ -241,31 +241,17 @@ export default function App() {
               localStorage.setItem('proto_blockedUserIds', JSON.stringify(blocked));
               localStorage.setItem('proto_removedFriendIds', JSON.stringify(removed));
             }
-          }
 
-          // Request notification permissions first and then register Web Push notifications subscription (VAPID)
-          if (typeof window !== 'undefined') {
-            const triggerPushRegistration = () => {
-              import('./services/notificationService').then(({ registerPushNotifications }) => {
-                registerPushNotifications(firebaseUser.uid);
-              }).catch(console.error);
-            };
-
-            if ('Notification' in window && Notification.permission === 'default') {
-              console.log("Prompting for notification permission immediately after login...");
-              Notification.requestPermission()
-                .then((perm) => {
-                  console.log("Notification permission received after login:", perm);
-                  triggerPushRegistration();
-                })
-                .catch((err) => {
-                  console.error("Error requesting notification permission immediately after login:", err);
-                  triggerPushRegistration();
-                });
-            } else {
-              triggerPushRegistration();
+            // If notification permission is already granted, silently register/sync push subscriptions in the background
+            if (typeof window !== 'undefined' && 'Notification' in window) {
+              if (Notification.permission === 'granted') {
+                import('./services/notificationService').then(({ registerPushNotifications }) => {
+                  registerPushNotifications(firebaseUser.uid);
+                }).catch(console.error);
+              }
             }
           }
+
           // If no doc exists, they might be mid-onboarding.
           // Onboarding will handle doc creation.
           
