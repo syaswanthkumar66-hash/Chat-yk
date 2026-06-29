@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useAppStore } from '../store';
 import { Icon, Avatar, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
+import { registerPushNotifications } from '../services/notificationService';
 
 const PRELOADED_AVATARS = [
   'https://picsum.photos/seed/avatar1/200',
@@ -38,6 +39,64 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
   const [description, setDescription] = useState(user?.description || '');
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Diagnostic state for Web Push Notifications (VAPID)
+  const [pushStatus, setPushStatus] = useState<{
+    supported: boolean;
+    permission: NotificationPermission;
+    hasServiceWorker: boolean;
+    hasSubscription: boolean;
+    subscriptionEndpoint: string;
+    loading: boolean;
+  }>({
+    supported: false,
+    permission: 'default',
+    hasServiceWorker: false,
+    hasSubscription: false,
+    subscriptionEndpoint: '',
+    loading: true
+  });
+
+  const checkSubscriptionStatus = async () => {
+    if (typeof window === 'undefined') return;
+    const supported = 'serviceWorker' in navigator && 'PushManager' in window;
+    const permission = 'Notification' in window ? Notification.permission : 'default';
+    
+    let hasServiceWorker = false;
+    let hasSubscription = false;
+    let subscriptionEndpoint = '';
+
+    if (supported) {
+      try {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (registration) {
+          hasServiceWorker = true;
+          const subscription = await registration.pushManager.getSubscription();
+          if (subscription) {
+            hasSubscription = true;
+            subscriptionEndpoint = subscription.endpoint;
+          }
+        }
+      } catch (e) {
+        console.error("Error checking push subscription status:", e);
+      }
+    }
+
+    setPushStatus({
+      supported,
+      permission,
+      hasServiceWorker,
+      hasSubscription,
+      subscriptionEndpoint,
+      loading: false
+    });
+  };
+
+  React.useEffect(() => {
+    if (activeView === 'notifications') {
+      checkSubscriptionStatus();
+    }
+  }, [activeView]);
 
   const [ticketCategory, setTicketCategory] = useState('Technical Issue');
   const [ticketDesc, setTicketDesc] = useState('');
@@ -125,11 +184,65 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
             </div>
 
             {/* Notification Testing & Diagnostics */}
-            <div className="mt-6 pt-6 border-t border-slate-100 space-y-3">
+            <div className="mt-6 pt-6 border-t border-slate-100 space-y-4">
               <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest italic">
-                Diagnostics & Testing
+                Diagnostics & Live VAPID Status
               </h4>
+
+              {/* Status Table */}
+              <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                  <span>Browser Push Support:</span>
+                  <span className={cn("font-black uppercase tracking-wider", pushStatus.supported ? "text-emerald-600" : "text-rose-500")}>
+                    {pushStatus.supported ? "Supported ✓" : "Unsupported ✗"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                  <span>OS/Browser Permission:</span>
+                  <span className={cn("font-black uppercase tracking-wider", 
+                    pushStatus.permission === 'granted' ? "text-emerald-600" : 
+                    pushStatus.permission === 'denied' ? "text-rose-500" : "text-amber-500"
+                  )}>
+                    {pushStatus.permission}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                  <span>Service Worker Status:</span>
+                  <span className={cn("font-black uppercase tracking-wider", pushStatus.hasServiceWorker ? "text-emerald-600" : "text-amber-500")}>
+                    {pushStatus.hasServiceWorker ? "Registered (/sw.js)" : "Not Detected"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                  <span>Push Subscription:</span>
+                  <span className={cn("font-black uppercase tracking-wider", pushStatus.hasSubscription ? "text-emerald-600" : "text-rose-500 animate-pulse")}>
+                    {pushStatus.hasSubscription ? "Active & Synced" : "Not Subscribed"}
+                  </span>
+                </div>
+
+                {pushStatus.hasSubscription && pushStatus.subscriptionEndpoint && (
+                  <div className="mt-2 pt-2 border-t border-slate-200/60 space-y-1">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Generated Endpoint:</span>
+                    <div className="p-2 bg-slate-900 rounded-xl overflow-x-auto text-[9px] font-mono text-slate-300 whitespace-nowrap max-w-full">
+                      {pushStatus.subscriptionEndpoint}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex flex-col gap-2">
+                <button
+                  onClick={async () => {
+                    if (user) {
+                      setPushStatus(prev => ({ ...prev, loading: true }));
+                      await registerPushNotifications(user.id);
+                      await checkSubscriptionStatus();
+                    }
+                  }}
+                  className="w-full p-4 bg-emerald-600 text-white font-black text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/10 hover:bg-emerald-700 active:scale-98 transition-all"
+                >
+                  <Icon name="sync" /> Force Generate VAPID Subscription
+                </button>
+
                 <button
                   onClick={() => {
                     if (typeof window !== 'undefined' && (window as any).triggerTestNotification) {
@@ -138,7 +251,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                   }}
                   className="w-full p-4 bg-primary text-white font-black text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-primary/10 hover:brightness-105 active:scale-98 transition-all"
                 >
-                  <Icon name="notifications_active" /> Send Test Notification
+                  <Icon name="notifications_active" /> Send Live Test Push (Server + UI)
                 </button>
                 
                 <button
@@ -149,11 +262,11 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                   }}
                   className="w-full p-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 active:scale-98 transition-all"
                 >
-                  <Icon name="restart_alt" /> Re-trigger Request Banner
+                  <Icon name="restart_alt" /> Reset & Show Request Banner
                 </button>
               </div>
               <p className="text-[10px] text-slate-400 text-center leading-normal mt-2 px-4">
-                Note: Standard browser notifications require permission to be allowed in your browser address bar settings.
+                Note: Web Push Notifications depend on secure browser subscriptions. Click <b>Force Generate VAPID Subscription</b> above to manually establish a fresh web push endpoint.
               </p>
             </div>
           </div>
