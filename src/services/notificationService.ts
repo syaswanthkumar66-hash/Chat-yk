@@ -113,44 +113,160 @@ export async function registerPushNotifications(userId: string, force?: boolean)
     }
 
     // 4. Since no active subscription is found, check if permission is already granted.
+    if (Notification.permission === 'denied') {
+      console.warn("Browser-level notification permission is explicitly denied by the user.");
+      return { 
+        success: false, 
+        error: "Notification permission explicitly denied. Please reset notification settings in your browser address bar to allow alerts." 
+      };
+    }
+
     if (Notification.permission !== 'granted') {
       console.log("Notification permission not granted, requesting...");
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
-        return { success: false, error: `Notification permission denied (${permission})` };
+        console.warn(`Browser-level notification permission was denied or ignored by user: status = ${permission}`);
+        return { 
+          success: false, 
+          error: `Notification permission denied (${permission}). Please allow notifications to enable live alerts.` 
+        };
       }
     }
 
     // 5. Subscribe the user silently (since permission is already granted)
-    console.log("Subscribing with PushManager...");
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: outputArray
-    });
+    console.log("Subscribing with PushManager using VAPID key...");
+    try {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: outputArray
+      });
+    } catch (subErr: any) {
+      console.error("PushManager subscribe call failed directly:", subErr);
+      
+      // Specifically identify VAPID token or applicationServerKey mismatches
+      const isVapidError = subErr.name === 'InvalidAccessError' || 
+                           subErr.message?.includes('applicationServerKey') || 
+                           subErr.message?.includes('VAPID') ||
+                           subErr.message?.includes('key') ||
+                           subErr.name === 'SecurityError';
+                           
+      if (isVapidError) {
+        console.error("CRITICAL: VAPID Public Key mismatch or malformed key detected! The browser's push engine rejected the applicationServerKey. Ensure the backend VAPID keys match this client public key exactly.", subErr);
+        throw new Error(`VAPID public key mismatch or browser rejection: ${subErr.message || subErr}`);
+      } else if (subErr.name === 'NotAllowedError') {
+        console.warn("Permission denied when calling pushManager.subscribe (NotAllowedError).", subErr);
+        throw new Error("Permission denied by browser configuration or secure origin rules during push registration.");
+      } else {
+        throw subErr;
+      }
+    }
 
     console.log("Successfully subscribed to Web Push Notifications");
 
-    // 6. Store the subscription object by sending it to the backend
+    // 6. Store the subscription object by sending it to the backend with simple retry support
     const targetUrl = BACKEND_URL || window.location.origin;
-    const saveResponse = await fetch(`${targetUrl}/api/save-subscription`, {
+    let saveResponse: Response | null = null;
+    let saveError: any = null;
+    
+    // Attempt saving to backend up to 3 times to handle transient offline/network states
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`Saving push subscription to backend (attempt ${attempt}/3)...`);
+        saveResponse = await fetch(`${targetUrl}/api/save-subscription`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            userId,
+            subscription: JSON.parse(JSON.stringify(subscription))
+          })
+        });
+        if (saveResponse.ok) {
+          saveError = null;
+          break;
+        }
+        saveError = new Error(`HTTP ${saveResponse.status}: ${saveResponse.statusText}`);
+      } catch (err) {
+        saveError = err;
+      }
+      if (attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+
+    if (saveError || !saveResponse || !saveResponse.ok) {
+      throw new Error(`Failed to save subscription to backend after multiple attempts: ${saveError?.message || 'Unknown network error'}`);
+    }
+
+    console.log("Push subscription sent to backend successfully");
+    return { success: true, subscription };
+  } catch (err: any) {
+    console.warn("Notice: Web Push subscription setup did not complete:", err.message || err);
+    return { success: false, error: err.message || String(err) };
+  }
+}
+
+/**
+ * Helper to retry asynchronous network tasks with exponential backoff.
+ */
+async function retryWithBackoff<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+  let lastError: any;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Retry Helper] Attempt ${i + 1}/${retries} failed. Retrying in ${delay}ms...`, err);
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2; // exponential backoff
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Dispatches a Web Push Notification delivery request to the Express backend
+ * with a built-in retry mechanism using exponential backoff to handle transient network errors.
+ */
+export async function triggerPushNotificationWithRetry(
+  userId: string, 
+  title: string, 
+  body: string, 
+  retries = 3
+): Promise<{ success: boolean; error?: string }> {
+  const targetUrl = BACKEND_URL || window.location.origin;
+  
+  const attemptDelivery = async () => {
+    console.log(`[Push Delivery] Dispatched request for user ${userId} to backend...`);
+    const res = await fetch(`${targetUrl}/api/send-test-push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         userId,
-        subscription: JSON.parse(JSON.stringify(subscription))
+        title,
+        body
       })
     });
-
-    if (!saveResponse.ok) {
-      throw new Error(`Failed to save subscription to backend: ${saveResponse.statusText}`);
+    
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
     }
+    
+    return await res.json();
+  };
 
-    console.log("Push subscription sent to backend successfully");
-    return { success: true, subscription };
+  try {
+    await retryWithBackoff(attemptDelivery, retries, 1000);
+    console.log("[Push Delivery] Successfully delivered push notification via backend after retries!");
+    return { success: true };
   } catch (err: any) {
-    console.error("Error during Web Push subscription setup:", err);
+    console.error("[Push Delivery] All delivery attempts failed:", err);
     return { success: false, error: err.message || String(err) };
   }
 }

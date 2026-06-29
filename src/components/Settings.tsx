@@ -87,7 +87,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
           }
         }
       } catch (e: any) {
-        console.error("Error checking push subscription status:", e);
+        console.warn("Notice checking push subscription status:", e);
       }
     }
 
@@ -122,7 +122,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
           }));
         }
       } catch (error: any) {
-        console.error("Auto-registration error:", error);
+        console.warn("Auto-registration alert:", error);
       }
     }
   };
@@ -315,15 +315,21 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 <button
                   onClick={async () => {
                     if (user) {
-                      setPushStatus(prev => ({ ...prev, loading: true, registrationError: '' }));
-                      const result = await registerPushNotifications(user.id, true);
-                      if (result && !result.success) {
+                      try {
+                        setPushStatus(prev => ({ ...prev, loading: true, registrationError: '' }));
+                        const result = await registerPushNotifications(user.id, true);
+                        if (result && !result.success) {
+                          setPushStatus(prev => ({ 
+                            ...prev, 
+                            registrationError: result.error || 'Failed to register subscription'
+                          }));
+                        }
+                      } catch (err: any) {
                         setPushStatus(prev => ({ 
                           ...prev, 
-                          registrationError: result.error || 'Failed to register subscription',
-                          loading: false 
+                          registrationError: err.message || 'An unexpected error occurred during subscription'
                         }));
-                      } else {
+                      } finally {
                         await checkSubscriptionStatus();
                       }
                     }

@@ -110,25 +110,28 @@ async function initVapid() {
         };
         console.log("Loaded existing VAPID keys from Firestore");
       } else {
+        const generated = webpush.generateVAPIDKeys();
         vapidKeys = {
-          publicKey: "BDAxvi0Gn7uLoTdcrvsepkHwsr4DqvKeBteM7civLbHWcCV3GKHv-uLqvhaxzSZpbLgJbF4o4Xs34B4CK8jVcNw",
-          privateKey: "NDQ7IS8SZjMMl8Wc-iT7Z-LvKWTb7ZnjcxhoPMrg-cw"
+          publicKey: generated.publicKey,
+          privateKey: generated.privateKey
         };
         await db.collection('system_config').doc('vapid').set(vapidKeys);
-        console.log("Generated and saved new VAPID keys in Firestore");
+        console.log("Generated new VAPID keys and saved securely in Firestore");
       }
     } catch (err) {
-      console.warn("Could not load/save VAPID keys from/to Firestore, using stable persistent fallback keys:", err);
+      console.warn("Could not load/save VAPID keys from/to Firestore, generating dynamic in-memory ones:", err);
+      const generated = webpush.generateVAPIDKeys();
       vapidKeys = {
-        publicKey: "BDAxvi0Gn7uLoTdcrvsepkHwsr4DqvKeBteM7civLbHWcCV3GKHv-uLqvhaxzSZpbLgJbF4o4Xs34B4CK8jVcNw",
-        privateKey: "NDQ7IS8SZjMMl8Wc-iT7Z-LvKWTb7ZnjcxhoPMrg-cw"
+        publicKey: generated.publicKey,
+        privateKey: generated.privateKey
       };
     }
   } else {
-    console.log("No Firebase DB or environment VAPID keys found. Using stable persistent fallback keys.");
+    console.log("No Firebase DB or environment VAPID keys found. Generating dynamic in-memory VAPID keys.");
+    const generated = webpush.generateVAPIDKeys();
     vapidKeys = {
-      publicKey: "BDAxvi0Gn7uLoTdcrvsepkHwsr4DqvKeBteM7civLbHWcCV3GKHv-uLqvhaxzSZpbLgJbF4o4Xs34B4CK8jVcNw",
-      privateKey: "NDQ7IS8SZjMMl8Wc-iT7Z-LvKWTb7ZnjcxhoPMrg-cw"
+      publicKey: generated.publicKey,
+      privateKey: generated.privateKey
     };
   }
 

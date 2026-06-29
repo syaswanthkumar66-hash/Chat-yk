@@ -103,29 +103,23 @@ export function NotificationPrompt() {
       }
     }
 
-    // Trigger a real backend VAPID push notification
+    // Trigger a real backend VAPID push notification with retry
     if (user) {
       try {
-        console.log("Triggering real server-side VAPID web push notification for user:", user.id);
-        const targetUrl = BACKEND_URL || window.location.origin;
-        const res = await fetch(`${targetUrl}/api/send-test-push`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            userId: user.id,
-            title: "🔔 Real VAPID Push Alert",
-            body: "Amazing! This notification is dispatched securely using VAPID keys directly from our backend server!"
-          })
-        });
-        if (!res.ok) {
-          console.warn("Backend failed to deliver VAPID test push:", await res.text());
+        console.log("Triggering real server-side VAPID web push notification with retry for user:", user.id);
+        const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
+        const result = await triggerPushNotificationWithRetry(
+          user.id,
+          "🔔 Real VAPID Push Alert",
+          "Amazing! This notification is dispatched securely using VAPID keys directly from our backend server!"
+        );
+        if (!result.success) {
+          console.warn("VAPID push delivery retry-mechanism reported failure:", result.error);
         } else {
-          console.log("Real VAPID test push request successfully queued!");
+          console.log("Real VAPID push successfully delivered!");
         }
       } catch (err) {
-        console.error("Failed to request server VAPID push:", err);
+        console.error("Failed to request retry-enabled server VAPID push:", err);
       }
     }
 
