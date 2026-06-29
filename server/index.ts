@@ -930,14 +930,20 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   async function startServer() {
     if (!process.env.VERCEL) {
       const isProd = process.env.NODE_ENV === "production";
-      const port = isProd ? 3000 : 3001;
+      const port = isProd ? Number(process.env.PORT || 3000) : 3001;
 
       if (isProd) {
         const distPath = path.join(process.cwd(), 'dist');
-        app.use(express.static(distPath));
-        app.get('*', (req, res) => {
-          res.sendFile(path.join(distPath, 'index.html'));
-        });
+        if (fs.existsSync(distPath) && fs.existsSync(path.join(distPath, 'index.html'))) {
+          app.use(express.static(distPath));
+          app.get('*', (req, res) => {
+            res.sendFile(path.join(distPath, 'index.html'));
+          });
+        } else {
+          app.get('*', (req, res) => {
+            res.json({ status: "ok", message: "Chat API Server is live and running. Frontend is served independently." });
+          });
+        }
       }
 
       httpServer.listen(port, "0.0.0.0", () => {
