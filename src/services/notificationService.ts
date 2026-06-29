@@ -1,15 +1,22 @@
 // Web Push Notification Registration Service using VAPID keys
-export async function registerPushNotifications(userId: string) {
-  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-    console.log("Push notifications are not supported on this device/browser");
-    return;
+export async function registerPushNotifications(userId: string): Promise<{ success: boolean; subscription?: PushSubscription; error?: string }> {
+  if (typeof window === 'undefined') {
+    return { success: false, error: "Window is undefined" };
+  }
+  if (!('serviceWorker' in navigator)) {
+    return { success: false, error: "Service Worker not supported in this browser" };
+  }
+  if (!('PushManager' in window)) {
+    return { success: false, error: "PushManager not supported in this browser" };
   }
 
   try {
     // 1. Register service worker
+    console.log("Registering service worker '/sw.js'...");
     const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     
     // Ensure the service worker is active before subscribing
+    console.log("Waiting for service worker to be ready...");
     await navigator.serviceWorker.ready;
 
     // 2. Check if a push subscription already exists in this browser
@@ -18,7 +25,7 @@ export async function registerPushNotifications(userId: string) {
     if (subscription) {
       console.log("Existing VAPID subscription found. Syncing silently with backend...");
       // Store the subscription object by sending it to the backend
-      await fetch('/api/save-subscription', {
+      const res = await fetch('/api/save-subscription', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -28,21 +35,25 @@ export async function registerPushNotifications(userId: string) {
           subscription: JSON.parse(JSON.stringify(subscription))
         })
       });
+      if (!res.ok) {
+        throw new Error(`Failed to sync existing subscription: ${res.statusText}`);
+      }
       console.log("VAPID subscription successfully synced with backend");
-      return;
+      return { success: true, subscription };
     }
 
     // 3. Since no active subscription is found, check if permission is already granted.
     // If it is NOT granted, then show the permission prompt.
     if (Notification.permission !== 'granted') {
+      console.log("Notification permission not granted, requesting...");
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
-        console.log("Notification permission not granted:", permission);
-        return;
+        return { success: false, error: `Notification permission denied (${permission})` };
       }
     }
 
     // 4. Fetch Public VAPID Key from backend
+    console.log("Fetching VAPID public key from backend...");
     const response = await fetch('/api/vapid-public-key');
     if (!response.ok) {
       throw new Error(`Failed to fetch public VAPID key: ${response.statusText}`);
@@ -62,6 +73,7 @@ export async function registerPushNotifications(userId: string) {
     }
 
     // 5. Subscribe the user silently (since permission is already granted)
+    console.log("Subscribing with PushManager...");
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: outputArray
@@ -86,7 +98,9 @@ export async function registerPushNotifications(userId: string) {
     }
 
     console.log("Push subscription sent to backend successfully");
-  } catch (err) {
+    return { success: true, subscription };
+  } catch (err: any) {
     console.error("Error during Web Push subscription setup:", err);
+    return { success: false, error: err.message || String(err) };
   }
 }

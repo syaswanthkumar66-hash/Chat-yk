@@ -48,13 +48,15 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     hasSubscription: boolean;
     subscriptionEndpoint: string;
     loading: boolean;
+    registrationError: string;
   }>({
     supported: false,
     permission: 'default',
     hasServiceWorker: false,
     hasSubscription: false,
     subscriptionEndpoint: '',
-    loading: true
+    loading: true,
+    registrationError: ''
   });
 
   const checkSubscriptionStatus = async () => {
@@ -68,28 +70,31 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
 
     if (supported) {
       try {
-        const registration = await navigator.serviceWorker.getRegistration();
-        if (registration) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        const swReg = registrations.find(reg => reg.active && reg.active.scriptURL.includes('sw.js')) || registrations[0];
+        
+        if (swReg) {
           hasServiceWorker = true;
-          const subscription = await registration.pushManager.getSubscription();
+          const subscription = await swReg.pushManager.getSubscription();
           if (subscription) {
             hasSubscription = true;
             subscriptionEndpoint = subscription.endpoint;
           }
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error("Error checking push subscription status:", e);
       }
     }
 
-    setPushStatus({
+    setPushStatus(prev => ({
+      ...prev,
       supported,
       permission,
       hasServiceWorker,
       hasSubscription,
       subscriptionEndpoint,
       loading: false
-    });
+    }));
   };
 
   React.useEffect(() => {
@@ -189,6 +194,22 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 Diagnostics & Live VAPID Status
               </h4>
 
+              {/* IFrame Warning Banner */}
+              {typeof window !== 'undefined' && window.self !== window.top && (
+                <div className="p-4 bg-amber-50 border border-amber-200/60 rounded-2xl flex items-start gap-3">
+                  <div className="size-8 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700 flex-shrink-0">
+                    <Icon name="open_in_new" className="text-lg" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h5 className="text-xs font-black text-amber-800 uppercase tracking-wider">Iframe Restriction Detected</h5>
+                    <p className="text-[10px] text-amber-700 font-medium leading-relaxed mt-1">
+                      Browsers block Service Workers and Web Push registrations inside interactive iframe previews. 
+                      Please open this application in a <b>New Tab</b> using the button in the top right to enable and test real-time native browser alerts!
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Status Table */}
               <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between text-xs font-medium text-slate-600">
@@ -229,13 +250,36 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 )}
               </div>
 
+              {/* Registration Error Display */}
+              {pushStatus.registrationError && (
+                <div className="p-4 bg-rose-50 border border-rose-200/60 rounded-2xl flex items-start gap-3">
+                  <div className="size-8 rounded-lg bg-rose-100 flex items-center justify-center text-rose-700 flex-shrink-0">
+                    <Icon name="error" className="text-lg" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h5 className="text-xs font-black text-rose-800 uppercase tracking-wider">Subscription Error</h5>
+                    <p className="text-[10px] text-rose-600 font-bold leading-relaxed mt-1">
+                      {pushStatus.registrationError}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col gap-2">
                 <button
                   onClick={async () => {
                     if (user) {
-                      setPushStatus(prev => ({ ...prev, loading: true }));
-                      await registerPushNotifications(user.id);
-                      await checkSubscriptionStatus();
+                      setPushStatus(prev => ({ ...prev, loading: true, registrationError: '' }));
+                      const result = await registerPushNotifications(user.id);
+                      if (result && !result.success) {
+                        setPushStatus(prev => ({ 
+                          ...prev, 
+                          registrationError: result.error || 'Failed to register subscription',
+                          loading: false 
+                        }));
+                      } else {
+                        await checkSubscriptionStatus();
+                      }
                     }
                   }}
                   className="w-full p-4 bg-emerald-600 text-white font-black text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/10 hover:bg-emerald-700 active:scale-98 transition-all"
