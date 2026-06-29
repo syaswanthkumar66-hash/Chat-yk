@@ -316,7 +316,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                   onClick={async () => {
                     if (user) {
                       setPushStatus(prev => ({ ...prev, loading: true, registrationError: '' }));
-                      const result = await registerPushNotifications(user.id);
+                      const result = await registerPushNotifications(user.id, true);
                       if (result && !result.success) {
                         setPushStatus(prev => ({ 
                           ...prev, 
