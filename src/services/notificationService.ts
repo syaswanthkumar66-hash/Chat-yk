@@ -27,6 +27,14 @@ export async function registerPushNotifications(userId: string, force?: boolean)
     console.log("Registering service worker '/sw.js'...");
     const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     
+    // Force service worker to look for updates immediately
+    try {
+      await registration.update();
+      console.log("Service Worker registration update triggered");
+    } catch (updateErr) {
+      console.warn("Failed to update service worker registration:", updateErr);
+    }
+    
     // Ensure the service worker is active before subscribing
     console.log("Waiting for service worker to be ready...");
     await navigator.serviceWorker.ready;
