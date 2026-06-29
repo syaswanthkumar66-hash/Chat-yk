@@ -25,7 +25,7 @@ export async function registerPushNotifications(userId: string): Promise<{ succe
     if (subscription) {
       console.log("Existing VAPID subscription found. Syncing silently with backend...");
       // Store the subscription object by sending it to the backend
-      const res = await fetch('/api/save-subscription', {
+      const res = await fetch(`${window.location.origin}/api/save-subscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -54,11 +54,25 @@ export async function registerPushNotifications(userId: string): Promise<{ succe
 
     // 4. Fetch Public VAPID Key from backend
     console.log("Fetching VAPID public key from backend...");
-    const response = await fetch('/api/vapid-public-key');
-    if (!response.ok) {
-      throw new Error(`Failed to fetch public VAPID key: ${response.statusText}`);
+    let response;
+    try {
+      const fetchUrl = `${window.location.origin}/api/vapid-public-key?cb=${Date.now()}`;
+      response = await fetch(fetchUrl);
+    } catch (fetchErr: any) {
+      console.error("Network error fetching VAPID public key:", fetchErr);
+      throw new Error(`Network error fetching public VAPID key: ${fetchErr.message || fetchErr}`);
     }
-    const { publicKey } = await response.json();
+
+    if (!response.ok) {
+      let bodyText = "";
+      try {
+        bodyText = await response.text();
+      } catch (_) {}
+      throw new Error(`Failed to fetch public VAPID key (HTTP ${response.status}): ${response.statusText || ""} ${bodyText}`.trim());
+    }
+
+    const data = await response.json();
+    const publicKey = data.publicKey;
     if (!publicKey) {
       throw new Error("No public VAPID key returned from server");
     }
@@ -82,7 +96,7 @@ export async function registerPushNotifications(userId: string): Promise<{ succe
     console.log("Successfully subscribed to Web Push Notifications");
 
     // 6. Store the subscription object by sending it to the backend
-    const saveResponse = await fetch('/api/save-subscription', {
+    const saveResponse = await fetch(`${window.location.origin}/api/save-subscription`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
