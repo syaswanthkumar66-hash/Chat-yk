@@ -62,6 +62,158 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     registrationError: ''
   });
 
+  const [diagnosticLogs, setDiagnosticLogs] = useState<string[]>([]);
+  const [activeSimulation, setActiveSimulation] = useState<'working' | 'blocked' | 'iframe' | 'timeout' | null>(null);
+
+  const addLog = (msg: string) => {
+    setDiagnosticLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+  };
+
+  const runSimulation = async (type: 'working' | 'blocked' | 'iframe' | 'timeout') => {
+    setActiveSimulation(type);
+    setDiagnosticLogs([]);
+    
+    if (type === 'working') {
+      addLog("🚀 Starting Live Push Test (VAPID Mode)");
+      addLog("🔍 Step 1: Checking Web Push Support...");
+      const supported = 'serviceWorker' in navigator && 'PushManager' in window;
+      if (!supported) {
+        addLog("❌ Error: Web Push is not supported by your browser!");
+        setActiveSimulation(null);
+        return;
+      }
+      addLog("✅ Web Push is supported by browser.");
+
+      addLog("🔍 Step 2: Checking Browser Permission...");
+      const permission = Notification.permission;
+      addLog(`ℹ️ Current permission state: "${permission}"`);
+      if (permission === 'denied') {
+        addLog("❌ Error: Notification permission is blocked in your browser address bar.");
+        addLog("💡 Resolution: Please reset/allow notifications to test successfully.");
+        setActiveSimulation(null);
+        return;
+      } else if (permission === 'default') {
+        addLog("⚠️ Notice: Permission is 'default'. Requesting permission now...");
+        const result = await Notification.requestPermission();
+        addLog(`ℹ️ Result of permission request: "${result}"`);
+        if (result !== 'granted') {
+          addLog("❌ Error: Permission was not granted.");
+          setActiveSimulation(null);
+          return;
+        }
+      }
+      addLog("✅ Notification permission is GRANTED.");
+
+      addLog("🔍 Step 3: Resolving Service Worker registration...");
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        addLog(`✅ Service Worker is ready! Scope: ${reg.scope}`);
+      } catch (err: any) {
+        addLog(`❌ Error registering Service Worker: ${err.message || err}`);
+        setActiveSimulation(null);
+        return;
+      }
+
+      addLog("🔍 Step 4: Syncing push subscription with secure backend...");
+      if (!user) {
+        addLog("❌ Error: No logged-in user detected.");
+        setActiveSimulation(null);
+        return;
+      }
+      
+      try {
+        const result = await registerPushNotifications(user.id, false);
+        if (result.success) {
+          addLog(`✅ Subscription established successfully.`);
+        } else {
+          addLog(`❌ Subscription error: ${result.error}`);
+          setActiveSimulation(null);
+          return;
+        }
+      } catch (err: any) {
+        addLog(`❌ Subscription failed: ${err.message || err}`);
+        setActiveSimulation(null);
+        return;
+      }
+
+      addLog("🔍 Step 5: Sending manual VAPID live test request to Express backend...");
+      try {
+        const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
+        const result = await triggerPushNotificationWithRetry(
+          user.id,
+          "🔔 Web Push Success Test",
+          "Working Test: Dispatched securely from Express using locked VAPID keys!"
+        );
+        if (result.success) {
+          addLog("🎉 SUCCESS! Live Web Push notification was sent and dispatched by the browser!");
+        } else {
+          addLog(`❌ Backend dispatch failed: ${result.error}`);
+        }
+      } catch (err: any) {
+        addLog(`❌ Failed to trigger test: ${err.message || err}`);
+      }
+    } 
+    
+    else if (type === 'blocked') {
+      addLog("🚀 Starting Simulated Failure Test (Blocked Permission Scenario)");
+      addLog("🔍 Step 1: Simulating Web Push check with blocked permission...");
+      await new Promise(r => setTimeout(r, 600));
+      addLog("⚠️ Simulating: User clicked 'Block' or browser blocks notification popups.");
+      await new Promise(r => setTimeout(r, 600));
+      addLog("❌ Error: Notification permission explicitly denied ('denied').");
+      await new Promise(r => setTimeout(r, 600));
+      addLog("🚫 PushManager subscription attempt aborted: DOMException: Registration failed - permission denied.");
+      await new Promise(r => setTimeout(r, 800));
+      addLog("💡 DIAGNOSTIC REPORT: How to fix 'denied' permission:");
+      addLog("   1. Click the 'lock' or 'info' icon in your browser's address bar (next to the website URL).");
+      addLog("   2. Change the 'Notifications' setting from 'Block' back to 'Allow' (or reset permissions).");
+      addLog("   3. Refresh the page and try again!");
+    } 
+    
+    else if (type === 'iframe') {
+      addLog("🚀 Starting Simulated Failure Test (IFrame Sandbox Scenario)");
+      addLog("🔍 Step 1: Detecting if application is running in an iframe...");
+      await new Promise(r => setTimeout(r, 500));
+      const inIframe = window.self !== window.top;
+      addLog(`ℹ️ Active iframe detection: ${inIframe ? "TRUE (Running inside sandbox iframe)" : "FALSE (Running in standalone new tab)"}`);
+      await new Promise(r => setTimeout(r, 600));
+      if (inIframe) {
+        addLog("❌ Error: Service Worker registration rejected inside iframe context.");
+        addLog("🚫 Reason: Modern browsers block service workers, storage, and secure APIs in third-party iframe contexts for security reasons (SameOrigin policy).");
+      } else {
+        addLog("✅ Diagnostic: App is running in a new tab! IFrame restriction is NOT active here.");
+      }
+      await new Promise(r => setTimeout(r, 800));
+      addLog("💡 DIAGNOSTIC REPORT: How to fix IFrame Restrictions:");
+      addLog("   1. Click the 'Open in New Tab' button in the top right of the developer workspace header.");
+      addLog("   2. Run the tests in the new tab where the Service Worker can register properly!");
+    } 
+    
+    else if (type === 'timeout') {
+      addLog("🚀 Starting Simulated Failure Test (Network Connection Timeout)");
+      addLog("🔍 Step 1: Checking client network connection state...");
+      await new Promise(r => setTimeout(r, 500));
+      addLog(`ℹ️ Client navigator.onLine status: ${navigator.onLine ? "ONLINE" : "OFFLINE"}`);
+      addLog("🔍 Step 2: Dispatching notification to invalid/disconnected endpoint...");
+      await new Promise(r => setTimeout(r, 800));
+      addLog("📡 Fetching mock address: POST http://127.0.0.1:9999/api/send-test-push (Disconnected Endpoint)");
+      await new Promise(r => setTimeout(r, 1200));
+      addLog("❌ Connection Error: TypeError: Failed to fetch (ECONNREFUSED/Timeout)");
+      await new Promise(r => setTimeout(r, 600));
+      addLog("⚠️ Retry Manager triggered: Exponential backoff attempt 1/3 in 1000ms...");
+      await new Promise(r => setTimeout(r, 1000));
+      addLog("❌ Retry 1 failed: Connection refused.");
+      addLog("⚠️ Retry Manager triggered: Exponential backoff attempt 2/3 in 2000ms...");
+      await new Promise(r => setTimeout(r, 1500));
+      addLog("❌ Retry 2 failed: Connection refused.");
+      addLog("❌ Error: Web Push notification delivery failed after maximum retry attempts.");
+      addLog("💡 DIAGNOSTIC REPORT: Ensure that your Express server is running and accessible (bind to 0.0.0.0:3000).");
+    }
+
+    setActiveSimulation(null);
+    await checkSubscriptionStatus();
+  };
+
   const checkSubscriptionStatus = async () => {
     if (typeof window === 'undefined') return;
     const supported = 'serviceWorker' in navigator && 'PushManager' in window;
@@ -311,85 +463,209 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 </div>
               )}
 
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={async () => {
-                    if (user) {
-                      try {
-                        setPushStatus(prev => ({ ...prev, loading: true, registrationError: '' }));
-                        const result = await registerPushNotifications(user.id, true);
-                        if (result && !result.success) {
+              {/* Interactive Playbook for Working and Not-Working Web Push tests */}
+              <div className="p-5 bg-slate-900 border border-slate-800 rounded-3xl space-y-4">
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-widest italic flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Web Push Diagnostic Console
+                  </h5>
+                  <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+                    Select a scenario below to test and inspect the actual Web Push behavior under <b>Working</b> vs <b>Failing</b> contexts:
+                  </p>
+                </div>
+
+                {/* Scenario Grid */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => runSimulation('working')}
+                    disabled={!!activeSimulation}
+                    className="p-3 bg-slate-800/80 border border-emerald-500/30 hover:border-emerald-500 hover:bg-slate-800 text-left rounded-2xl transition-all disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="size-2 rounded-full bg-emerald-500"></span>
+                      <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Working Test</span>
+                    </div>
+                    <span className="text-[9px] text-slate-300 font-medium block mt-1 leading-normal">
+                      Full VAPID Web Push delivery via backend server.
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => runSimulation('blocked')}
+                    disabled={!!activeSimulation}
+                    className="p-3 bg-slate-800/80 border border-rose-500/30 hover:border-rose-500 hover:bg-slate-800 text-left rounded-2xl transition-all disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="size-2 rounded-full bg-rose-500"></span>
+                      <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Not Working (Blocked)</span>
+                    </div>
+                    <span className="text-[9px] text-slate-300 font-medium block mt-1 leading-normal">
+                      Simulates denied browser permissions & resolution.
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => runSimulation('iframe')}
+                    disabled={!!activeSimulation}
+                    className="p-3 bg-slate-800/80 border border-amber-500/30 hover:border-amber-500 hover:bg-slate-800 text-left rounded-2xl transition-all disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="size-2 rounded-full bg-amber-500"></span>
+                      <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Not Working (Iframe)</span>
+                    </div>
+                    <span className="text-[9px] text-slate-300 font-medium block mt-1 leading-normal">
+                      Tests browser service worker sandbox limitations.
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => runSimulation('timeout')}
+                    disabled={!!activeSimulation}
+                    className="p-3 bg-slate-800/80 border border-sky-500/30 hover:border-sky-500 hover:bg-slate-800 text-left rounded-2xl transition-all disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="size-2 rounded-full bg-sky-500"></span>
+                      <span className="text-[10px] font-bold text-sky-400 uppercase tracking-wider">Not Working (Timeout)</span>
+                    </div>
+                    <span className="text-[9px] text-slate-300 font-medium block mt-1 leading-normal">
+                      Simulates backend connection timeout & retry mechanism.
+                    </span>
+                  </button>
+                </div>
+
+                {/* Developer Terminal Logs Panel */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest font-mono">
+                      {activeSimulation ? `🏃 Running Simulation: ${activeSimulation}...` : "📁 Diagnostic Logs Output"}
+                    </span>
+                    {diagnosticLogs.length > 0 && (
+                      <button
+                        onClick={() => setDiagnosticLogs([])}
+                        className="text-[8px] font-black text-slate-400 hover:text-white uppercase tracking-wider font-mono transition-all"
+                      >
+                        [ Clear Logs ]
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="h-44 bg-black/60 border border-slate-800/80 rounded-2xl p-3 font-mono text-[9px] overflow-y-auto space-y-1 select-all text-slate-300 max-w-full">
+                    {diagnosticLogs.length === 0 ? (
+                      <div className="text-slate-500 italic h-full flex items-center justify-center text-center px-4">
+                        Terminal ready. Click any of the playbook scenarios above to run interactive diagnostics!
+                      </div>
+                    ) : (
+                      diagnosticLogs.map((log, i) => {
+                        let colorClass = "text-emerald-400";
+                        if (log.includes("❌") || log.includes("Error:") || log.includes("failed")) {
+                          colorClass = "text-rose-400";
+                        } else if (log.includes("⚠️") || log.includes("Warning") || log.includes("Notice:")) {
+                          colorClass = "text-amber-400";
+                        } else if (log.includes("ℹ️") || log.includes("Diagnostic")) {
+                          colorClass = "text-sky-300";
+                        } else if (log.includes("🎉") || log.includes("SUCCESS")) {
+                          colorClass = "text-emerald-300 font-bold bg-emerald-950/40 px-1 py-0.5 rounded";
+                        } else if (log.includes("🚀") || log.includes("Starting")) {
+                          colorClass = "text-white font-bold tracking-wide border-b border-slate-800 pb-1 block mb-1";
+                        }
+                        return (
+                          <div key={i} className={cn("leading-relaxed break-words whitespace-pre-wrap", colorClass)}>
+                            {log}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Keep Quick Action Buttons for standard validation flows */}
+              <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                  Manual Subscriptions & Core Actions:
+                </span>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={async () => {
+                      if (user) {
+                        try {
+                          setPushStatus(prev => ({ ...prev, loading: true, registrationError: '' }));
+                          const result = await registerPushNotifications(user.id, true);
+                          if (result && !result.success) {
+                            setPushStatus(prev => ({ 
+                              ...prev, 
+                              registrationError: result.error || 'Failed to register subscription'
+                            }));
+                          }
+                        } catch (err: any) {
                           setPushStatus(prev => ({ 
                             ...prev, 
-                            registrationError: result.error || 'Failed to register subscription'
+                            registrationError: err.message || 'An unexpected error occurred during subscription'
                           }));
+                        } finally {
+                          await checkSubscriptionStatus();
                         }
-                      } catch (err: any) {
-                        setPushStatus(prev => ({ 
-                          ...prev, 
-                          registrationError: err.message || 'An unexpected error occurred during subscription'
-                        }));
-                      } finally {
-                        await checkSubscriptionStatus();
                       }
-                    }
-                  }}
-                  className="w-full p-4 bg-emerald-600 text-white font-black text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/10 hover:bg-emerald-700 active:scale-98 transition-all"
-                >
-                  <Icon name="sync" /> Force Generate VAPID Subscription
-                </button>
+                    }}
+                    className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200/60 text-slate-700 font-bold text-[10px] uppercase tracking-wider rounded-2xl flex items-center justify-center gap-1.5 active:scale-98 transition-all"
+                  >
+                    <Icon name="sync" className="text-sm" /> Force Sync VAPID
+                  </button>
 
-                <button
-                  onClick={async () => {
-                    if (typeof window === 'undefined') return;
-                    if (!('serviceWorker' in navigator)) {
-                      alert("Service workers are not supported by this browser.");
-                      return;
-                    }
-                    if (!('Notification' in window)) {
-                      alert("Notifications are not supported by this browser.");
-                      return;
-                    }
-                    if (Notification.permission !== 'granted') {
-                      const perm = await Notification.requestPermission();
-                      if (perm !== 'granted') {
-                        setPushStatus(prev => ({ 
-                          ...prev, 
-                          registrationError: `Notification permission denied (${perm}). Please allow notifications in your browser settings to test.` 
-                        }));
+                  <button
+                    onClick={async () => {
+                      if (typeof window === 'undefined') return;
+                      if (!('serviceWorker' in navigator)) {
+                        alert("Service workers are not supported by this browser.");
                         return;
                       }
-                    }
-                    try {
-                      const reg = await navigator.serviceWorker.ready;
-                      await reg.showNotification("🔔 Service Worker Test Alert", {
-                        body: "Amazing! The service worker and notification permissions are working correctly.",
-                        icon: "/pwa-192x192.png",
-                        badge: "/favicon.ico",
-                        tag: "test-notification",
-                        renotify: true
-                      } as any);
-                      
-                      // Also show in-app toast to confirm
-                      const addInAppToast = useAppStore.getState().addInAppToast;
-                      addInAppToast({
-                        title: "🔔 Test Notification Dispatched",
-                        body: "Dummy notification sent to the active Service Worker!",
-                        avatar: "/pwa-192x192.png",
-                        chatId: 'system-test'
-                      });
-                    } catch (err: any) {
-                      console.error("Failed to show local service worker notification:", err);
-                      setPushStatus(prev => ({ 
-                        ...prev, 
-                        registrationError: `Failed to show notification: ${err.message || err}` 
-                      }));
-                    }
-                  }}
-                  className="w-full p-4 bg-blue-600 text-white font-black text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-blue-600/10 hover:bg-blue-700 active:scale-98 transition-all"
-                >
-                  <Icon name="bug_report" /> Test Service Worker Notification
-                </button>
+                      if (!('Notification' in window)) {
+                        alert("Notifications are not supported by this browser.");
+                        return;
+                      }
+                      if (Notification.permission !== 'granted') {
+                        const perm = await Notification.requestPermission();
+                        if (perm !== 'granted') {
+                          setPushStatus(prev => ({ 
+                            ...prev, 
+                            registrationError: `Notification permission denied (${perm}). Please allow notifications in your browser settings to test.` 
+                          }));
+                          return;
+                        }
+                      }
+                      try {
+                        const reg = await navigator.serviceWorker.ready;
+                        await reg.showNotification("🔔 Service Worker Test Alert", {
+                          body: "Amazing! The service worker and notification permissions are working correctly.",
+                          icon: "/pwa-192x192.png",
+                          badge: "/favicon.ico",
+                          tag: "test-notification",
+                          renotify: true
+                        } as any);
+                        
+                        // Also show in-app toast to confirm
+                        const addInAppToast = useAppStore.getState().addInAppToast;
+                        addInAppToast({
+                          title: "🔔 Test Notification Dispatched",
+                          body: "Dummy notification sent to the active Service Worker!",
+                          avatar: "/pwa-192x192.png",
+                          chatId: 'system-test'
+                        });
+                      } catch (err: any) {
+                        console.error("Failed to show local service worker notification:", err);
+                        setPushStatus(prev => ({ 
+                          ...prev, 
+                          registrationError: `Failed to show notification: ${err.message || err}` 
+                        }));
+                      }
+                    }}
+                    className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200/60 text-slate-700 font-bold text-[10px] uppercase tracking-wider rounded-2xl flex items-center justify-center gap-1.5 active:scale-98 transition-all"
+                  >
+                    <Icon name="bug_report" className="text-sm" /> Test SW Local
+                  </button>
+                </div>
 
                 <button
                   onClick={() => {
@@ -414,7 +690,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 </button>
               </div>
               <p className="text-[10px] text-slate-400 text-center leading-normal mt-2 px-4">
-                Note: Web Push Notifications depend on secure browser subscriptions. Click <b>Force Generate VAPID Subscription</b> above to manually establish a fresh web push endpoint.
+                Note: Web Push Notifications depend on secure browser subscriptions. Click <b>Force Sync VAPID</b> above to manually establish a fresh web push endpoint.
               </p>
             </div>
           </div>
