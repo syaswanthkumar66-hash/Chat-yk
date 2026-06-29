@@ -39,24 +39,26 @@ export async function registerPushNotifications(userId: string, force?: boolean)
     console.log("Waiting for service worker to be ready...");
     await navigator.serviceWorker.ready;
 
-    // 2. Fetch Public VAPID Key from backend first
+    // 2. Fetch Public VAPID Key from backend first (with retry)
     console.log("Fetching VAPID public key from backend...");
     let response;
     try {
       const targetUrl = BACKEND_URL || window.location.origin;
       const fetchUrl = `${targetUrl}/api/vapid-public-key?cb=${Date.now()}`;
-      response = await fetch(fetchUrl);
+      response = await retryWithBackoff(async () => {
+        const res = await fetch(fetchUrl);
+        if (!res.ok) {
+          let bodyText = "";
+          try {
+            bodyText = await res.text();
+          } catch (_) {}
+          throw new Error(`Failed to fetch public VAPID key (HTTP ${res.status}): ${res.statusText || ""} ${bodyText}`.trim());
+        }
+        return res;
+      }, 5, 1000); // Retry 5 times, starting with 1000ms delay and doubling each time
     } catch (fetchErr: any) {
       console.error("Network error fetching VAPID public key:", fetchErr);
       throw new Error(`Network error fetching public VAPID key: ${fetchErr.message || fetchErr}`);
-    }
-
-    if (!response.ok) {
-      let bodyText = "";
-      try {
-        bodyText = await response.text();
-      } catch (_) {}
-      throw new Error(`Failed to fetch public VAPID key (HTTP ${response.status}): ${response.statusText || ""} ${bodyText}`.trim());
     }
 
     const data = await response.json();
