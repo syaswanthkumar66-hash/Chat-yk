@@ -133,31 +133,50 @@ export async function registerPushNotifications(userId: string, force?: boolean)
       }
     }
 
-    // 5. Subscribe the user silently (since permission is already granted)
-    console.log("Subscribing with PushManager using VAPID key...");
-    try {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: outputArray
-      });
-    } catch (subErr: any) {
-      console.error("PushManager subscribe call failed directly:", subErr);
-      
-      // Specifically identify VAPID token or applicationServerKey mismatches
-      const isVapidError = subErr.name === 'InvalidAccessError' || 
-                           subErr.message?.includes('applicationServerKey') || 
-                           subErr.message?.includes('VAPID') ||
-                           subErr.message?.includes('key') ||
-                           subErr.name === 'SecurityError';
-                           
-      if (isVapidError) {
-        console.error("CRITICAL: VAPID Public Key mismatch or malformed key detected! The browser's push engine rejected the applicationServerKey. Ensure the backend VAPID keys match this client public key exactly.", subErr);
-        throw new Error(`VAPID public key mismatch or browser rejection: ${subErr.message || subErr}`);
-      } else if (subErr.name === 'NotAllowedError') {
-        console.warn("Permission denied when calling pushManager.subscribe (NotAllowedError).", subErr);
-        throw new Error("Permission denied by browser configuration or secure origin rules during push registration.");
-      } else {
-        throw subErr;
+    // 5. Subscribe the user silently (since permission is already granted) with retry mechanism
+    console.log("Subscribing with PushManager using VAPID key (with retry mechanism)...");
+    const maxSubscribeAttempts = 3;
+    for (let attempt = 1; attempt <= maxSubscribeAttempts; attempt++) {
+      try {
+        console.log(`PushManager subscribe attempt ${attempt}/${maxSubscribeAttempts}...`);
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: outputArray
+        });
+        // If we reach here, we succeeded!
+        break;
+      } catch (subErr: any) {
+        console.warn(`PushManager subscribe attempt ${attempt}/${maxSubscribeAttempts} failed:`, subErr);
+
+        // Check if this is a permanent failure (like permission denial or VAPID mismatch)
+        const isVapidError = subErr.name === 'InvalidAccessError' || 
+                             subErr.message?.includes('applicationServerKey') || 
+                             subErr.message?.includes('VAPID') ||
+                             subErr.message?.includes('key') ||
+                             subErr.name === 'SecurityError';
+                             
+        const isPermissionDenied = subErr.name === 'NotAllowedError' ||
+                                   subErr.message?.includes('permission') ||
+                                   subErr.message?.includes('allowed') ||
+                                   subErr.message?.includes('denied');
+
+        if (isVapidError) {
+          console.error("CRITICAL: VAPID Public Key mismatch or malformed key detected! The browser's push engine rejected the applicationServerKey. Ensure the backend VAPID keys match this client public key exactly.", subErr);
+          throw new Error(`VAPID public key mismatch or browser rejection: ${subErr.message || subErr}`);
+        } else if (isPermissionDenied) {
+          console.warn("CRITICAL: Permission denied when calling pushManager.subscribe (NotAllowedError or equivalent).", subErr);
+          throw new Error("Permission denied by browser configuration or secure origin rules during push registration.");
+        }
+
+        // For other transient errors, wait and retry unless we hit max attempts
+        if (attempt < maxSubscribeAttempts) {
+          console.log(`Waiting 1000ms before retrying pushManager.subscribe...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+          // If we run out of retries, throw the final error
+          console.error(`All ${maxSubscribeAttempts} pushManager.subscribe attempts failed.`);
+          throw subErr;
+        }
       }
     }
 

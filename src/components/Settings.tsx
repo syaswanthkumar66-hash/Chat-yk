@@ -340,6 +340,58 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 </button>
 
                 <button
+                  onClick={async () => {
+                    if (typeof window === 'undefined') return;
+                    if (!('serviceWorker' in navigator)) {
+                      alert("Service workers are not supported by this browser.");
+                      return;
+                    }
+                    if (!('Notification' in window)) {
+                      alert("Notifications are not supported by this browser.");
+                      return;
+                    }
+                    if (Notification.permission !== 'granted') {
+                      const perm = await Notification.requestPermission();
+                      if (perm !== 'granted') {
+                        setPushStatus(prev => ({ 
+                          ...prev, 
+                          registrationError: `Notification permission denied (${perm}). Please allow notifications in your browser settings to test.` 
+                        }));
+                        return;
+                      }
+                    }
+                    try {
+                      const reg = await navigator.serviceWorker.ready;
+                      await reg.showNotification("🔔 Service Worker Test Alert", {
+                        body: "Amazing! The service worker and notification permissions are working correctly.",
+                        icon: "/pwa-192x192.png",
+                        badge: "/favicon.ico",
+                        tag: "test-notification",
+                        renotify: true
+                      } as any);
+                      
+                      // Also show in-app toast to confirm
+                      const addInAppToast = useAppStore.getState().addInAppToast;
+                      addInAppToast({
+                        title: "🔔 Test Notification Dispatched",
+                        body: "Dummy notification sent to the active Service Worker!",
+                        avatar: "/pwa-192x192.png",
+                        chatId: 'system-test'
+                      });
+                    } catch (err: any) {
+                      console.error("Failed to show local service worker notification:", err);
+                      setPushStatus(prev => ({ 
+                        ...prev, 
+                        registrationError: `Failed to show notification: ${err.message || err}` 
+                      }));
+                    }
+                  }}
+                  className="w-full p-4 bg-blue-600 text-white font-black text-xs uppercase tracking-widest italic rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-blue-600/10 hover:bg-blue-700 active:scale-98 transition-all"
+                >
+                  <Icon name="bug_report" /> Test Service Worker Notification
+                </button>
+
+                <button
                   onClick={() => {
                     if (typeof window !== 'undefined' && (window as any).triggerTestNotification) {
                       (window as any).triggerTestNotification();
