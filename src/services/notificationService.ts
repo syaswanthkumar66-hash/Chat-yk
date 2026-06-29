@@ -1,4 +1,6 @@
 // Web Push Notification Registration Service using VAPID keys
+import { BACKEND_URL } from '../config';
+
 export async function registerPushNotifications(userId: string): Promise<{ success: boolean; subscription?: PushSubscription; error?: string }> {
   if (typeof window === 'undefined') {
     return { success: false, error: "Window is undefined" };
@@ -25,7 +27,8 @@ export async function registerPushNotifications(userId: string): Promise<{ succe
     if (subscription) {
       console.log("Existing VAPID subscription found. Syncing silently with backend...");
       // Store the subscription object by sending it to the backend
-      const res = await fetch(`${window.location.origin}/api/save-subscription`, {
+      const targetUrl = BACKEND_URL || window.location.origin;
+      const res = await fetch(`${targetUrl}/api/save-subscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -56,7 +59,8 @@ export async function registerPushNotifications(userId: string): Promise<{ succe
     console.log("Fetching VAPID public key from backend...");
     let response;
     try {
-      const fetchUrl = `${window.location.origin}/api/vapid-public-key?cb=${Date.now()}`;
+      const targetUrl = BACKEND_URL || window.location.origin;
+      const fetchUrl = `${targetUrl}/api/vapid-public-key?cb=${Date.now()}`;
       response = await fetch(fetchUrl);
     } catch (fetchErr: any) {
       console.error("Network error fetching VAPID public key:", fetchErr);
@@ -96,7 +100,8 @@ export async function registerPushNotifications(userId: string): Promise<{ succe
     console.log("Successfully subscribed to Web Push Notifications");
 
     // 6. Store the subscription object by sending it to the backend
-    const saveResponse = await fetch(`${window.location.origin}/api/save-subscription`, {
+    const targetUrl = BACKEND_URL || window.location.origin;
+    const saveResponse = await fetch(`${targetUrl}/api/save-subscription`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

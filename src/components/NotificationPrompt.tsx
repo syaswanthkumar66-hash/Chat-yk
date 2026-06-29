@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Card } from './UI';
 import { useAppStore } from '../store';
+import { BACKEND_URL } from '../config';
 
 export function NotificationPrompt() {
   const [status, setStatus] = useState<'hidden' | 'request' | 'success'>('hidden');
@@ -106,7 +107,8 @@ export function NotificationPrompt() {
     if (user) {
       try {
         console.log("Triggering real server-side VAPID web push notification for user:", user.id);
-        const res = await fetch('/api/send-test-push', {
+        const targetUrl = BACKEND_URL || window.location.origin;
+        const res = await fetch(`${targetUrl}/api/send-test-push`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

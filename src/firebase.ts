@@ -18,6 +18,7 @@ import {
   getDocFromServer as firestoreGetDocFromServer
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import { BACKEND_URL } from './config';
 
 const app = initializeApp(firebaseConfig);
 
@@ -141,7 +142,8 @@ export async function getDoc(docRef: any) {
 
 async function fetchDocViaProxy(docRef: any) {
   console.warn("Client-side Firestore offline/unavailable, proxying getDoc:", docRef.path);
-  const response = await fetch(`/api/firestore/get?path=${encodeURIComponent(docRef.path)}`);
+  const targetUrl = BACKEND_URL || window.location.origin;
+  const response = await fetch(`${targetUrl}/api/firestore/get?path=${encodeURIComponent(docRef.path)}`);
   if (!response.ok) throw new Error(await response.text());
   const result = await response.json();
   const convertedData = convertTimestamps(result.data);
@@ -188,7 +190,8 @@ export async function setDoc(docRef: any, data: any, options?: any) {
 
 async function setDocViaProxy(docRef: any, data: any, options?: any) {
   console.warn("Client-side Firestore offline/unavailable, proxying setDoc:", docRef.path);
-  const response = await fetch(`/api/firestore/set`, {
+  const targetUrl = BACKEND_URL || window.location.origin;
+  const response = await fetch(`${targetUrl}/api/firestore/set`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -215,7 +218,8 @@ export async function updateDoc(docRef: any, data: any) {
 
 async function updateDocViaProxy(docRef: any, data: any) {
   console.warn("Client-side Firestore offline/unavailable, proxying updateDoc:", docRef.path);
-  const response = await fetch(`/api/firestore/update`, {
+  const targetUrl = BACKEND_URL || window.location.origin;
+  const response = await fetch(`${targetUrl}/api/firestore/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -241,7 +245,8 @@ export async function deleteDoc(docRef: any) {
 
 async function deleteDocViaProxy(docRef: any) {
   console.warn("Client-side Firestore offline/unavailable, proxying deleteDoc:", docRef.path);
-  const response = await fetch(`/api/firestore/delete`, {
+  const targetUrl = BACKEND_URL || window.location.origin;
+  const response = await fetch(`${targetUrl}/api/firestore/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -274,7 +279,8 @@ async function addDocViaProxy(collectionRef: any, data: any) {
   const randomId = `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const docPath = `${collectionRef.path}/${randomId}`;
   console.warn("Client-side Firestore offline/unavailable, proxying addDoc via setDoc:", docPath);
-  const response = await fetch(`/api/firestore/set`, {
+  const targetUrl = BACKEND_URL || window.location.origin;
+  const response = await fetch(`${targetUrl}/api/firestore/set`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -342,7 +348,8 @@ async function fetchDocsViaProxy(queryObj: any) {
 
   console.warn("Client-side Firestore offline, proxying getDocs for collection:", colName);
 
-  const response = await fetch(`/api/firestore/query`, {
+  const targetUrl = BACKEND_URL || window.location.origin;
+  const response = await fetch(`${targetUrl}/api/firestore/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

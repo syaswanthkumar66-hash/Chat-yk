@@ -93,7 +93,13 @@ let vapidKeys = {
 };
 
 async function initVapid() {
-  if (db) {
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    vapidKeys = {
+      publicKey: process.env.VAPID_PUBLIC_KEY,
+      privateKey: process.env.VAPID_PRIVATE_KEY
+    };
+    console.log("Loaded VAPID keys from environment variables");
+  } else if (db) {
     try {
       const vapidDoc = await db.collection('system_config').doc('vapid').get();
       if (vapidDoc.exists) {
@@ -121,25 +127,21 @@ async function initVapid() {
       };
     }
   } else {
-    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-      vapidKeys = {
-        publicKey: process.env.VAPID_PUBLIC_KEY,
-        privateKey: process.env.VAPID_PRIVATE_KEY
-      };
-      console.log("Loaded VAPID keys from environment variables");
-    } else {
-      console.log("No Firebase DB or environment VAPID keys found. Generating in-memory VAPID keys.");
-      const generated = webpush.generateVAPIDKeys();
-      vapidKeys = {
-        publicKey: generated.publicKey,
-        privateKey: generated.privateKey
-      };
-    }
+    console.log("No Firebase DB or environment VAPID keys found. Generating in-memory VAPID keys.");
+    const generated = webpush.generateVAPIDKeys();
+    vapidKeys = {
+      publicKey: generated.publicKey,
+      privateKey: generated.privateKey
+    };
   }
 
   try {
+    let subject = process.env.VAPID_SUBJECT || 'mailto:syaswanthkumar66@gmail.com';
+    if (subject && !subject.startsWith('mailto:') && subject.includes('@')) {
+      subject = `mailto:${subject}`;
+    }
     webpush.setVapidDetails(
-      'mailto:syaswanthkumar66@gmail.com',
+      subject,
       vapidKeys.publicKey,
       vapidKeys.privateKey
     );
