@@ -19,16 +19,26 @@ class WebRTCService {
     this.fetchIceConfig();
   }
 
-  private async fetchIceConfig() {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/webrtc/config`);
-      if (response.ok) {
-        const data = await response.json();
-        this.iceServers = data.iceServers;
+  private async fetchIceConfig(retries = 5, delay = 1000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/webrtc/config`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.iceServers) {
+            this.iceServers = data.iceServers;
+            console.log("Successfully fetched WebRTC ICE config");
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn(`Attempt ${attempt} to fetch ICE config failed:`, error);
       }
-    } catch (error) {
-      console.error('Failed to fetch ICE config:', error);
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, attempt - 1)));
+      }
     }
+    console.error('Failed to fetch ICE config after retries, using default STUN server');
   }
 
   private async apiRequest(path: string, method: string = 'POST', body?: any) {
@@ -45,6 +55,12 @@ class WebRTCService {
 
   async initSession() {
     if (this.sessionId) return this.sessionId;
+
+    // If we only have the default STUN server, try one quick final fetch
+    if (this.iceServers.length <= 1) {
+      await this.fetchIceConfig(2, 500);
+    }
+
     const data = await this.apiRequest('sessions/new');
     this.sessionId = data.sessionId;
     

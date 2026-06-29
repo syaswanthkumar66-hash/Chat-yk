@@ -73,145 +73,149 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     setActiveSimulation(type);
     setDiagnosticLogs([]);
     
-    if (type === 'working') {
-      addLog("🚀 Starting Live Push Test (VAPID Mode)");
-      addLog("🔍 Step 1: Checking Web Push Support...");
-      const supported = 'serviceWorker' in navigator && 'PushManager' in window;
-      if (!supported) {
-        addLog("❌ Error: Web Push is not supported by your browser!");
-        setActiveSimulation(null);
-        return;
-      }
-      addLog("✅ Web Push is supported by browser.");
-
-      addLog("🔍 Step 2: Checking Browser Permission...");
-      const permission = Notification.permission;
-      addLog(`ℹ️ Current permission state: "${permission}"`);
-      if (permission === 'denied') {
-        addLog("❌ Error: Notification permission is blocked in your browser address bar.");
-        addLog("💡 Resolution: Please reset/allow notifications to test successfully.");
-        setActiveSimulation(null);
-        return;
-      } else if (permission === 'default') {
-        addLog("⚠️ Notice: Permission is 'default'. Requesting permission now...");
-        const result = await Notification.requestPermission();
-        addLog(`ℹ️ Result of permission request: "${result}"`);
-        if (result !== 'granted') {
-          addLog("❌ Error: Permission was not granted.");
-          setActiveSimulation(null);
+    try {
+      if (type === 'working') {
+        addLog("🚀 Starting Live Push Test (VAPID Mode)");
+        addLog("🔍 Step 1: Checking Web Push Support...");
+        const supported = 'serviceWorker' in navigator && 'PushManager' in window;
+        if (!supported) {
+          addLog("❌ Error: Web Push is not supported by your browser!");
           return;
         }
-      }
-      addLog("✅ Notification permission is GRANTED.");
+        addLog("✅ Web Push is supported by browser.");
 
-      addLog("🔍 Step 3: Resolving Service Worker registration...");
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        addLog(`✅ Service Worker is ready! Scope: ${reg.scope}`);
-      } catch (err: any) {
-        addLog(`❌ Error registering Service Worker: ${err.message || err}`);
-        setActiveSimulation(null);
-        return;
-      }
+        addLog("🔍 Step 2: Checking Browser Permission...");
+        const permission = Notification.permission;
+        addLog(`ℹ️ Current permission state: "${permission}"`);
+        if (permission === 'denied') {
+          addLog("❌ Error: Notification permission is blocked in your browser address bar.");
+          addLog("💡 Resolution: Please reset/allow notifications to test successfully.");
+          return;
+        } else if (permission === 'default') {
+          addLog("⚠️ Notice: Permission is 'default'. Requesting permission now...");
+          let result: NotificationPermission = 'default';
+          try {
+            result = await Notification.requestPermission();
+            addLog(`ℹ️ Result of permission request: "${result}"`);
+          } catch (permErr: any) {
+            addLog(`❌ Permission request failed: ${permErr.message || permErr}`);
+            addLog("⚠️ Note: Browser blocked permission popup because we are in an iframe. Click 'Open in New Tab' to bypass iframe sandbox restrictions.");
+            return;
+          }
+          if (result !== 'granted') {
+            addLog("❌ Error: Permission was not granted.");
+            return;
+          }
+        }
+        addLog("✅ Notification permission is GRANTED.");
 
-      addLog("🔍 Step 4: Syncing push subscription with secure backend...");
-      if (!user) {
-        addLog("❌ Error: No logged-in user detected.");
-        setActiveSimulation(null);
-        return;
-      }
+        addLog("🔍 Step 3: Resolving Service Worker registration...");
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          addLog(`✅ Service Worker is ready! Scope: ${reg.scope}`);
+        } catch (err: any) {
+          addLog(`❌ Error registering Service Worker: ${err.message || err}`);
+          return;
+        }
+
+        addLog("🔍 Step 4: Syncing push subscription with secure backend...");
+        if (!user) {
+          addLog("❌ Error: No logged-in user detected.");
+          return;
+        }
+        
+        try {
+          const result = await registerPushNotifications(user.id, false);
+          if (result.success) {
+            addLog(`✅ Subscription established successfully.`);
+          } else {
+            addLog(`❌ Subscription error: ${result.error}`);
+            return;
+          }
+        } catch (err: any) {
+          addLog(`❌ Subscription failed: ${err.message || err}`);
+          return;
+        }
+
+        addLog("🔍 Step 5: Sending manual VAPID live test request to Express backend...");
+        try {
+          const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
+          const result = await triggerPushNotificationWithRetry(
+            user.id,
+            "🔔 Web Push Success Test",
+            "Working Test: Dispatched securely from Express using locked VAPID keys!"
+          );
+          if (result.success) {
+            addLog("🎉 SUCCESS! Live Web Push notification was sent and dispatched by the browser!");
+          } else {
+            addLog(`❌ Backend dispatch failed: ${result.error}`);
+          }
+        } catch (err: any) {
+          addLog(`❌ Failed to trigger test: ${err.message || err}`);
+        }
+      } 
       
-      try {
-        const result = await registerPushNotifications(user.id, false);
-        if (result.success) {
-          addLog(`✅ Subscription established successfully.`);
+      else if (type === 'blocked') {
+        addLog("🚀 Starting Simulated Failure Test (Blocked Permission Scenario)");
+        addLog("🔍 Step 1: Simulating Web Push check with blocked permission...");
+        await new Promise(r => setTimeout(r, 600));
+        addLog("⚠️ Simulating: User clicked 'Block' or browser blocks notification popups.");
+        await new Promise(r => setTimeout(r, 600));
+        addLog("❌ Error: Notification permission explicitly denied ('denied').");
+        await new Promise(r => setTimeout(r, 600));
+        addLog("🚫 PushManager subscription attempt aborted: DOMException: Registration failed - permission denied.");
+        await new Promise(r => setTimeout(r, 800));
+        addLog("💡 DIAGNOSTIC REPORT: How to fix 'denied' permission:");
+        addLog("   1. Click the 'lock' or 'info' icon in your browser's address bar (next to the website URL).");
+        addLog("   2. Change the 'Notifications' setting from 'Block' back to 'Allow' (or reset permissions).");
+        addLog("   3. Refresh the page and try again!");
+      } 
+      
+      else if (type === 'iframe') {
+        addLog("🚀 Starting Simulated Failure Test (IFrame Sandbox Scenario)");
+        addLog("🔍 Step 1: Detecting if application is running in an iframe...");
+        await new Promise(r => setTimeout(r, 500));
+        const inIframe = window.self !== window.top;
+        addLog(`ℹ️ Active iframe detection: ${inIframe ? "TRUE (Running inside sandbox iframe)" : "FALSE (Running in standalone new tab)"}`);
+        await new Promise(r => setTimeout(r, 600));
+        if (inIframe) {
+          addLog("❌ Error: Service Worker registration rejected inside iframe context.");
+          addLog("🚫 Reason: Modern browsers block service workers, storage, and secure APIs in third-party iframe contexts for security reasons (SameOrigin policy).");
         } else {
-          addLog(`❌ Subscription error: ${result.error}`);
-          setActiveSimulation(null);
-          return;
+          addLog("✅ Diagnostic: App is running in a new tab! IFrame restriction is NOT active here.");
         }
-      } catch (err: any) {
-        addLog(`❌ Subscription failed: ${err.message || err}`);
-        setActiveSimulation(null);
-        return;
+        await new Promise(r => setTimeout(r, 800));
+        addLog("💡 DIAGNOSTIC REPORT: How to fix IFrame Restrictions:");
+        addLog("   1. Click the 'Open in New Tab' button in the top right of the developer workspace header.");
+        addLog("   2. Run the tests in the new tab where the Service Worker can register properly!");
+      } 
+      
+      else if (type === 'timeout') {
+        addLog("🚀 Starting Simulated Failure Test (Network Connection Timeout)");
+        addLog("🔍 Step 1: Checking client network connection state...");
+        await new Promise(r => setTimeout(r, 500));
+        addLog(`ℹ️ Client navigator.onLine status: ${navigator.onLine ? "ONLINE" : "OFFLINE"}`);
+        addLog("🔍 Step 2: Dispatching notification to invalid/disconnected endpoint...");
+        await new Promise(r => setTimeout(r, 800));
+        addLog("📡 Fetching mock address: POST http://127.0.0.1:9999/api/send-test-push (Disconnected Endpoint)");
+        await new Promise(r => setTimeout(r, 1200));
+        addLog("❌ Connection Error: TypeError: Failed to fetch (ECONNREFUSED/Timeout)");
+        await new Promise(r => setTimeout(r, 600));
+        addLog("⚠️ Retry Manager triggered: Exponential backoff attempt 1/3 in 1000ms...");
+        await new Promise(r => setTimeout(r, 1000));
+        addLog("❌ Retry 1 failed: Connection refused.");
+        addLog("⚠️ Retry Manager triggered: Exponential backoff attempt 2/3 in 2000ms...");
+        await new Promise(r => setTimeout(r, 1500));
+        addLog("❌ Retry 2 failed: Connection refused.");
+        addLog("❌ Error: Web Push notification delivery failed after maximum retry attempts.");
+        addLog("💡 DIAGNOSTIC REPORT: Ensure that your Express server is running and accessible (bind to 0.0.0.0:3000).");
       }
-
-      addLog("🔍 Step 5: Sending manual VAPID live test request to Express backend...");
-      try {
-        const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
-        const result = await triggerPushNotificationWithRetry(
-          user.id,
-          "🔔 Web Push Success Test",
-          "Working Test: Dispatched securely from Express using locked VAPID keys!"
-        );
-        if (result.success) {
-          addLog("🎉 SUCCESS! Live Web Push notification was sent and dispatched by the browser!");
-        } else {
-          addLog(`❌ Backend dispatch failed: ${result.error}`);
-        }
-      } catch (err: any) {
-        addLog(`❌ Failed to trigger test: ${err.message || err}`);
-      }
-    } 
-    
-    else if (type === 'blocked') {
-      addLog("🚀 Starting Simulated Failure Test (Blocked Permission Scenario)");
-      addLog("🔍 Step 1: Simulating Web Push check with blocked permission...");
-      await new Promise(r => setTimeout(r, 600));
-      addLog("⚠️ Simulating: User clicked 'Block' or browser blocks notification popups.");
-      await new Promise(r => setTimeout(r, 600));
-      addLog("❌ Error: Notification permission explicitly denied ('denied').");
-      await new Promise(r => setTimeout(r, 600));
-      addLog("🚫 PushManager subscription attempt aborted: DOMException: Registration failed - permission denied.");
-      await new Promise(r => setTimeout(r, 800));
-      addLog("💡 DIAGNOSTIC REPORT: How to fix 'denied' permission:");
-      addLog("   1. Click the 'lock' or 'info' icon in your browser's address bar (next to the website URL).");
-      addLog("   2. Change the 'Notifications' setting from 'Block' back to 'Allow' (or reset permissions).");
-      addLog("   3. Refresh the page and try again!");
-    } 
-    
-    else if (type === 'iframe') {
-      addLog("🚀 Starting Simulated Failure Test (IFrame Sandbox Scenario)");
-      addLog("🔍 Step 1: Detecting if application is running in an iframe...");
-      await new Promise(r => setTimeout(r, 500));
-      const inIframe = window.self !== window.top;
-      addLog(`ℹ️ Active iframe detection: ${inIframe ? "TRUE (Running inside sandbox iframe)" : "FALSE (Running in standalone new tab)"}`);
-      await new Promise(r => setTimeout(r, 600));
-      if (inIframe) {
-        addLog("❌ Error: Service Worker registration rejected inside iframe context.");
-        addLog("🚫 Reason: Modern browsers block service workers, storage, and secure APIs in third-party iframe contexts for security reasons (SameOrigin policy).");
-      } else {
-        addLog("✅ Diagnostic: App is running in a new tab! IFrame restriction is NOT active here.");
-      }
-      await new Promise(r => setTimeout(r, 800));
-      addLog("💡 DIAGNOSTIC REPORT: How to fix IFrame Restrictions:");
-      addLog("   1. Click the 'Open in New Tab' button in the top right of the developer workspace header.");
-      addLog("   2. Run the tests in the new tab where the Service Worker can register properly!");
-    } 
-    
-    else if (type === 'timeout') {
-      addLog("🚀 Starting Simulated Failure Test (Network Connection Timeout)");
-      addLog("🔍 Step 1: Checking client network connection state...");
-      await new Promise(r => setTimeout(r, 500));
-      addLog(`ℹ️ Client navigator.onLine status: ${navigator.onLine ? "ONLINE" : "OFFLINE"}`);
-      addLog("🔍 Step 2: Dispatching notification to invalid/disconnected endpoint...");
-      await new Promise(r => setTimeout(r, 800));
-      addLog("📡 Fetching mock address: POST http://127.0.0.1:9999/api/send-test-push (Disconnected Endpoint)");
-      await new Promise(r => setTimeout(r, 1200));
-      addLog("❌ Connection Error: TypeError: Failed to fetch (ECONNREFUSED/Timeout)");
-      await new Promise(r => setTimeout(r, 600));
-      addLog("⚠️ Retry Manager triggered: Exponential backoff attempt 1/3 in 1000ms...");
-      await new Promise(r => setTimeout(r, 1000));
-      addLog("❌ Retry 1 failed: Connection refused.");
-      addLog("⚠️ Retry Manager triggered: Exponential backoff attempt 2/3 in 2000ms...");
-      await new Promise(r => setTimeout(r, 1500));
-      addLog("❌ Retry 2 failed: Connection refused.");
-      addLog("❌ Error: Web Push notification delivery failed after maximum retry attempts.");
-      addLog("💡 DIAGNOSTIC REPORT: Ensure that your Express server is running and accessible (bind to 0.0.0.0:3000).");
+    } catch (globalErr: any) {
+      addLog(`❌ Simulation Error: ${globalErr.message || globalErr}`);
+    } finally {
+      setActiveSimulation(null);
+      await checkSubscriptionStatus();
     }
-
-    setActiveSimulation(null);
-    await checkSubscriptionStatus();
   };
 
   const checkSubscriptionStatus = async () => {
