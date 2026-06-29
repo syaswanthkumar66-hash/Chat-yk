@@ -41,12 +41,14 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Diagnostic state for Web Push Notifications (VAPID)
+  const [subCopied, setSubCopied] = useState(false);
   const [pushStatus, setPushStatus] = useState<{
     supported: boolean;
     permission: NotificationPermission;
     hasServiceWorker: boolean;
     hasSubscription: boolean;
     subscriptionEndpoint: string;
+    rawSubscriptionString: string;
     loading: boolean;
     registrationError: string;
   }>({
@@ -55,6 +57,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     hasServiceWorker: false,
     hasSubscription: false,
     subscriptionEndpoint: '',
+    rawSubscriptionString: '',
     loading: true,
     registrationError: ''
   });
@@ -67,6 +70,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     let hasServiceWorker = false;
     let hasSubscription = false;
     let subscriptionEndpoint = '';
+    let rawSubscriptionString = '';
 
     if (supported) {
       try {
@@ -79,6 +83,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
           if (subscription) {
             hasSubscription = true;
             subscriptionEndpoint = subscription.endpoint;
+            rawSubscriptionString = JSON.stringify(subscription, null, 2);
           }
         }
       } catch (e: any) {
@@ -93,8 +98,33 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
       hasServiceWorker,
       hasSubscription,
       subscriptionEndpoint,
+      rawSubscriptionString,
       loading: false
     }));
+
+    // Auto-subscribe if we are in a top-level tab (outside iframe), permission is granted, but we don't have a subscription yet
+    if (supported && permission === 'granted' && !hasSubscription && window.self === window.top && user) {
+      console.log("Detecting top-level window with granted permissions but no subscription. Registering push silently...");
+      try {
+        const result = await registerPushNotifications(user.id);
+        if (result && result.success && result.subscription) {
+          setPushStatus(prev => ({
+            ...prev,
+            hasSubscription: true,
+            subscriptionEndpoint: result.subscription!.endpoint,
+            rawSubscriptionString: JSON.stringify(result.subscription, null, 2),
+            registrationError: ''
+          }));
+        } else if (result && !result.success) {
+          setPushStatus(prev => ({
+            ...prev,
+            registrationError: result.error || 'Failed auto-registration'
+          }));
+        }
+      } catch (error: any) {
+        console.error("Auto-registration error:", error);
+      }
+    }
   };
 
   React.useEffect(() => {
@@ -240,12 +270,28 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                   </span>
                 </div>
 
-                {pushStatus.hasSubscription && pushStatus.subscriptionEndpoint && (
-                  <div className="mt-2 pt-2 border-t border-slate-200/60 space-y-1">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Generated Endpoint:</span>
-                    <div className="p-2 bg-slate-900 rounded-xl overflow-x-auto text-[9px] font-mono text-slate-300 whitespace-nowrap max-w-full">
-                      {pushStatus.subscriptionEndpoint}
+                {pushStatus.hasSubscription && (
+                  <div className="mt-3 pt-3 border-t border-slate-200/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                        Raw Subscription JSON:
+                      </span>
+                      <button
+                        onClick={async () => {
+                          const str = pushStatus.rawSubscriptionString || JSON.stringify({ endpoint: pushStatus.subscriptionEndpoint }, null, 2);
+                          await navigator.clipboard.writeText(str);
+                          setSubCopied(true);
+                          setTimeout(() => setSubCopied(false), 2000);
+                        }}
+                        className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 uppercase tracking-wider"
+                      >
+                        <Icon name={subCopied ? "check" : "content_copy"} className="text-xs" />
+                        {subCopied ? "Copied!" : "Copy JSON"}
+                      </button>
                     </div>
+                    <pre className="p-3 bg-slate-900 rounded-xl overflow-x-auto text-[10px] font-mono text-slate-300 max-h-48 overflow-y-auto leading-relaxed max-w-full select-all">
+                      {pushStatus.rawSubscriptionString || JSON.stringify({ endpoint: pushStatus.subscriptionEndpoint }, null, 2)}
+                    </pre>
                   </div>
                 )}
               </div>

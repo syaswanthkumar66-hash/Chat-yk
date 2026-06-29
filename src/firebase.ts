@@ -173,18 +173,16 @@ export async function getDocFromServer(docRef: any) {
 }
 
 export async function setDoc(docRef: any, data: any, options?: any) {
-  // Always write to local Firestore client (so local cache has it immediately)
+  // Try writing to local Firestore client (with robust persistent offline caching)
   try {
     await firestoreSetDoc(docRef, data, options);
   } catch (err: any) {
-    console.warn("Local setDoc write failed/delayed:", err);
-  }
-
-  // Also write to server proxy to guarantee backend synchronization immediately
-  try {
-    await setDocViaProxy(docRef, data, options);
-  } catch (err: any) {
-    console.error("setDocViaProxy failed:", err);
+    console.warn("Local setDoc write failed/delayed, falling back to proxy:", err);
+    try {
+      await setDocViaProxy(docRef, data, options);
+    } catch (proxyErr: any) {
+      console.error("setDocViaProxy fallback also failed:", proxyErr);
+    }
   }
 }
 
@@ -206,13 +204,12 @@ export async function updateDoc(docRef: any, data: any) {
   try {
     await firestoreUpdateDoc(docRef, data);
   } catch (err: any) {
-    console.warn("Local updateDoc write failed/delayed:", err);
-  }
-
-  try {
-    await updateDocViaProxy(docRef, data);
-  } catch (err: any) {
-    console.error("updateDocViaProxy failed:", err);
+    console.warn("Local updateDoc write failed/delayed, falling back to proxy:", err);
+    try {
+      await updateDocViaProxy(docRef, data);
+    } catch (proxyErr: any) {
+      console.error("updateDocViaProxy fallback also failed:", proxyErr);
+    }
   }
 }
 
@@ -233,13 +230,12 @@ export async function deleteDoc(docRef: any) {
   try {
     await firestoreDeleteDoc(docRef);
   } catch (err: any) {
-    console.warn("Local deleteDoc write failed/delayed:", err);
-  }
-
-  try {
-    await deleteDocViaProxy(docRef);
-  } catch (err: any) {
-    console.error("deleteDocViaProxy failed:", err);
+    console.warn("Local deleteDoc write failed/delayed, falling back to proxy:", err);
+    try {
+      await deleteDocViaProxy(docRef);
+    } catch (proxyErr: any) {
+      console.error("deleteDocViaProxy fallback also failed:", proxyErr);
+    }
   }
 }
 
