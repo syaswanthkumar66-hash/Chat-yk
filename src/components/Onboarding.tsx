@@ -1,7 +1,7 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
-import { Button, Icon, Avatar, Card } from './UI';
+import { Button, Icon, Avatar } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, doc, getDoc, setDoc } from '../firebase';
 import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged } from 'firebase/auth';
@@ -28,14 +28,53 @@ export const Onboarding = () => {
   });
   const [error, setError] = useState('');
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected'>('connecting');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Background backend server warm-up on mount
   useEffect(() => {
+    let isMounted = true;
+    const targetUrl = BACKEND_URL || window.location.origin;
+    
+    const pingBackend = async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        
+        await fetch(`${targetUrl}/api/health`, {
+          signal: controller.signal,
+          mode: 'no-cors',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        clearTimeout(timeoutId);
+        
+        if (isMounted) {
+          setBackendStatus('connected');
+          console.log("Onboarding: Secure backend gateway pre-warmed.");
+        }
+      } catch (err) {
+        if (isMounted) {
+          setBackendStatus('connecting');
+          // Retry to warm it up
+          setTimeout(pingBackend, 3000);
+        }
+      }
+    };
+
+    pingBackend();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Handle Firebase redirect results cleanly on mount
+  useEffect(() => {
+    setIsLoading(true);
     getRedirectResult(auth)
       .then(async (result) => {
-        if (result) {
+        if (result?.user) {
           const user = result.user;
-          
           try {
             const token = await user.getIdToken();
             await fetch(`${BACKEND_URL}/api/auth/google`, {
@@ -78,13 +117,18 @@ export const Onboarding = () => {
         } else {
           setError(err.message || 'Failed to complete Google login.');
         }
+      })
+      .finally(() => {
+        setIsLoading(false);
       });
-  }, []);
+  }, [login]);
 
+  // Handle active sessions reactively
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
+          setIsLoading(true);
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userDoc = await getDoc(userDocRef);
           
@@ -109,6 +153,8 @@ export const Onboarding = () => {
           }
         } catch (err) {
           console.error("Error in onboarding auto-sync:", err);
+        } finally {
+          setIsLoading(false);
         }
       }
     });
@@ -118,9 +164,9 @@ export const Onboarding = () => {
 
   const handleGoogleLogin = async () => {
     try {
+      setIsLoading(true);
       setError('');
       const provider = new GoogleAuthProvider();
-      // Always try popup first, it works well on desktop and most Vercel deployments
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
@@ -135,7 +181,6 @@ export const Onboarding = () => {
         console.warn('Backend API notification failed', e);
       }
       
-      // Check if user exists in Firestore
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
       
@@ -151,7 +196,6 @@ export const Onboarding = () => {
           joinDate: userData.joinDate
         });
       } else {
-        // New user, move to profile setup step
         setProfile(prev => ({
           ...prev,
           displayName: user.displayName || '',
@@ -164,7 +208,6 @@ export const Onboarding = () => {
       if (err.code === 'auth/unauthorized-domain') {
         setError('URGENT: This domain is not authorized. You MUST add your current domain url to Firebase Console > Authentication > Settings > Authorized Domains for Google Login to work.');
       } else if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
-        // Automatically fallback to redirect when popups are blocked 
         console.log("Popup blocked, falling back to redirect...");
         const provider = new GoogleAuthProvider();
         signInWithRedirect(auth, provider).catch(redirectErr => {
@@ -173,6 +216,8 @@ export const Onboarding = () => {
       } else {
         setError(err.message || 'Failed to login with Google');
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -192,6 +237,8 @@ export const Onboarding = () => {
     }
     
     try {
+      setIsLoading(true);
+      setError('');
       const userData = {
         id: auth.currentUser.uid,
         email: auth.currentUser.email,
@@ -209,6 +256,8 @@ export const Onboarding = () => {
     } catch (err: any) {
       console.error(err);
       setError('Failed to setup profile');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -235,6 +284,18 @@ export const Onboarding = () => {
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
         <div className="absolute -top-24 -left-24 size-64 md:size-96 bg-primary/10 blur-[80px] md:blur-[100px] rounded-full" />
         <div className="absolute -bottom-24 -right-24 size-64 md:size-96 bg-primary/5 blur-[80px] md:blur-[100px] rounded-full" />
+      </div>
+
+      {/* Network Connection Badge */}
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-md border border-slate-100 px-3 py-1.5 rounded-full shadow-sm">
+        <div className={`size-2 rounded-full ${
+          backendStatus === 'connected' 
+            ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse' 
+            : 'bg-amber-500 animate-pulse'
+        }`} />
+        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 select-none">
+          {backendStatus === 'connected' ? 'Secure Gateway Active' : 'Connecting to Gateway...'}
+        </span>
       </div>
 
       <AnimatePresence mode="wait">
@@ -273,9 +334,22 @@ export const Onboarding = () => {
                 <p className="text-slate-500 text-xs text-center font-medium leading-relaxed px-2">
                   Authorize via Social Cloud backend for real-time encrypted communication with the global developer network.
                 </p>
-                <Button onClick={handleGoogleLogin} className="w-full h-14 rounded-2xl font-black uppercase tracking-widest italic text-xs shadow-xl shadow-primary/20">
-                  <Icon name="mail" className="text-lg mr-2" />
-                  Continue with Google
+                <Button 
+                  onClick={handleGoogleLogin} 
+                  disabled={isLoading}
+                  className="w-full h-14 rounded-2xl font-black uppercase tracking-widest italic text-xs shadow-xl shadow-primary/20"
+                >
+                  {isLoading ? (
+                    <div className="flex items-center gap-2">
+                      <div className="size-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                      <span>Authenticating...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <Icon name="mail" className="text-lg mr-2" />
+                      Continue with Google
+                    </>
+                  )}
                 </Button>
               </div>
 
@@ -283,8 +357,6 @@ export const Onboarding = () => {
                 <p className="text-[8px] font-black uppercase tracking-[0.4em] text-slate-300">Secured by Social Cloud Protocol</p>
               </div>
             </div>
-            
-            <div className="mt-6 text-center" />
           </motion.div>
         ) : (
           <motion.div 
@@ -301,14 +373,20 @@ export const Onboarding = () => {
               </div>
 
               <div className="flex flex-col items-center gap-4 md:gap-6">
-                <div className="relative group cursor-pointer" onClick={() => setShowAvatarPicker(true)}>
+                <div 
+                  className="relative group cursor-pointer" 
+                  onClick={() => !isLoading && setShowAvatarPicker(true)}
+                >
                   <div className="size-24 md:size-32 rounded-[2rem] md:rounded-[2.5rem] overflow-hidden ring-4 md:ring-8 ring-white shadow-inner">
                     <Avatar src={profile.avatar} className="size-full" />
                   </div>
                   <div className="absolute inset-0 bg-primary/20 rounded-[2rem] md:rounded-[2.5rem] opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all backdrop-blur-[2px]">
                     <Icon name="edit" className="text-white text-2xl md:text-3xl" />
                   </div>
-                  <button className="absolute -bottom-1 -right-1 md:-bottom-2 md:-right-2 size-8 md:size-10 rounded-xl md:rounded-2xl bg-primary text-white border-2 md:border-4 border-white flex items-center justify-center shadow-xl">
+                  <button 
+                    disabled={isLoading}
+                    className="absolute -bottom-1 -right-1 md:-bottom-2 md:-right-2 size-8 md:size-10 rounded-xl md:rounded-2xl bg-primary text-white border-2 md:border-4 border-white flex items-center justify-center shadow-xl disabled:opacity-50"
+                  >
                     <Icon name="edit" className="text-sm md:text-lg" />
                   </button>
                 </div>
@@ -322,11 +400,12 @@ export const Onboarding = () => {
                     type="text" 
                     placeholder="e.g. John Doe"
                     value={profile.displayName}
+                    disabled={isLoading}
                     onChange={(e) => {
                       setProfile(prev => ({ ...prev, displayName: e.target.value }));
                       setError('');
                     }}
-                    className="w-full bg-white border border-primary/10 rounded-xl md:rounded-2xl px-4 md:px-5 py-3 md:py-4 text-xs md:text-sm font-black uppercase tracking-tight italic focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-slate-300"
+                    className="w-full bg-white border border-primary/10 rounded-xl md:rounded-2xl px-4 md:px-5 py-3 md:py-4 text-xs md:text-sm font-black uppercase tracking-tight italic focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-slate-300 disabled:opacity-50 disabled:bg-slate-50"
                   />
                 </div>
 
@@ -338,11 +417,12 @@ export const Onboarding = () => {
                       type="text" 
                       placeholder="username"
                       value={profile.username}
+                      disabled={isLoading}
                       onChange={(e) => {
                         setProfile(prev => ({ ...prev, username: e.target.value.replace(/\s+/g, '_').toLowerCase() }));
                         setError('');
                       }}
-                      className="w-full bg-white border border-primary/10 rounded-xl md:rounded-2xl pl-8 md:pl-10 pr-4 md:pr-5 py-3 md:py-4 text-xs md:text-sm font-black uppercase tracking-tight italic focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-slate-300"
+                      className="w-full bg-white border border-primary/10 rounded-xl md:rounded-2xl pl-8 md:pl-10 pr-4 md:pr-5 py-3 md:py-4 text-xs md:text-sm font-black uppercase tracking-tight italic focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-slate-300 disabled:opacity-50 disabled:bg-slate-50"
                     />
                   </div>
                 </div>
@@ -352,8 +432,9 @@ export const Onboarding = () => {
                   <textarea 
                     placeholder="Tell us about yourself..."
                     value={profile.description}
+                    disabled={isLoading}
                     onChange={(e) => setProfile(prev => ({ ...prev, description: e.target.value }))}
-                    className="w-full bg-white border border-primary/10 rounded-xl md:rounded-2xl px-4 md:px-5 py-3 md:py-4 text-xs md:text-sm font-medium focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none h-20 md:h-28 placeholder:text-slate-300"
+                    className="w-full bg-white border border-primary/10 rounded-xl md:rounded-2xl px-4 md:px-5 py-3 md:py-4 text-xs md:text-sm font-medium focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none h-20 md:h-28 placeholder:text-slate-300 disabled:opacity-50 disabled:bg-slate-50"
                   />
                 </div>
               </div>
@@ -370,8 +451,19 @@ export const Onboarding = () => {
                 </motion.div>
               )}
 
-              <Button onClick={handleComplete} className="w-full h-14 md:h-16 rounded-xl md:rounded-2xl font-black uppercase tracking-widest italic text-xs md:text-sm shadow-xl shadow-primary/20">
-                Complete Setup
+              <Button 
+                onClick={handleComplete} 
+                disabled={isLoading}
+                className="w-full h-14 md:h-16 rounded-xl md:rounded-2xl font-black uppercase tracking-widest italic text-xs md:text-sm shadow-xl shadow-primary/20"
+              >
+                {isLoading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="size-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    <span>Configuring Identity...</span>
+                  </div>
+                ) : (
+                  <span>Complete Setup</span>
+                )}
               </Button>
             </div>
           </motion.div>
@@ -386,7 +478,7 @@ export const Onboarding = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowAvatarPicker(false)}
+              onClick={() => !isLoading && setShowAvatarPicker(false)}
               className="absolute inset-0 bg-black/60 backdrop-blur-md"
             />
             <motion.div 
@@ -397,7 +489,11 @@ export const Onboarding = () => {
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight italic">Choose Avatar</h3>
-                <button onClick={() => setShowAvatarPicker(false)} className="text-slate-400 hover:text-slate-600">
+                <button 
+                  disabled={isLoading}
+                  onClick={() => setShowAvatarPicker(false)} 
+                  className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                >
                   <Icon name="close" />
                 </button>
               </div>
@@ -406,15 +502,17 @@ export const Onboarding = () => {
                 {PRELOADED_AVATARS.map((url) => (
                   <button 
                     key={`avatar-choice-${url}`} 
+                    disabled={isLoading}
                     onClick={() => handleAvatarSelect(url)}
-                    className="aspect-square rounded-2xl overflow-hidden border-2 border-transparent hover:border-primary transition-all active:scale-95"
+                    className="aspect-square rounded-2xl overflow-hidden border-2 border-transparent hover:border-primary transition-all active:scale-95 disabled:opacity-50"
                   >
                     <img src={url} className="size-full object-cover" referrerPolicy="no-referrer" />
                   </button>
                 ))}
                 <button 
+                  disabled={isLoading}
                   onClick={() => fileInputRef.current?.click()}
-                  className="aspect-square rounded-2xl border-2 border-dashed border-primary/20 flex flex-col items-center justify-center gap-2 text-primary hover:bg-primary/5 transition-all"
+                  className="aspect-square rounded-2xl border-2 border-dashed border-primary/20 flex flex-col items-center justify-center gap-2 text-primary hover:bg-primary/5 transition-all disabled:opacity-50"
                 >
                   <Icon name="upload" />
                   <span className="text-[10px] font-bold uppercase">Upload</span>
