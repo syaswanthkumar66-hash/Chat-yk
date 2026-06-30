@@ -15,24 +15,19 @@ self.addEventListener('push', (event) => {
   let data = { title: 'New Message', body: 'You have a new message.' };
   
   if (event.data) {
+    // Call .text() ONCE only — never call both .text() and .json()
     const rawText = event.data.text();
     console.log('Push raw text:', rawText);
     
-    try {
-      data = event.data.json();
-    } catch (e) {
-      console.warn('Failed to parse push data as JSON directly, attempting manual string parse:', e);
-      // Attempt manual parsing fallback if text looks like JSON
-      if (rawText && rawText.trim().startsWith('{')) {
-        try {
-          data = JSON.parse(rawText);
-        } catch (parseErr) {
-          console.error('Failed manual JSON parse fallback:', parseErr);
-          data = { title: 'New Message', body: rawText };
-        }
-      } else {
-        data = { title: 'New Message', body: rawText || 'You have a new message.' };
+    if (rawText && rawText.trim().startsWith('{')) {
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseErr) {
+        console.error('Failed to parse push payload as JSON:', parseErr);
+        data = { title: 'New Message', body: rawText };
       }
+    } else if (rawText) {
+      data = { title: 'New Message', body: rawText };
     }
   }
 
@@ -52,40 +47,49 @@ self.addEventListener('push', (event) => {
     data: data.data || {}
   };
 
-  console.log('Showing notification:', title, options);
+  console.log('Showing notification (if not focused):', title, options);
 
   event.waitUntil(
-    self.registration.showNotification(title, options)
-      .then(() => {
-        console.log('Notification successfully displayed');
-      })
-      .catch((err) => {
-        console.error('Failed to show standard notification, trying minimal fallback:', err);
-        // Fallback to absolute minimal properties if browser complains about advanced features (like tag, renotify, etc.)
-        return self.registration.showNotification(title, {
-          body: body
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // If the user has a focused browser tab open, suppress the redundant push notification
+      const isFocused = windowClients.some(client => client.focused);
+      if (isFocused) {
+        console.log('App tab is currently active and focused. Suppressing push notification.');
+        return;
+      }
+
+      return self.registration.showNotification(title, options)
+        .then(() => {
+          console.log('Notification successfully displayed');
+        })
+        .catch((err) => {
+          console.error('Failed to show standard notification, trying minimal fallback:', err);
+          // Fallback to absolute minimal properties if browser complains about advanced features (like tag, renotify, etc.)
+          return self.registration.showNotification(title, {
+            body: body
+          });
         });
-      })
+    })
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   console.log('Notification clicked:', event);
   event.notification.close();
-  const urlToOpen = '/';
+  const targetUrl = new URL(event.notification.data?.url || '/', self.location.origin).href;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // If a window is already open, focus it
+      // If a window is already open at the target URL, focus it
       for (let i = 0; i < windowClients.length; i++) {
         const client = windowClients[i];
-        if (client.url === urlToOpen && 'focus' in client) {
+        if (client.url === targetUrl && 'focus' in client) {
           return client.focus();
         }
       }
       // Otherwise open a new window
       if (self.clients.openWindow) {
-        return self.clients.openWindow(urlToOpen);
+        return self.clients.openWindow(targetUrl);
       }
     })
   );

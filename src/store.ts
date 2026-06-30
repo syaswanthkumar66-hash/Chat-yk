@@ -239,8 +239,12 @@ const cachedIsLoggedIn = getLocalStorageItem('proto_isLoggedIn', 'false') === 't
 const cachedAuthMethod = getLocalStorageItem('proto_authMethod', '') || null;
 const cachedBlockedUserIds = getLocalStorageJSON<string[]>('proto_blockedUserIds', []);
 const cachedRemovedFriendIds = getLocalStorageJSON<string[]>('proto_removedFriendIds', []);
-const cachedUsers = getLocalStorageJSON<any[]>('proto_users', []);
-const cachedChats = getLocalStorageJSON<any[]>('proto_chats', []);
+const cachedUsers = cachedUser 
+  ? getLocalStorageJSON<any[]>(`proto_users_${cachedUser.id}`, getLocalStorageJSON<any[]>('proto_users', []))
+  : getLocalStorageJSON<any[]>('proto_users', []);
+const cachedChats = cachedUser 
+  ? getLocalStorageJSON<any[]>(`proto_chats_${cachedUser.id}`, getLocalStorageJSON<any[]>('proto_chats', []))
+  : getLocalStorageJSON<any[]>('proto_chats', []);
 const cachedFriendRequests = getLocalStorageJSON<any[]>('proto_friendRequests', []);
 const cachedSentFriendRequests = getLocalStorageJSON<string[]>('proto_sentFriendRequests', []);
 
@@ -395,14 +399,56 @@ export const useAppStore = create<AppState>((set) => ({
         vibrateEnabled: true
       }
     };
+
+    // Load per-user chats from localStorage
+    let userChats: any[] = [];
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`proto_chats_${user.id}`);
+      if (stored) {
+        try {
+          userChats = JSON.parse(stored);
+        } catch (e) {
+          console.error("Error parsing stored chats for user", user.id, e);
+        }
+      } else {
+        const legacy = localStorage.getItem('proto_chats');
+        if (legacy) {
+          try {
+            userChats = JSON.parse(legacy);
+          } catch (e) {}
+        }
+      }
+    }
+
+    // Load per-user users (friends) list from localStorage
+    let userUsers: any[] = [];
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`proto_users_${user.id}`);
+      if (stored) {
+        try {
+          userUsers = JSON.parse(stored);
+        } catch (e) {
+          console.error("Error parsing stored users for user", user.id, e);
+        }
+      } else {
+        const legacy = localStorage.getItem('proto_users');
+        if (legacy) {
+          try {
+            userUsers = JSON.parse(legacy);
+          } catch (e) {}
+        }
+      }
+    }
+
     set({ 
       isLoggedIn: true, 
       user,
       authMethod,
+      chats: userChats,
       friendRequests: [],
       groupJoinRequests: [],
       onlineUserIds: [],
-      users: DEFAULT_PRESETS
+      users: userUsers
     });
     
     if (typeof window !== 'undefined') {
@@ -442,6 +488,7 @@ export const useAppStore = create<AppState>((set) => ({
       isLoggedIn: false, 
       mode: 'hub', 
       user: null, 
+      chats: [],
       authMethod: null,
       wssStatus: 'disconnected',
       isWssConnected: false,
@@ -1520,6 +1567,10 @@ if (typeof window !== 'undefined') {
     try {
       localStorage.setItem('proto_users', JSON.stringify(state.users));
       localStorage.setItem('proto_chats', JSON.stringify(state.chats));
+      if (state.user?.id) {
+        localStorage.setItem(`proto_chats_${state.user.id}`, JSON.stringify(state.chats));
+        localStorage.setItem(`proto_users_${state.user.id}`, JSON.stringify(state.users));
+      }
       localStorage.setItem('proto_friendRequests', JSON.stringify(state.friendRequests));
       localStorage.setItem('proto_sentFriendRequests', JSON.stringify(state.sentFriendRequests));
     } catch (e) {

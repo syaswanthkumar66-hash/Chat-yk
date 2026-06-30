@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAppStore } from './store';
 import { Message } from './types';
 import { Hub } from './components/Hub';
@@ -34,18 +34,9 @@ function useNotifications() {
   const mode = useAppStore((state) => state.mode);
   const addInAppToast = useAppStore((state) => state.addInAppToast);
 
-  // Request system notification permissions on mount/login
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-
-    if (user && Notification.permission === 'default') {
-      Notification.requestPermission()
-        .then((permission) => {
-          console.log(`Notification permission status: ${permission}`);
-        })
-        .catch(console.error);
-    }
-  }, [user]);
+  // Permission is requested by <NotificationPrompt /> which shows a proper
+  // contextual UI prompt. A silent requestPermission() call here would conflict
+  // and cause browsers to suppress the NotificationPrompt dialog.
 
   // Listen to socket 'receive_message' to trigger system alerts
   useEffect(() => {
@@ -115,10 +106,24 @@ function useNotifications() {
         }
       }
 
+      // Play device vibration if enabled (Additional Improvement B)
+      if (user.notificationSettings?.vibrateEnabled !== false && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate([200, 100, 200]);
+        } catch (e) {
+          console.warn('Vibration failed:', e);
+        }
+      }
+
+      // Handle preview settings for notification body (Additional Improvement A)
+      const displayBody = user.notificationSettings?.previewEnabled !== false
+        ? decryptedText
+        : "You have a new message";
+
       // Add custom in-app Toast notification so they ALWAYS get a beautiful floating banner
       addInAppToast({
         title: senderName,
-        body: decryptedText,
+        body: displayBody,
         avatar: avatarUrl,
         chatId: data.groupId || data.senderId
       });
@@ -127,7 +132,7 @@ function useNotifications() {
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
         try {
           new Notification(senderName, {
-            body: decryptedText,
+            body: displayBody,
             icon: avatarUrl,
             tag: data.groupId || data.senderId,
             renotify: true
@@ -169,6 +174,15 @@ function useNotifications() {
         }
       }
 
+      // Play device vibration if enabled (Additional Improvement B)
+      if (user.notificationSettings?.vibrateEnabled !== false && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate([200, 100]);
+        } catch (e) {
+          console.warn('Vibration failed:', e);
+        }
+      }
+
       // Trigger standard web notification
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
         try {
@@ -191,7 +205,67 @@ function useNotifications() {
   }, [socket, user, users]);
 }
 
+interface InAppToastItemProps {
+  toast: {
+    id: string;
+    title: string;
+    body: string;
+    avatar: string;
+    chatId: string;
+  };
+  removeInAppToast: (id: string) => void;
+  setMode: (mode: any) => void;
+  setActiveChatId: (id: string | null) => void;
+  setActiveRecipientId: (id: string | null) => void;
+}
+
+function InAppToastItem({
+  toast,
+  removeInAppToast,
+  setMode,
+  setActiveChatId,
+  setActiveRecipientId
+}: InAppToastItemProps) {
+  useEffect(() => {
+    // Runs exactly once on mount — single clean timer
+    const timer = setTimeout(() => removeInAppToast(toast.id), 5000);
+    return () => clearTimeout(timer);
+  }, [toast.id, removeInAppToast]);
+
+  return (
+    <div
+      className="w-full bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-primary/10 flex gap-3 pointer-events-auto cursor-pointer hover:bg-slate-50 transition-all active:scale-98"
+      onClick={() => {
+        removeInAppToast(toast.id);
+        setMode('social');
+        setActiveChatId(toast.chatId);
+        setActiveRecipientId(null);
+      }}
+    >
+      <div className="size-11 rounded-xl overflow-hidden border border-slate-100 flex-shrink-0">
+        <img src={toast.avatar} alt={toast.title} className="size-full object-cover" referrerPolicy="no-referrer" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between">
+          <h4 className="font-black text-slate-800 text-xs uppercase tracking-tight truncate">{toast.title}</h4>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              removeInAppToast(toast.id);
+            }}
+            className="size-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"
+          >
+            <Icon name="close" className="text-xs" />
+          </button>
+        </div>
+        <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{toast.body}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const { 
     mode, 
     isLoggedIn, 
@@ -212,11 +286,19 @@ export default function App() {
   // Activate the real-time notification integration hook
   useNotifications();
 
+  // Handle Firebase auth state changes cleanly
   useEffect(() => {
-    let unsubscribeFirestore = () => {};
-
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        const currentStoreState = useAppStore.getState();
+        const cachedUserObj = currentStoreState.user;
+        const wasLoggedIn = currentStoreState.isLoggedIn;
+
+        // Optimistically keep logged in if we have matching cache to prevent splash flash or kicking back to onboarding
+        if (wasLoggedIn && cachedUserObj && cachedUserObj.id === firebaseUser.uid) {
+          setIsAuthLoading(false);
+        }
+
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
@@ -233,15 +315,6 @@ export default function App() {
               notificationSettings: userData.notificationSettings
             });
 
-            // Sync blocked and removed friends lists from Firestore
-            const blocked = userData.blockedUserIds || [];
-            const removed = userData.removedFriendIds || [];
-            useAppStore.setState({ blockedUserIds: blocked, removedFriendIds: removed });
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('proto_blockedUserIds', JSON.stringify(blocked));
-              localStorage.setItem('proto_removedFriendIds', JSON.stringify(removed));
-            }
-
             // If notification permission is already granted, silently register/sync push subscriptions in the background
             if (typeof window !== 'undefined' && 'Notification' in window) {
               if (Notification.permission === 'granted') {
@@ -250,123 +323,158 @@ export default function App() {
                 }).catch(console.error);
               }
             }
-          }
-
-          // If no doc exists, they might be mid-onboarding.
-          // Onboarding will handle doc creation.
-          
-          // Set up friend request listener
-          if (unsubscribeFirestore) unsubscribeFirestore(); // clean old if any
-          let unsubscribeReceived = () => {};
-          let unsubscribeSent = () => {};
-
-          const requestsRef = collection(db, 'friendRequests');
-          const qReceived = query(requestsRef, where('toUserId', '==', firebaseUser.uid));
-          unsubscribeReceived = onSnapshot(qReceived, async (snapshot) => {
-            const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
-            
-            // Generate full FriendRequest objects
-            const fullRequests = [];
-            for (const r of requests) {
-              try {
-                // Get sender info
-                let senderDoc = await getDoc(doc(db, 'users', r.fromUserId));
-                if (senderDoc.exists()) {
-                  const senderData = senderDoc.data();
-                  if (r.status === 'accepted') {
-                     useAppStore.getState().addUser({
-                        id: r.fromUserId,
-                        username: senderData.username || r.fromUserId,
-                        displayName: senderData.displayName || senderData.username || 'Unknown',
-                        avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
-                        description: senderData.description || '',
-                        isOnline: senderData.isOnline || false,
-                        lastSeen: senderData.lastSeen || null,
-                        isFriend: true,
-                        profileVisibility: 'everyone',
-                        hasPrivateProfile: false,
-                        isAdmin: senderData.isAdmin || false,
-                        joinDate: senderData.joinDate || new Date().toISOString()
-                     } as any);
-                     useAppStore.getState().restoreFriend(r.fromUserId);
-                  } else {
-                    fullRequests.push({
-                      id: r.id,
-                      userId: r.fromUserId,
-                      name: senderData.displayName || senderData.username || 'Unknown',
-                      avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
-                      timestamp: r.createdAt ? new Date(r.createdAt.toMillis()).toISOString() : new Date().toISOString()
-                    });
-                  }
-                }
-              } catch (e) {
-                console.error("Error fetching sender for request:", e);
-              }
+          } else {
+            // Document does not exist in Firestore, but Firebase User exists.
+            // This means they are mid-onboarding or a new user. We must not treat them as logged in yet.
+            if (!cachedUserObj || cachedUserObj.id !== firebaseUser.uid) {
+              useAppStore.setState({ isLoggedIn: false, user: null });
             }
-            useAppStore.getState().setFriendRequests(fullRequests);
-          }, (err) => {
-            console.error("Error in friendRequests onSnapshot:", err);
-            handleFirestoreError(err, OperationType.LIST, 'friendRequests');
-          });
-
-          // Fetch sent requests too
-          const qSent = query(requestsRef, where('fromUserId', '==', firebaseUser.uid));
-          unsubscribeSent = onSnapshot(qSent, async (snapshot) => {
-             const sentIds: string[] = [];
-             
-             for (let rDoc of snapshot.docs) {
-               const data = rDoc.data() as any;
-               if (data.status === 'accepted') {
-                 try {
-                   let recipientDoc = await getDoc(doc(db, 'users', data.toUserId));
-                   if (recipientDoc.exists()) {
-                     const recipientData = recipientDoc.data();
-                     useAppStore.getState().addUser({
-                        id: data.toUserId,
-                        username: recipientData.username || data.toUserId,
-                        displayName: recipientData.displayName || recipientData.username || 'Unknown',
-                        avatar: recipientData.avatar || `https://picsum.photos/seed/${data.toUserId}/200`,
-                        description: recipientData.description || '',
-                        isOnline: recipientData.isOnline || false,
-                        lastSeen: recipientData.lastSeen || null,
-                        isFriend: true,
-                        profileVisibility: 'everyone',
-                        hasPrivateProfile: false,
-                        isAdmin: recipientData.isAdmin || false,
-                        joinDate: recipientData.joinDate || new Date().toISOString()
-                     } as any);
-                     useAppStore.getState().restoreFriend(data.toUserId);
-                   }
-                 } catch (e) {
-                   console.error("Error fetching accepted friend:", e);
-                 }
-               } else {
-                 sentIds.push(data.toUserId);
-               }
-             }
-             useAppStore.setState({ sentFriendRequests: sentIds });
-          }, (err) => {
-            console.error("Error in sent friendRequests onSnapshot:", err);
-            handleFirestoreError(err, OperationType.LIST, 'friendRequests');
-          });
-
-          unsubscribeFirestore = () => {
-             unsubscribeReceived();
-             unsubscribeSent();
-          };
+          }
         } catch (err) {
           console.error("Error fetching user data:", err);
+          // Firestore connection failed (offline / unavailable). Fallback to cached user if matching!
+          if (cachedUserObj && cachedUserObj.id === firebaseUser.uid) {
+            console.log("Firestore error occurred. Continuing with cached user session to maintain offline/local storage compatibility.");
+            useAppStore.setState({ isLoggedIn: true });
+          } else {
+            useAppStore.setState({ isLoggedIn: false, user: null });
+          }
+        } finally {
+          setIsAuthLoading(false);
         }
       } else {
-        if (unsubscribeFirestore) unsubscribeFirestore();
+        const currentStoreState = useAppStore.getState();
+        if (currentStoreState.authMethod !== 'local') {
+          logout();
+        }
+        setIsAuthLoading(false);
       }
     });
 
     return () => {
       unsubscribeAuth();
-      if (unsubscribeFirestore) unsubscribeFirestore();
     };
-  }, [login]);
+  }, [login, logout]);
+
+  // Handle Firestore syncing for both Google and Local logins Reactively
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id) return;
+
+    let unsubscribeReceived = () => {};
+    let unsubscribeSent = () => {};
+
+    const syncFirestoreData = async () => {
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.id));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          // Sync blocked and removed friends lists from Firestore
+          const blocked = userData.blockedUserIds || [];
+          const removed = userData.removedFriendIds || [];
+          useAppStore.setState({ blockedUserIds: blocked, removedFriendIds: removed });
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('proto_blockedUserIds', JSON.stringify(blocked));
+            localStorage.setItem('proto_removedFriendIds', JSON.stringify(removed));
+          }
+        }
+
+        const requestsRef = collection(db, 'friendRequests');
+        const qReceived = query(requestsRef, where('toUserId', '==', user.id));
+        unsubscribeReceived = onSnapshot(qReceived, async (snapshot) => {
+          const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+          const fullRequests = [];
+          for (const r of requests) {
+            try {
+              let senderDoc = await getDoc(doc(db, 'users', r.fromUserId));
+              if (senderDoc.exists()) {
+                const senderData = senderDoc.data();
+                if (r.status === 'accepted') {
+                   useAppStore.getState().addUser({
+                      id: r.fromUserId,
+                      username: senderData.username || r.fromUserId,
+                      displayName: senderData.displayName || senderData.username || 'Unknown',
+                      avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
+                      description: senderData.description || '',
+                      isOnline: senderData.isOnline || false,
+                      lastSeen: senderData.lastSeen || null,
+                      isFriend: true,
+                      profileVisibility: 'everyone',
+                      hasPrivateProfile: false,
+                      isAdmin: senderData.isAdmin || false,
+                      joinDate: senderData.joinDate || new Date().toISOString()
+                   } as any);
+                   useAppStore.getState().restoreFriend(r.fromUserId);
+                } else {
+                  fullRequests.push({
+                    id: r.id,
+                    userId: r.fromUserId,
+                    name: senderData.displayName || senderData.username || 'Unknown',
+                    avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
+                    timestamp: r.createdAt ? new Date(r.createdAt.toMillis()).toISOString() : new Date().toISOString()
+                  });
+                }
+              }
+            } catch (e) {
+              console.error("Error fetching sender for request:", e);
+            }
+          }
+          useAppStore.getState().setFriendRequests(fullRequests);
+        }, (err) => {
+          console.error("Error in friendRequests onSnapshot:", err);
+          handleFirestoreError(err, OperationType.LIST, 'friendRequests');
+        });
+
+        const qSent = query(requestsRef, where('fromUserId', '==', user.id));
+        unsubscribeSent = onSnapshot(qSent, async (snapshot) => {
+           const sentIds: string[] = [];
+           for (let rDoc of snapshot.docs) {
+             const data = rDoc.data() as any;
+             if (data.status === 'accepted') {
+               try {
+                 let recipientDoc = await getDoc(doc(db, 'users', data.toUserId));
+                 if (recipientDoc.exists()) {
+                   const recipientData = recipientDoc.data();
+                   useAppStore.getState().addUser({
+                      id: data.toUserId,
+                      username: recipientData.username || data.toUserId,
+                      displayName: recipientData.displayName || recipientData.username || 'Unknown',
+                      avatar: recipientData.avatar || `https://picsum.photos/seed/${data.toUserId}/200`,
+                      description: recipientData.description || '',
+                      isOnline: recipientData.isOnline || false,
+                      lastSeen: recipientData.lastSeen || null,
+                      isFriend: true,
+                      profileVisibility: 'everyone',
+                      hasPrivateProfile: false,
+                      isAdmin: recipientData.isAdmin || false,
+                      joinDate: recipientData.joinDate || new Date().toISOString()
+                   } as any);
+                   useAppStore.getState().restoreFriend(data.toUserId);
+                 }
+               } catch (e) {
+                 console.error("Error fetching accepted friend:", e);
+               }
+             } else {
+               sentIds.push(data.toUserId);
+             }
+           }
+           useAppStore.setState({ sentFriendRequests: sentIds });
+        }, (err) => {
+           console.error("Error in sent friendRequests onSnapshot:", err);
+           handleFirestoreError(err, OperationType.LIST, 'friendRequests');
+        });
+
+      } catch (err) {
+        console.error("Error syncing Firestore user and friend data:", err);
+      }
+    };
+
+    syncFirestoreData();
+
+    return () => {
+      unsubscribeReceived();
+      unsubscribeSent();
+    };
+  }, [isLoggedIn, user?.id]);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -398,6 +506,26 @@ export default function App() {
       window.history.replaceState({}, '', newUrl);
     }
   }, []);
+
+  // Auth Loading Splash Screen
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md space-y-6">
+          <div className="size-16 rounded-2xl bg-primary flex items-center justify-center text-white shadow-2xl shadow-primary/30 rotate-3 animate-pulse mx-auto">
+            <Icon name="share" className="text-3xl" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-2xl font-black text-white uppercase italic tracking-tighter">Connecting Protocol</h1>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Initializing Secure Digital Ecosystem...</p>
+          </div>
+          <div className="pt-6 border-t border-white/5 max-w-[180px] mx-auto">
+            <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em]">Protocol v2.5 • Loading</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Maintenance Mode Screen
   if (systemSettings.maintenanceMode && mode !== 'admin') {
@@ -504,46 +632,21 @@ export default function App() {
               initial={{ opacity: 0, y: -20, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.2 } }}
-              className="w-full bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-primary/10 flex gap-3 pointer-events-auto cursor-pointer hover:bg-slate-50 transition-all active:scale-98"
-              onClick={() => {
-                // Remove the toast
-                removeInAppToast(toast.id);
-                // Bring them to the social mode and open the chat!
-                setMode('social');
-                setActiveChatId(toast.chatId);
-                setActiveRecipientId(null);
-              }}
-              onAnimationComplete={() => {
-                // Automatically dismiss toast after 5 seconds
-                setTimeout(() => {
-                  removeInAppToast(toast.id);
-                }, 5000);
-              }}
+              className="pointer-events-auto"
             >
-              <div className="size-11 rounded-xl overflow-hidden border border-slate-100 flex-shrink-0">
-                <img src={toast.avatar} alt={toast.title} className="size-full object-cover" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-black text-slate-800 text-xs uppercase tracking-tight truncate">{toast.title}</h4>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeInAppToast(toast.id);
-                    }}
-                    className="size-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"
-                  >
-                    <Icon name="close" className="text-xs" />
-                  </button>
-                </div>
-                <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{toast.body}</p>
-              </div>
+              <InAppToastItem
+                toast={toast}
+                removeInAppToast={removeInAppToast}
+                setMode={setMode}
+                setActiveChatId={setActiveChatId}
+                setActiveRecipientId={setActiveRecipientId}
+              />
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
 
-      <NotificationPrompt />
+      {isLoggedIn && <NotificationPrompt />}
     </div>
   );
 }

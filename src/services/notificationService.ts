@@ -67,14 +67,14 @@ export async function registerPushNotifications(userId: string, force?: boolean)
       throw new Error("No public VAPID key returned from server");
     }
 
-    // Convert base64 VAPID key to Uint8Array
-    const padding = '='.repeat((4 - publicKey.length % 4) % 4);
-    const base64 = (publicKey + padding).replace(/\-/g, '+').replace(/_/g, '/');
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    for (let i = 0; i < rawData.length; ++i) {
-      outputArray[i] = rawData.charCodeAt(i);
-    }
+    // Convert base64 VAPID key to Uint8Array cleanly and reliably
+    const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      return Uint8Array.from(rawData, (c) => c.charCodeAt(0));
+    };
+    const outputArray = urlBase64ToUint8Array(publicKey);
 
     // 3. Check if a push subscription already exists in this browser
     let subscription = await registration.pushManager.getSubscription();

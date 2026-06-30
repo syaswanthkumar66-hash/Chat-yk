@@ -173,11 +173,19 @@ async function initVapid() {
   }
 }
 
-initVapid();
+// IMPORTANT: initVapid() is async. Keys load from Firestore/env/disk.
+// If a push fires before it resolves (cold start race), keys will be empty.
+// The .catch() ensures startup failures are always visible in logs.
+initVapid().catch((e) => console.error('VAPID init failed:', e));
 
 const memorySubscriptions = new Map<string, any[]>();
 
 async function sendPushNotification(recipientId: string, payload: { title: string, body: string, icon?: string, data?: any }) {
+  // Guard: if VAPID keys aren't loaded yet, skip silently with a clear log
+  if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
+    console.warn(`sendPushNotification skipped for ${recipientId}: VAPID keys not yet initialized`);
+    return;
+  }
   let subscriptions: any[] = [];
   if (db) {
     try {
@@ -582,7 +590,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         socket.to(`group-${groupId}`).emit("receive_message", messageData);
         console.log(`Group message sent from ${senderId} to group-${groupId}`);
 
-        // For any group member who is offline, save an offline message and send a push notification
+        // For any group member who is offline, save an offline message
         if (Array.isArray(recipientIds)) {
           for (const targetId of recipientIds) {
             if (targetId === senderId) continue;
@@ -604,14 +612,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
                 tempStorage.set(offlineMsgId, storeData);
                 console.log(`Group member ${targetId} offline. Message stored temporarily in memory.`);
               }
-              // Send web push notification
-              sendPushNotification(targetId, {
-                title: data.senderName || "New Group Message",
-                body: messageData.type === 'text' ? messageData.text : `📎 Shared a ${messageData.type}`,
-                icon: 'https://picsum.photos/seed/default/200',
-                data: { url: '/' }
-              });
             }
+            // Send web push notification ALWAYS to ensure delivery (since they might be online but backgrounded)
+            sendPushNotification(targetId, {
+              title: data.senderName || "New Group Message",
+              body: messageData.type === 'text' ? "You have a new group message 💬" : `📎 Shared a ${messageData.type}`,
+              icon: '/pwa-192x192.png',
+              data: { url: '/' }
+            });
           }
         }
       } else if (recipientId) {
@@ -637,14 +645,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             tempStorage.set(messageData.id, storeData);
             console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
           }
-          // Send web push notification
-          sendPushNotification(recipientId, {
-            title: data.senderName || "New Message",
-            body: messageData.type === 'text' ? messageData.text : `📎 Shared a ${messageData.type}`,
-            icon: 'https://picsum.photos/seed/default/200',
-            data: { url: '/' }
-          });
         }
+        // Send web push notification ALWAYS to ensure delivery (since they might be online but backgrounded)
+        sendPushNotification(recipientId, {
+          title: data.senderName || "New Message",
+          body: messageData.type === 'text' ? "You have a new message 💬" : `📎 Shared a ${messageData.type}`,
+          icon: '/pwa-192x192.png',
+          data: { url: '/' }
+        });
       }
     });
 
@@ -968,7 +976,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       await sendPushNotification(userId, {
         title: notificationTitle,
         body: notificationBody,
-        icon: 'https://picsum.photos/seed/default/200',
+        icon: '/pwa-192x192.png',
         data: { url: '/' }
       });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Card } from './UI';
 import { useAppStore } from '../store';
@@ -7,6 +7,11 @@ import { BACKEND_URL } from '../config';
 export function NotificationPrompt() {
   const [status, setStatus] = useState<'hidden' | 'request' | 'success'>('hidden');
   const user = useAppStore((state) => state.user);
+  const userRef = useRef(user);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -73,7 +78,7 @@ export function NotificationPrompt() {
     localStorage.setItem('notification_prompt_dismissed', 'true');
   };
 
-  const triggerTestNotification = async () => {
+  const triggerTestNotification = useCallback(async () => {
     if (typeof window === 'undefined') return;
     
     // Play sound
@@ -104,12 +109,13 @@ export function NotificationPrompt() {
     }
 
     // Trigger a real backend VAPID push notification with retry
-    if (user) {
+    const currentUser = userRef.current;
+    if (currentUser) {
       try {
-        console.log("Triggering real server-side VAPID web push notification with retry for user:", user.id);
+        console.log("Triggering real server-side VAPID web push notification with retry for user:", currentUser.id);
         const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
         const result = await triggerPushNotificationWithRetry(
-          user.id,
+          currentUser.id,
           "🔔 Real VAPID Push Alert",
           "Amazing! This notification is dispatched securely using VAPID keys directly from our backend server!"
         );
@@ -131,7 +137,7 @@ export function NotificationPrompt() {
       avatar,
       chatId: 'system-test'
     });
-  };
+  }, []);
 
   // Expose test function globally so it can be called from Settings or elsewhere
   useEffect(() => {
@@ -145,7 +151,7 @@ export function NotificationPrompt() {
         delete (window as any).showNotificationPrompt;
       }
     };
-  }, []);
+  }, [triggerTestNotification]);
 
   return (
     <AnimatePresence>
