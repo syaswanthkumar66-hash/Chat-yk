@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Chat, Message, Device, Transfer } from './types';
+import { Chat, Message, Device, Transfer, Notification } from './types';
 import { io, Socket } from 'socket.io-client';
 import { BACKEND_URL } from './config';
 
@@ -119,6 +119,12 @@ interface AppState {
   sentFriendRequests: string[];
   sendFriendRequest: (userId: string) => void;
   cancelFriendRequest: (userId: string) => void;
+  notifications: Notification[];
+  setNotifications: (notifications: Notification[]) => void;
+  addNotification: (notification: Notification) => void;
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
+  clearNotifications: () => Promise<void>;
   groupJoinRequests: GroupJoinRequest[];
   setGroupJoinRequests: (requests: GroupJoinRequest[]) => void;
   chats: Chat[];
@@ -975,18 +981,35 @@ export const useAppStore = create<AppState>((set) => ({
     
     if (state.user) {
       try {
-        const { db, addDoc, collection, serverTimestamp, query, where, getDocs } = await import('./firebase');
+        const { db, addDoc, collection, serverTimestamp, query, where, getDocs, doc, setDoc } = await import('./firebase');
         const requestsRef = collection(db, 'friendRequests');
         
         // Prevent dupes
         const q = query(requestsRef, where('fromUserId', '==', state.user.id), where('toUserId', '==', userId));
         const existing = await getDocs(q);
         if (existing.empty) {
-          await addDoc(requestsRef, {
+          const docRef = await addDoc(requestsRef, {
             fromUserId: state.user.id,
             toUserId: userId,
             createdAt: serverTimestamp(),
             status: 'pending'
+          });
+
+          // Create persistent notification record
+          const notifId = `notif-friend-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          const notifRef = doc(db, 'notifications', notifId);
+          await setDoc(notifRef, {
+            id: notifId,
+            type: 'friend_request',
+            senderId: state.user.id,
+            senderName: state.user.displayName || state.user.username,
+            senderAvatar: state.user.avatar || '',
+            recipientId: userId,
+            title: 'New Friend Request',
+            body: `${state.user.displayName || state.user.username} sent you a friend request.`,
+            requestId: docRef.id,
+            status: 'created',
+            createdAt: new Date().toISOString()
           });
         }
       } catch (err) {
@@ -1012,6 +1035,64 @@ export const useAppStore = create<AppState>((set) => ({
       } catch (err) {
         console.error("Error canceling request", err);
       }
+    }
+  },
+  notifications: [],
+  setNotifications: (notifications) => set({ notifications }),
+  addNotification: (notification) => set((state) => {
+    if (state.notifications.some(n => n.id === notification.id)) {
+      return state;
+    }
+    return { notifications: [notification, ...state.notifications] };
+  }),
+  markNotificationAsRead: async (id) => {
+    set((state) => ({
+      notifications: state.notifications.map(n => n.id === id ? { ...n, status: 'read' as const, readAt: new Date().toISOString() } : n)
+    }));
+    try {
+      const { db, updateDoc, doc } = await import('./firebase');
+      await updateDoc(doc(db, 'notifications', id), { 
+        status: 'read',
+        readAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error marking notification as read in db:", err);
+    }
+  },
+  markAllNotificationsAsRead: async () => {
+    const state = useAppStore.getState();
+    const unread = state.notifications.filter(n => n.status !== 'read');
+    if (unread.length === 0) return;
+
+    set((state) => ({
+      notifications: state.notifications.map(n => ({ ...n, status: 'read' as const, readAt: new Date().toISOString() }))
+    }));
+
+    try {
+      const { db, updateDoc, doc } = await import('./firebase');
+      await Promise.all(unread.map(async (n) => {
+        await updateDoc(doc(db, 'notifications', n.id), { 
+          status: 'read',
+          readAt: new Date().toISOString()
+        });
+      }));
+    } catch (err) {
+      console.error("Error marking all notifications as read in db:", err);
+    }
+  },
+  clearNotifications: async () => {
+    const state = useAppStore.getState();
+    const ids = state.notifications.map(n => n.id);
+    
+    set({ notifications: [] });
+
+    try {
+      const { db, deleteDoc, doc } = await import('./firebase');
+      await Promise.all(ids.map(async (id) => {
+        await deleteDoc(doc(db, 'notifications', id));
+      }));
+    } catch (err) {
+      console.error("Error clearing notifications in db:", err);
     }
   },
   groupJoinRequests: [],

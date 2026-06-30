@@ -75,3 +75,20 @@ export interface Transfer {
   fileType?: 'image' | 'video' | 'audio' | 'pdf' | 'zip' | 'document' | 'presentation' | 'code';
   previewUrl?: string;
 }
+
+export interface Notification {
+  id: string;
+  type: 'message' | 'mention' | 'friend_request' | 'system_alert';
+  senderId?: string;
+  senderName?: string;
+  senderAvatar?: string;
+  recipientId: string;
+  title: string;
+  body: string;
+  chatId?: string;
+  requestId?: string;
+  status: 'created' | 'delivered' | 'read';
+  createdAt: string;
+  deliveredAt?: string;
+  readAt?: string;
+}

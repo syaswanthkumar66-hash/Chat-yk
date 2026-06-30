@@ -86,18 +86,38 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
         const userDoc = await getDoc(doc(db, 'users', userId));
         if (userDoc.exists() && isActive) {
           const userData = userDoc.data();
-          // Update store user state so other components also get the fresh details!
-          useAppStore.getState().addUser({
-            id: userId,
-            username: userData.username,
-            displayName: userData.displayName || userData.username,
-            avatar: userData.avatar || `https://picsum.photos/seed/${userId}/200`,
-            description: userData.description || '',
-            isAdmin: userData.isAdmin || false,
-            joinDate: userData.joinDate || new Date().toISOString(),
-            isOnline: userData.isOnline || false,
-            lastSeen: userData.lastSeen || null
-          });
+          
+          const freshDisplayName = userData.displayName || userData.username;
+          const freshAvatar = userData.avatar || `https://picsum.photos/seed/${userId}/200`;
+          const freshDescription = userData.description || '';
+          const freshIsAdmin = userData.isAdmin || false;
+          const freshIsOnline = userData.isOnline || false;
+          const freshLastSeen = userData.lastSeen || null;
+
+          const currentStoreUser = useAppStore.getState().users.find(u => u.id === userId);
+          const needsUpdate = !currentStoreUser ||
+                              currentStoreUser.username !== userData.username ||
+                              currentStoreUser.displayName !== freshDisplayName ||
+                              currentStoreUser.avatar !== freshAvatar ||
+                              currentStoreUser.description !== freshDescription ||
+                              currentStoreUser.isAdmin !== freshIsAdmin ||
+                              currentStoreUser.isOnline !== freshIsOnline ||
+                              currentStoreUser.lastSeen !== freshLastSeen;
+
+          if (needsUpdate) {
+            // Update store user state so other components also get the fresh details!
+            useAppStore.getState().addUser({
+              id: userId,
+              username: userData.username,
+              displayName: freshDisplayName,
+              avatar: freshAvatar,
+              description: freshDescription,
+              isAdmin: freshIsAdmin,
+              joinDate: userData.joinDate || currentStoreUser?.joinDate || new Date().toISOString(),
+              isOnline: freshIsOnline,
+              lastSeen: freshLastSeen
+            });
+          }
           // Retrieve updated store user
           storeUser = useAppStore.getState().users.find(u => u.id === userId);
         }

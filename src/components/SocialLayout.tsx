@@ -9,6 +9,7 @@ import { ProfileView } from './ProfileView';
 import { UserProfileView } from './UserProfileView';
 import { GlobalSearch } from './GlobalSearch';
 import { Settings } from './Settings';
+import { NotificationPanel } from './NotificationPanel';
 import { GroupCall } from './GroupCall';
 import { GroupInfo } from './GroupInfo';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -42,6 +43,7 @@ export const SocialLayout = () => {
   const [showFabMenu, setShowFabMenu] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const { 
     setMode, 
     activeChatId, 
@@ -62,6 +64,7 @@ export const SocialLayout = () => {
     activeGroupInfoId,
     setActiveGroupInfoId,
     chats,
+    notifications,
     blockedUserIds,
     removedFriendIds,
     createGroup,
@@ -220,6 +223,9 @@ export const SocialLayout = () => {
           {showSettings && (
             <Settings onClose={() => setShowSettings(false)} />
           )}
+          {showNotifications && (
+            <NotificationPanel onClose={() => setShowNotifications(false)} />
+          )}
           {activeGroupCall && (
             <GroupCall 
               groupId={activeGroupCall.groupId}
@@ -305,6 +311,18 @@ export const SocialLayout = () => {
                 title="Logout"
               >
                 <Icon name="logout" />
+              </button>
+              <button 
+                onClick={() => setShowNotifications(true)}
+                className="size-11 rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm relative"
+                title="Notifications"
+              >
+                <Icon name="notifications" />
+                {notifications.filter(n => n.status !== 'read').length > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white ring-2 ring-white animate-bounce">
+                    {notifications.filter(n => n.status !== 'read').length}
+                  </span>
+                )}
               </button>
               {activeTab !== 'profile' && (
                 <>

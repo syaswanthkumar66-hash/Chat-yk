@@ -225,7 +225,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   useEffect(() => {
     // Mock participants joining
     const initialParticipants: Participant[] = [
-      { id: 'me', name: 'You', avatar: 'https://picsum.photos/seed/me/200', isMuted: false, isVideoOff: type === 'voice', isSpeaking: false, status: 'online' },
+      { id: 'me', name: 'You', avatar: user?.avatar || 'https://picsum.photos/seed/me/200', isMuted: false, isVideoOff: type === 'voice', isSpeaking: false, status: 'online' },
     ];
     
     if (targetUser) {

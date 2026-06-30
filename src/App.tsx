@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from './store';
-import { Message } from './types';
+import { Message, Notification as AppNotification } from './types';
 import { Hub } from './components/Hub';
 import { Onboarding } from './components/Onboarding';
 import { SocialLayout } from './components/SocialLayout';
@@ -10,11 +10,12 @@ import { AdminPanel } from './components/AdminPanel';
 import { Icon, cn } from './components/UI';
 import { NotificationPrompt } from './components/NotificationPrompt';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, getDocFromServer, collection, query, where, onSnapshot } from './firebase';
+import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
 async function testConnection() {
   try {
+    await runBypassSelfTests();
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
@@ -37,117 +38,6 @@ function useNotifications() {
   // Permission is requested by <NotificationPrompt /> which shows a proper
   // contextual UI prompt. A silent requestPermission() call here would conflict
   // and cause browsers to suppress the NotificationPrompt dialog.
-
-  // Listen to socket 'receive_message' to trigger system alerts
-  useEffect(() => {
-    if (!socket || !user) return;
-
-    const handleReceiveMessage = async (data: {
-      id?: string;
-      messageId?: string;
-      groupId?: string;
-      senderId: string;
-      text: string;
-      type: Message['type'];
-      fileUrl?: string;
-      fileSize?: string;
-      encryptedFileKey?: number[];
-      iv?: number[];
-    }) => {
-      // Don't notify if the message is from ourselves
-      if (data.senderId === user.id) return;
-
-      // Check if user has push notifications enabled in settings
-      const pushEnabled = user.notificationSettings?.pushEnabled !== false;
-      if (!pushEnabled) return;
-
-      // Don't show system alerts for the active chat if the tab/document is focused
-      const isChatActive = activeChatId === (data.groupId || data.senderId);
-      const isChatPage = mode === 'social';
-      const shouldAlert = !isChatPage || !isChatActive || !document.hasFocus();
-      if (!shouldAlert) return;
-
-      let decryptedText = data.text;
-
-      // If encrypted, decrypt the message payload
-      if (data.iv && data.text) {
-        try {
-          const { cryptoService } = await import('./services/cryptoService');
-          const remotePubKeyBase64 = await new Promise<string>((resolve) => {
-            socket.emit("get_public_key", { userId: data.senderId }, resolve);
-          });
-          if (remotePubKeyBase64) {
-            const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64);
-            const encryptedObj = JSON.parse(data.text);
-            decryptedText = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
-          }
-        } catch (e) {
-          console.error("Notification decryption failed", e);
-          decryptedText = "🔒 [Encrypted Message]";
-        }
-      }
-
-      // Determine sender / group name
-      const chatInfo = data.groupId 
-        ? chats.find(c => c.id === data.groupId)
-        : users.find(u => u.id === data.senderId);
-
-      const senderName = (chatInfo as any)?.name || (chatInfo as any)?.displayName || 'New Message';
-      const avatarUrl = chatInfo?.avatar || `https://picsum.photos/seed/${data.senderId}/200`;
-
-      // Play system alert sound if enabled
-      if (user.notificationSettings?.soundEnabled !== false) {
-        try {
-          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
-          audio.volume = 0.5;
-          audio.play().catch(() => {});
-        } catch (e) {
-          console.warn('Audio playback failed:', e);
-        }
-      }
-
-      // Play device vibration if enabled (Additional Improvement B)
-      if (user.notificationSettings?.vibrateEnabled !== false && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-        try {
-          navigator.vibrate([200, 100, 200]);
-        } catch (e) {
-          console.warn('Vibration failed:', e);
-        }
-      }
-
-      // Handle preview settings for notification body (Additional Improvement A)
-      const displayBody = user.notificationSettings?.previewEnabled !== false
-        ? decryptedText
-        : "You have a new message";
-
-      // Add custom in-app Toast notification so they ALWAYS get a beautiful floating banner
-      addInAppToast({
-        title: senderName,
-        body: displayBody,
-        avatar: avatarUrl,
-        chatId: data.groupId || data.senderId
-      });
-
-      // Trigger the OS/Browser Notification alert if permitted
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(senderName, {
-            body: displayBody,
-            icon: avatarUrl,
-            tag: data.groupId || data.senderId,
-            renotify: true
-          } as any);
-        } catch (e) {
-          console.warn('Notification display failed:', e);
-        }
-      }
-    };
-
-    socket.on('receive_message', handleReceiveMessage);
-    return () => {
-      socket.off('receive_message', handleReceiveMessage);
-    };
-  }, [socket, user, activeChatId, chats, users, mode, addInAppToast]);
 
   // Listen to socket 'user_status' to trigger alerts when a friend comes online
   useEffect(() => {
@@ -362,6 +252,7 @@ export default function App() {
 
     let unsubscribeReceived = () => {};
     let unsubscribeSent = () => {};
+    let unsubscribeNotifications = () => {};
 
     const syncFirestoreData = async () => {
       try {
@@ -382,8 +273,9 @@ export default function App() {
         const qReceived = query(requestsRef, where('toUserId', '==', user.id));
         unsubscribeReceived = onSnapshot(qReceived, async (snapshot) => {
           const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
-          const fullRequests = [];
-          for (const r of requests) {
+          const fullRequests: any[] = [];
+          
+          await Promise.all(requests.map(async (r) => {
             try {
               let senderDoc = await getDoc(doc(db, 'users', r.fromUserId));
               if (senderDoc.exists()) {
@@ -417,7 +309,8 @@ export default function App() {
             } catch (e) {
               console.error("Error fetching sender for request:", e);
             }
-          }
+          }));
+          
           useAppStore.getState().setFriendRequests(fullRequests);
         }, (err) => {
           console.error("Error in friendRequests onSnapshot:", err);
@@ -427,7 +320,8 @@ export default function App() {
         const qSent = query(requestsRef, where('fromUserId', '==', user.id));
         unsubscribeSent = onSnapshot(qSent, async (snapshot) => {
            const sentIds: string[] = [];
-           for (let rDoc of snapshot.docs) {
+           
+           await Promise.all(snapshot.docs.map(async (rDoc) => {
              const data = rDoc.data() as any;
              if (data.status === 'accepted') {
                try {
@@ -456,7 +350,8 @@ export default function App() {
              } else {
                sentIds.push(data.toUserId);
              }
-           }
+           }));
+           
            useAppStore.setState({ sentFriendRequests: sentIds });
         }, (err) => {
            console.error("Error in sent friendRequests onSnapshot:", err);
@@ -468,11 +363,102 @@ export default function App() {
       }
     };
 
+    const notificationsRef = collection(db, 'notifications');
+    const qNotifications = query(notificationsRef, where('recipientId', '==', user.id));
+    unsubscribeNotifications = onSnapshot(qNotifications, async (snapshot) => {
+      const notificationsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as AppNotification);
+      notificationsList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      useAppStore.setState({ notifications: notificationsList });
+
+      const newlyCreated = notificationsList.filter(n => n.status === 'created');
+      if (newlyCreated.length > 0) {
+        const currentStore = useAppStore.getState();
+        
+        for (const notif of newlyCreated) {
+          if (currentStore.blockedUserIds.includes(notif.senderId || '')) {
+            try {
+              await updateDoc(doc(db, 'notifications', notif.id), { status: 'read', readAt: new Date().toISOString() });
+            } catch (e) {
+              console.error("Failed to mark blocked notification as read:", e);
+            }
+            continue;
+          }
+
+          const isChatActive = currentStore.activeChatId === notif.chatId;
+          const isSocialView = currentStore.mode === 'social';
+          
+          if (isSocialView && isChatActive && document.hasFocus()) {
+            try {
+              await updateDoc(doc(db, 'notifications', notif.id), { status: 'read', readAt: new Date().toISOString() });
+            } catch (e) {
+              console.error("Failed to mark active chat notification as read:", e);
+            }
+            continue;
+          }
+
+          try {
+            await updateDoc(doc(db, 'notifications', notif.id), { status: 'delivered', deliveredAt: new Date().toISOString() });
+          } catch (e) {
+            console.error("Failed to update notification delivery status:", e);
+          }
+
+          const userSettings = user.notificationSettings;
+          const pushEnabled = userSettings?.pushEnabled !== false;
+          if (!pushEnabled) continue;
+
+          if (userSettings?.soundEnabled !== false) {
+            try {
+              const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
+              audio.volume = 0.5;
+              audio.play().catch(() => {});
+            } catch (e) {
+              console.warn('Notification audio failed:', e);
+            }
+          }
+
+          if (userSettings?.vibrateEnabled !== false && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+            try {
+              navigator.vibrate([200, 100, 200]);
+            } catch (e) {
+              console.warn('Notification vibration failed:', e);
+            }
+          }
+
+          const bodyText = userSettings?.previewEnabled !== false ? notif.body : "New Notification received";
+
+          currentStore.addInAppToast({
+            title: notif.title,
+            body: bodyText,
+            avatar: notif.senderAvatar || `https://picsum.photos/seed/${notif.senderId || 'sys'}/200`,
+            chatId: notif.chatId || ''
+          });
+
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(notif.title, {
+                body: bodyText,
+                icon: notif.senderAvatar || '/pwa-192x192.png',
+                tag: notif.chatId || notif.id,
+                renotify: true
+              } as any);
+            } catch (e) {
+              console.warn('Browser OS Notification failed:', e);
+            }
+          }
+        }
+      }
+    }, (err) => {
+      console.error("Error in notifications onSnapshot:", err);
+      handleFirestoreError(err, OperationType.LIST, 'notifications');
+    });
+
     syncFirestoreData();
 
     return () => {
       unsubscribeReceived();
       unsubscribeSent();
+      unsubscribeNotifications();
     };
   }, [isLoggedIn, user?.id]);
 

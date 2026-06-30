@@ -25,6 +25,13 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
   const [showFriendsList, setShowFriendsList] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName || 'Alex Johnson');
   const [bio, setBio] = useState(user?.description || 'Product Designer & Tech Enthusiast. Always connecting! 🚀');
+
+  React.useEffect(() => {
+    if (user && !isEditing) {
+      setDisplayName(user.displayName || user.username || 'Alex Johnson');
+      setBio(user.description || 'Product Designer & Tech Enthusiast. Always connecting! 🚀');
+    }
+  }, [user, isEditing]);
   const [isCopying, setIsCopying] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [showMediaGallery, setShowMediaGallery] = useState(false);
@@ -360,7 +367,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
 
   const handleSave = () => {
     if (user) {
-      setUser({ ...user, displayName, description: bio });
+      updateUser({ displayName, description: bio });
     }
     setIsEditing(false);
   };

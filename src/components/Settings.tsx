@@ -37,6 +37,14 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [description, setDescription] = useState(user?.description || '');
+
+  React.useEffect(() => {
+    if (user && !isEditing) {
+      setDisplayName(user.displayName || '');
+      setDescription(user.description || '');
+    }
+  }, [user, isEditing]);
+
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 

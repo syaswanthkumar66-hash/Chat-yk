@@ -72,42 +72,23 @@ export const Avatar = ({
   status?: 'online' | 'offline' | 'away'; 
   onClick?: () => void; 
 }) => {
-  const [displayedSrc, setDisplayedSrc] = React.useState(src);
-  const [isLoading, setIsLoading] = React.useState(false);
+  const [isLoaded, setIsLoaded] = React.useState(false);
 
   React.useEffect(() => {
-    if (!src) {
-      setDisplayedSrc('');
-      return;
-    }
-    
-    // If the image is the same, no action needed
-    if (src === displayedSrc) return;
-
-    setIsLoading(true);
-    const img = new Image();
-    img.src = src;
-    img.onload = () => {
-      setDisplayedSrc(src);
-      setIsLoading(false);
-    };
-    img.onerror = () => {
-      // If load fails, fallback directly to show whatever has changed
-      setDisplayedSrc(src);
-      setIsLoading(false);
-    };
+    setIsLoaded(false);
   }, [src]);
 
   return (
     <div className={cn('relative shrink-0 transition-transform active:scale-95', className)} onClick={onClick}>
       <div className="size-full rounded-[35%] overflow-hidden bg-primary/10 border-2 border-white dark:border-slate-800 shadow-sm">
-        {displayedSrc ? (
+        {src ? (
           <img 
-            src={displayedSrc} 
+            src={src} 
             alt="avatar" 
+            onLoad={() => setIsLoaded(true)}
             className={cn(
               "size-full object-cover transition-opacity duration-300",
-              isLoading ? "opacity-75" : "opacity-100"
+              isLoaded ? "opacity-100" : "opacity-0"
             )} 
             referrerPolicy="no-referrer" 
           />

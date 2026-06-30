@@ -1,10 +1,18 @@
-import { useState, useRef, ChangeEvent, useEffect } from 'react';
+import { useState, useRef, ChangeEvent, useEffect, FormEvent } from 'react';
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
 import { Button, Icon, Avatar } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, doc, getDoc, setDoc } from '../firebase';
-import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged } from 'firebase/auth';
+import { 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult, 
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword
+} from 'firebase/auth';
 
 const TAKEN_USERNAMES = ['sarah_c', 'admin', 'system', 'root'];
 
@@ -30,7 +38,27 @@ export const Onboarding = () => {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected'>('connecting');
+  const [isLocalDev, setIsLocalDev] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Email login states
+  const [authMethod, setAuthMethod] = useState<'google' | 'email'>('google');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [showIframeWarning, setShowIframeWarning] = useState(false);
+
+  const handleDevLogin = () => {
+    setIsLocalDev(true);
+    setError('');
+    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    setProfile(prev => ({
+      ...prev,
+      displayName: 'Developer',
+      username: `dev_${randomSuffix}`,
+    }));
+    setStep('profile');
+  };
 
   // Background backend server warm-up on mount
   useEffect(() => {
@@ -101,9 +129,13 @@ export const Onboarding = () => {
               joinDate: userData.joinDate
             });
           } else {
+            const defaultUsername = user.email 
+              ? user.email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() 
+              : (user.displayName ? user.displayName.replace(/\s+/g, '_').toLowerCase() : '');
             setProfile(prev => ({
               ...prev,
               displayName: user.displayName || '',
+              username: prev.username || defaultUsername,
               avatar: user.photoURL || prev.avatar
             }));
             setStep('profile');
@@ -144,9 +176,13 @@ export const Onboarding = () => {
               joinDate: userData.joinDate
             });
           } else {
+            const defaultUsername = firebaseUser.email 
+              ? firebaseUser.email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() 
+              : (firebaseUser.displayName ? firebaseUser.displayName.replace(/\s+/g, '_').toLowerCase() : '');
             setProfile(prev => ({
               ...prev,
               displayName: firebaseUser.displayName || '',
+              username: prev.username || defaultUsername,
               avatar: firebaseUser.photoURL || prev.avatar
             }));
             setStep('profile');
@@ -166,6 +202,7 @@ export const Onboarding = () => {
     try {
       setIsLoading(true);
       setError('');
+      setShowIframeWarning(false);
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
@@ -205,7 +242,13 @@ export const Onboarding = () => {
       }
     } catch (err: any) {
       console.error("Auth error:", err);
-      if (err.code === 'auth/unauthorized-domain') {
+      const isNetworkFailed = err.code === 'auth/network-request-failed' || 
+                              err.message?.toLowerCase().includes('network-request-failed') ||
+                              err.message?.toLowerCase().includes('network_request_failed');
+      if (isNetworkFailed) {
+        setShowIframeWarning(true);
+        setError('Google Login Blocked: Sandbox restrictions apply. Please try Direct Email Login or open in a new tab.');
+      } else if (err.code === 'auth/unauthorized-domain') {
         setError('URGENT: This domain is not authorized. You MUST add your current domain url to Firebase Console > Authentication > Settings > Authorized Domains for Google Login to work.');
       } else if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
         console.log("Popup blocked, falling back to redirect...");
@@ -215,6 +258,74 @@ export const Onboarding = () => {
         });
       } else {
         setError(err.message || 'Failed to login with Google');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEmailAuth = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setError('Please fill in both email and password');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+    try {
+      setIsLoading(true);
+      setError('');
+      setIsLocalDev(false);
+
+      let user;
+      if (isRegistering) {
+        // Register new user
+        const result = await createUserWithEmailAndPassword(auth, email, password);
+        user = result.user;
+      } else {
+        // Sign in existing user
+        const result = await signInWithEmailAndPassword(auth, email, password);
+        user = result.user;
+      }
+
+      // Sync user profile
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        login({
+          id: user.uid,
+          username: userData.username,
+          displayName: userData.displayName,
+          avatar: userData.avatar,
+          description: userData.description,
+          isAdmin: userData.isAdmin,
+          joinDate: userData.joinDate
+        }, 'local');
+      } else {
+        // Navigate to profile setup
+        setProfile(prev => ({
+          ...prev,
+          displayName: email.split('@')[0],
+          avatar: `https://picsum.photos/seed/${user.uid}/200`
+        }));
+        setStep('profile');
+      }
+    } catch (err: any) {
+      console.error("Email auth error:", err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email is already in use. Please sign in instead.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Password is too weak. Please choose a stronger password.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Invalid email address format.');
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        setError('Incorrect email or password, or account does not exist.');
+      } else {
+        setError(err.message || 'Authentication failed');
       }
     } finally {
       setIsLoading(false);
@@ -231,7 +342,7 @@ export const Onboarding = () => {
       return;
     }
     
-    if (!auth.currentUser) {
+    if (!isLocalDev && !auth.currentUser) {
       setError('Not authenticated');
       return;
     }
@@ -239,20 +350,29 @@ export const Onboarding = () => {
     try {
       setIsLoading(true);
       setError('');
+
+      const uid = isLocalDev 
+        ? `dev_user_${profile.username}` 
+        : auth.currentUser!.uid;
+        
+      const email = isLocalDev 
+        ? 'developer@protocol.net' 
+        : auth.currentUser!.email;
+
       const userData = {
-        id: auth.currentUser.uid,
-        email: auth.currentUser.email,
+        id: uid,
+        email: email,
         username: profile.username,
         displayName: profile.displayName,
         avatar: profile.avatar,
         description: profile.description,
-        isAdmin: auth.currentUser.email === 'admin@protocol.net' || auth.currentUser.email === 'syaswanthkumar66@gmail.com',
+        isAdmin: isLocalDev || email === 'admin@protocol.net' || email === 'syaswanthkumar66@gmail.com',
         joinDate: new Date().toISOString()
       };
       
-      await setDoc(doc(db, 'users', auth.currentUser.uid), userData);
+      await setDoc(doc(db, 'users', uid), userData);
       
-      login(userData);
+      login(userData, isLocalDev ? 'local' : 'google');
     } catch (err: any) {
       console.error(err);
       setError('Failed to setup profile');
@@ -318,38 +438,187 @@ export const Onboarding = () => {
                 </div>
               </div>
 
+              {/* Pill Tabs */}
+              <div className="grid grid-cols-2 p-1.5 bg-slate-50/80 rounded-2xl border border-slate-100 shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMethod('google');
+                    setError('');
+                  }}
+                  className={`py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-300 ${
+                    authMethod === 'google'
+                      ? 'bg-white text-primary shadow-sm ring-1 ring-slate-100'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  Google Portal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMethod('email');
+                    setError('');
+                  }}
+                  className={`py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-300 ${
+                    authMethod === 'email'
+                      ? 'bg-white text-primary shadow-sm ring-1 ring-slate-100'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  Email Gateway
+                </button>
+              </div>
+
               {error && (
                 <motion.div 
                   initial={{ opacity: 0, y: -5 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-red-50 p-3 rounded-xl border border-red-100"
+                  className="bg-red-50 p-3.5 rounded-xl border border-red-100"
                 >
-                  <p className="text-[8px] text-red-500 font-black uppercase tracking-widest text-center">
+                  <p className="text-[9px] text-red-500 font-bold uppercase tracking-wider text-center leading-normal">
                     {error}
                   </p>
                 </motion.div>
               )}
 
-              <div className="space-y-6">
-                <p className="text-slate-500 text-xs text-center font-medium leading-relaxed px-2">
-                  Authorize via Social Cloud backend for real-time encrypted communication with the global developer network.
-                </p>
-                <Button 
-                  onClick={handleGoogleLogin} 
-                  disabled={isLoading}
-                  className="w-full h-14 rounded-2xl font-black uppercase tracking-widest italic text-xs shadow-xl shadow-primary/20"
-                >
-                  {isLoading ? (
-                    <div className="flex items-center gap-2">
-                      <div className="size-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                      <span>Authenticating...</span>
+              {authMethod === 'google' ? (
+                <div className="space-y-6">
+                  <p className="text-slate-500 text-xs text-center font-medium leading-relaxed px-2">
+                    Authorize via Social Cloud backend for real-time encrypted communication with the global developer network.
+                  </p>
+
+                  {showIframeWarning && (
+                    <div className="bg-amber-50 border border-amber-200/50 p-4 rounded-2xl text-amber-800 space-y-3">
+                      <p className="text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 text-amber-700">
+                        <Icon name="warning" className="text-amber-500 text-sm" />
+                        Iframe Sandbox Restricting Popup
+                      </p>
+                      <p className="text-[10px] leading-relaxed font-medium text-slate-600">
+                        The browser blocks popup signals inside the AI Studio frame. Open the app directly in a new browser tab to login, or use the <strong>Email Gateway</strong> tab.
+                      </p>
+                      <a 
+                        href={window.location.origin} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-primary hover:underline bg-white border border-primary/15 px-3 py-1.5 rounded-xl shadow-sm"
+                      >
+                        Open App in New Tab <Icon name="open_in_new" className="text-[9px]" />
+                      </a>
                     </div>
-                  ) : (
-                    <>
-                      <Icon name="mail" className="text-lg mr-2" />
-                      Continue with Google
-                    </>
                   )}
+
+                  <Button 
+                    onClick={handleGoogleLogin} 
+                    disabled={isLoading}
+                    className="w-full h-14 rounded-2xl font-black uppercase tracking-widest italic text-xs shadow-xl shadow-primary/20"
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center gap-2 justify-center">
+                        <div className="size-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                        <span>Authenticating...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Icon name="mail" className="text-lg mr-2" />
+                        Continue with Google
+                      </>
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleEmailAuth} className="space-y-4">
+                  <p className="text-slate-500 text-xs text-center font-medium leading-relaxed px-2">
+                    Bypass iframe restrictions completely with direct credential authorization on our Firebase security cluster.
+                  </p>
+
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="block text-[8px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1.5 px-1">
+                        Secure Email ID
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        disabled={isLoading}
+                        placeholder="developer@protocol.net"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setError('');
+                        }}
+                        className="w-full bg-slate-50/50 border border-slate-200/80 rounded-2xl px-4 py-3.5 text-xs font-bold focus:ring-2 focus:ring-primary/20 focus:bg-white outline-none transition-all placeholder:text-slate-300"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[8px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1.5 px-1">
+                        Secure Gate Key Passcode
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        disabled={isLoading}
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          setError('');
+                        }}
+                        className="w-full bg-slate-50/50 border border-slate-200/80 rounded-2xl px-4 py-3.5 text-xs font-bold focus:ring-2 focus:ring-primary/20 focus:bg-white outline-none transition-all placeholder:text-slate-300"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between px-1 text-[9px] font-black uppercase tracking-wider text-slate-400 select-none">
+                    <span>{isRegistering ? 'Registration Portal' : 'Access Portal'}</span>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => {
+                        setIsRegistering(!isRegistering);
+                        setError('');
+                      }}
+                      className="text-primary hover:underline"
+                    >
+                      {isRegistering ? 'Sign In Identity' : 'Create Identity'}
+                    </button>
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full h-14 rounded-2xl font-black uppercase tracking-widest italic text-xs shadow-xl shadow-primary/20"
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center gap-2 justify-center">
+                        <div className="size-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                        <span>Verifying Gate Key...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Icon name="vpn_key" className="text-lg mr-2" />
+                        {isRegistering ? 'Register & Connect' : 'Verify & Connect'}
+                      </>
+                    )}
+                  </Button>
+                </form>
+              )}
+
+              <div className="space-y-4">
+                <div className="relative flex py-2 items-center justify-center">
+                  <div className="flex-grow border-t border-slate-100"></div>
+                  <span className="flex-shrink mx-4 text-[9px] font-black uppercase tracking-widest text-slate-300">or troubleshoot</span>
+                  <div className="flex-grow border-t border-slate-100"></div>
+                </div>
+
+                <Button 
+                  onClick={handleDevLogin}
+                  disabled={isLoading}
+                  className="w-full h-12 rounded-xl font-black uppercase tracking-widest italic text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/60 shadow-sm animate-pulse"
+                >
+                  <Icon name="construction" className="text-sm mr-2 text-primary" />
+                  Developer / Demo Session
                 </Button>
               </div>
 

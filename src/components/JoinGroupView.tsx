@@ -4,7 +4,7 @@ import { Icon, Avatar, Button, Card } from './UI';
 import { useAppStore } from '../store';
 
 export const JoinGroupView = () => {
-  const { joinGroupId, setJoinGroupId, setActiveChatId, login, isLoggedIn, chats } = useAppStore();
+  const { joinGroupId, setJoinGroupId, setActiveChatId, isLoggedIn, chats, addInAppToast } = useAppStore();
   const chat = chats.find(c => c.id === joinGroupId);
 
   if (!chat) {
@@ -22,8 +22,18 @@ export const JoinGroupView = () => {
 
   const handleJoin = () => {
     if (!isLoggedIn) {
-      // For demo, just login and then join
-      login();
+      if (addInAppToast) {
+        addInAppToast({
+          title: "Authentication Required",
+          body: "Please register or log in first to join this group chat.",
+          avatar: chat.avatar || 'https://picsum.photos/seed/default/200',
+          chatId: chat.id
+        });
+      } else {
+        alert("Please log in or sign up first to join this group chat.");
+      }
+      setJoinGroupId(null);
+      return;
     }
     setActiveChatId(chat.id);
     setJoinGroupId(null);

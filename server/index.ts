@@ -594,6 +594,52 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         if (Array.isArray(recipientIds)) {
           for (const targetId of recipientIds) {
             if (targetId === senderId) continue;
+
+            // Check if target has blocked sender
+            let isTargetBlocked = false;
+            if (db) {
+              try {
+                const targetDoc = await db.collection('users').doc(targetId).get();
+                if (targetDoc.exists) {
+                  const targetData = targetDoc.data();
+                  const blockedList = targetData?.blockedUserIds || [];
+                  if (blockedList.includes(senderId)) {
+                    isTargetBlocked = true;
+                  }
+                }
+              } catch (e) {
+                console.warn(`Block check failed for target ${targetId}`, e);
+              }
+            }
+
+            if (isTargetBlocked) {
+              console.log(`Skipping message notification for ${targetId} because they blocked ${senderId}`);
+              continue;
+            }
+
+            // Create persistent Notification first
+            if (db) {
+              try {
+                const notifId = `notif-msg-${messageData.id}-${targetId}`;
+                await db.collection('notifications').doc(notifId).set({
+                  id: notifId,
+                  type: 'message',
+                  senderId,
+                  senderName: data.senderName || "User",
+                  senderAvatar: data.senderAvatar || "",
+                  recipientId: targetId,
+                  title: data.groupName || "New Group Message",
+                  body: messageData.type === 'text' ? (messageData.text && messageData.text.startsWith('{') && messageData.text.includes('"ciphertext"') ? "🔒 [Encrypted Message]" : messageData.text) : `📎 Shared a ${messageData.type}`,
+                  chatId: groupId,
+                  status: 'created',
+                  createdAt: new Date().toISOString()
+                });
+                console.log(`Durable group notification created for member ${targetId}`);
+              } catch (e: any) {
+                console.warn(`Failed to create durable group notification for ${targetId}:`, e.message);
+              }
+            }
+
             const targetSocketId = users.get(targetId);
             if (!targetSocketId) {
               const storeData = { ...messageData, recipientId: targetId, to: targetId };
@@ -613,9 +659,10 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
                 console.log(`Group member ${targetId} offline. Message stored temporarily in memory.`);
               }
             }
+
             // Send web push notification ALWAYS to ensure delivery (since they might be online but backgrounded)
             sendPushNotification(targetId, {
-              title: data.senderName || "New Group Message",
+              title: data.groupName || "New Group Message",
               body: messageData.type === 'text' ? "You have a new group message 💬" : `📎 Shared a ${messageData.type}`,
               icon: '/pwa-192x192.png',
               data: { url: '/' }
@@ -623,6 +670,51 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           }
         }
       } else if (recipientId) {
+        // Check if recipient has blocked sender
+        let isRecipientBlocked = false;
+        if (db) {
+          try {
+            const recipientDoc = await db.collection('users').doc(recipientId).get();
+            if (recipientDoc.exists) {
+              const recData = recipientDoc.data();
+              const blockedList = recData?.blockedUserIds || [];
+              if (blockedList.includes(senderId)) {
+                isRecipientBlocked = true;
+              }
+            }
+          } catch (e) {
+            console.warn(`Block check failed for recipient ${recipientId}`, e);
+          }
+        }
+
+        if (isRecipientBlocked) {
+          console.log(`Skipping message notification for ${recipientId} because they blocked ${senderId}`);
+          return;
+        }
+
+        // Create persistent Notification first
+        if (db) {
+          try {
+            const notifId = `notif-msg-${messageData.id}`;
+            await db.collection('notifications').doc(notifId).set({
+              id: notifId,
+              type: 'message',
+              senderId,
+              senderName: data.senderName || "User",
+              senderAvatar: data.senderAvatar || "",
+              recipientId,
+              title: data.senderName || "New Message",
+              body: messageData.type === 'text' ? (messageData.text && messageData.text.startsWith('{') && messageData.text.includes('"ciphertext"') ? "🔒 [Encrypted Message]" : messageData.text) : `📎 Shared a ${messageData.type}`,
+              chatId: senderId,
+              status: 'created',
+              createdAt: new Date().toISOString()
+            });
+            console.log(`Durable direct notification created for recipient ${recipientId}`);
+          } catch (e: any) {
+            console.warn(`Failed to create durable direct notification for ${recipientId}:`, e.message);
+          }
+        }
+
         const targetSocketId = users.get(recipientId);
         if (targetSocketId) {
           io.to(targetSocketId).emit("receive_message", messageData);
@@ -646,6 +738,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             console.log(`User ${recipientId} offline. Message ${messageData.id} stored temporarily in memory.`);
           }
         }
+
         // Send web push notification ALWAYS to ensure delivery (since they might be online but backgrounded)
         sendPushNotification(recipientId, {
           title: data.senderName || "New Message",
@@ -1047,9 +1140,21 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   async function startServer() {
     if (!process.env.VERCEL) {
       const isProd = process.env.NODE_ENV === "production";
-      const port = isProd ? Number(process.env.PORT || 3000) : 3001;
+      const port = 3000;
 
-      if (isProd) {
+      if (!isProd) {
+        try {
+          const { createServer: createViteServer } = await import("vite");
+          const vite = await createViteServer({
+            server: { middlewareMode: true },
+            appType: "spa",
+          });
+          app.use(vite.middlewares);
+          console.log("Vite development middleware integrated successfully.");
+        } catch (viteErr) {
+          console.error("Failed to load Vite dev middleware:", viteErr);
+        }
+      } else {
         const distPath = path.join(process.cwd(), 'dist');
         if (fs.existsSync(distPath) && fs.existsSync(path.join(distPath, 'index.html'))) {
           app.use(express.static(distPath));
@@ -1064,7 +1169,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
 
       httpServer.listen(port, "0.0.0.0", () => {
-        console.log(`Backend server running on port ${port} (production: ${isProd})`);
+        console.log(`Unified server running on http://0.0.0.0:${port} (production: ${isProd})`);
       });
     }
   }

@@ -74,5 +74,23 @@ service cloud.firestore {
       allow delete: if isVerified() && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid);
       allow update: if isVerified() && (existing().toUserId == request.auth.uid || existing().fromUserId == request.auth.uid) && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
     }
+
+    function isValidNotification(data) {
+       return data.keys().hasAll(['id', 'type', 'recipientId', 'title', 'body', 'status', 'createdAt']) &&
+         data.id is string && data.id.size() <= 128 &&
+         data.type is string && data.type.size() <= 64 &&
+         data.recipientId is string && data.recipientId.size() <= 128 &&
+         data.title is string && data.title.size() <= 256 &&
+         data.body is string && data.body.size() <= 2048 &&
+         data.status is string && (data.status == 'created' || data.status == 'delivered' || data.status == 'read') &&
+         (data.createdAt is string || data.createdAt is timestamp);
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isVerified() && resource.data.recipientId == request.auth.uid;
+      allow create: if isVerified() && isValidId(notificationId) && isValidNotification(incoming());
+      allow update: if isVerified() && resource.data.recipientId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow delete: if isVerified() && resource.data.recipientId == request.auth.uid;
+    }
   }
 }

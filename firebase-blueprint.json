@@ -15,12 +15,36 @@
         "joinDate": { "type": "string" }
       },
       "required": ["id", "email", "username", "displayName"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Durable user notifications representing system alerts, messages, mentions, and friend requests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderAvatar": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "chatId": { "type": "string" },
+        "requestId": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "type", "recipientId", "title", "body", "status", "createdAt"]
     }
   },
   "firestore": {
     "users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
       "description": "User profiles"
+    },
+    "notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Durable user notifications"
     }
   }
 }
