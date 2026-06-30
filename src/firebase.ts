@@ -118,12 +118,30 @@ function convertTimestamps(val: any): any {
   return val;
 }
 
+// Fast-timeout helper to fall back to HTTP proxy quickly if direct Firestore connections are blocked/slow (e.g., in iframe sandbox)
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 2500): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error("Firebase query timed out (connection blocked/slow in iframe sandbox)"));
+    }, timeoutMs);
+  });
+
+  return Promise.race([
+    promise,
+    timeoutPromise
+  ]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
 // Wrapped execution functions
 export async function getDoc(docRef: any) {
   try {
-    return await firestoreGetDoc(docRef);
+    return await withTimeout(firestoreGetDoc(docRef), 2500);
   } catch (err: any) {
-    const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
+    const isNetworkError = err.message?.toLowerCase().includes('timeout') ||
+                           err.message?.toLowerCase().includes('unavailable') || 
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {
@@ -156,9 +174,10 @@ async function fetchDocViaProxy(docRef: any) {
 
 export async function getDocFromServer(docRef: any) {
   try {
-    return await firestoreGetDocFromServer(docRef);
+    return await withTimeout(firestoreGetDocFromServer(docRef), 2500);
   } catch (err: any) {
-    const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
+    const isNetworkError = err.message?.toLowerCase().includes('timeout') ||
+                           err.message?.toLowerCase().includes('unavailable') || 
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {
@@ -177,9 +196,9 @@ export async function getDocFromServer(docRef: any) {
 export async function setDoc(docRef: any, data: any, options?: any) {
   // Try writing to local Firestore client (with robust persistent offline caching)
   try {
-    await firestoreSetDoc(docRef, data, options);
+    await withTimeout(firestoreSetDoc(docRef, data, options), 2500);
   } catch (err: any) {
-    console.warn("Local setDoc write failed/delayed, falling back to proxy:", err);
+    console.warn("Local setDoc write failed/delayed/timed out, falling back to proxy:", err);
     try {
       await setDocViaProxy(docRef, data, options);
     } catch (proxyErr: any) {
@@ -205,9 +224,9 @@ async function setDocViaProxy(docRef: any, data: any, options?: any) {
 
 export async function updateDoc(docRef: any, data: any) {
   try {
-    await firestoreUpdateDoc(docRef, data);
+    await withTimeout(firestoreUpdateDoc(docRef, data), 2500);
   } catch (err: any) {
-    console.warn("Local updateDoc write failed/delayed, falling back to proxy:", err);
+    console.warn("Local updateDoc write failed/delayed/timed out, falling back to proxy:", err);
     try {
       await updateDocViaProxy(docRef, data);
     } catch (proxyErr: any) {
@@ -232,9 +251,9 @@ async function updateDocViaProxy(docRef: any, data: any) {
 
 export async function deleteDoc(docRef: any) {
   try {
-    await firestoreDeleteDoc(docRef);
+    await withTimeout(firestoreDeleteDoc(docRef), 2500);
   } catch (err: any) {
-    console.warn("Local deleteDoc write failed/delayed, falling back to proxy:", err);
+    console.warn("Local deleteDoc write failed/delayed/timed out, falling back to proxy:", err);
     try {
       await deleteDocViaProxy(docRef);
     } catch (proxyErr: any) {
@@ -258,9 +277,10 @@ async function deleteDocViaProxy(docRef: any) {
 
 export async function addDoc(collectionRef: any, data: any) {
   try {
-    return await firestoreAddDoc(collectionRef, data);
+    return await withTimeout(firestoreAddDoc(collectionRef, data), 2500);
   } catch (err: any) {
-    const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
+    const isNetworkError = err.message?.toLowerCase().includes('timeout') ||
+                           err.message?.toLowerCase().includes('unavailable') || 
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {
@@ -294,9 +314,10 @@ async function addDocViaProxy(collectionRef: any, data: any) {
 
 export async function getDocs(queryObj: any) {
   try {
-    return await firestoreGetDocs(queryObj);
+    return await withTimeout(firestoreGetDocs(queryObj), 2500);
   } catch (err: any) {
-    const isNetworkError = err.message?.toLowerCase().includes('unavailable') || 
+    const isNetworkError = err.message?.toLowerCase().includes('timeout') ||
+                           err.message?.toLowerCase().includes('unavailable') || 
                            err.message?.toLowerCase().includes('offline') || 
                            err.message?.toLowerCase().includes('could not reach');
     if (isNetworkError) {

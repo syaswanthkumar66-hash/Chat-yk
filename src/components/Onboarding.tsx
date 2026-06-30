@@ -4,7 +4,7 @@ import { BACKEND_URL } from '../config';
 import { Button, Icon, Avatar, Card } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, doc, getDoc, setDoc } from '../firebase';
-import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged } from 'firebase/auth';
 
 const TAKEN_USERNAMES = ['sarah_c', 'admin', 'system', 'root'];
 
@@ -80,6 +80,41 @@ export const Onboarding = () => {
         }
       });
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          const userDocRef = doc(db, 'users', firebaseUser.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            login({
+              id: firebaseUser.uid,
+              username: userData.username,
+              displayName: userData.displayName,
+              avatar: userData.avatar,
+              description: userData.description,
+              isAdmin: userData.isAdmin,
+              joinDate: userData.joinDate
+            });
+          } else {
+            setProfile(prev => ({
+              ...prev,
+              displayName: firebaseUser.displayName || '',
+              avatar: firebaseUser.photoURL || prev.avatar
+            }));
+            setStep('profile');
+          }
+        } catch (err) {
+          console.error("Error in onboarding auto-sync:", err);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [login]);
 
   const handleGoogleLogin = async () => {
     try {
