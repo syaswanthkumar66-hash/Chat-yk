@@ -61,16 +61,68 @@ export const GlassCard = ({ children, className, ...props }: React.HTMLAttribute
   </div>
 );
 
-export const Avatar = ({ src, className, status, onClick }: { src: string, className?: string, status?: 'online' | 'offline' | 'away', onClick?: () => void }) => (
-  <div className={cn('relative shrink-0 transition-transform active:scale-95', className)} onClick={onClick}>
-    <div className="size-full rounded-[35%] overflow-hidden bg-primary/10 border-2 border-white dark:border-slate-800 shadow-sm">
-      <img src={src} alt="avatar" className="size-full object-cover" referrerPolicy="no-referrer" />
+export const Avatar = ({ 
+  src, 
+  className, 
+  status, 
+  onClick 
+}: { 
+  src: string; 
+  className?: string; 
+  status?: 'online' | 'offline' | 'away'; 
+  onClick?: () => void; 
+}) => {
+  const [displayedSrc, setDisplayedSrc] = React.useState(src);
+  const [isLoading, setIsLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!src) {
+      setDisplayedSrc('');
+      return;
+    }
+    
+    // If the image is the same, no action needed
+    if (src === displayedSrc) return;
+
+    setIsLoading(true);
+    const img = new Image();
+    img.src = src;
+    img.onload = () => {
+      setDisplayedSrc(src);
+      setIsLoading(false);
+    };
+    img.onerror = () => {
+      // If load fails, fallback directly to show whatever has changed
+      setDisplayedSrc(src);
+      setIsLoading(false);
+    };
+  }, [src]);
+
+  return (
+    <div className={cn('relative shrink-0 transition-transform active:scale-95', className)} onClick={onClick}>
+      <div className="size-full rounded-[35%] overflow-hidden bg-primary/10 border-2 border-white dark:border-slate-800 shadow-sm">
+        {displayedSrc ? (
+          <img 
+            src={displayedSrc} 
+            alt="avatar" 
+            className={cn(
+              "size-full object-cover transition-opacity duration-300",
+              isLoading ? "opacity-75" : "opacity-100"
+            )} 
+            referrerPolicy="no-referrer" 
+          />
+        ) : (
+          <div className="size-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+            <Icon name="person" className="text-lg opacity-60" />
+          </div>
+        )}
+      </div>
+      {status && (
+        <div className={cn(
+          "absolute -bottom-1 -right-1 size-4 rounded-full border-2 border-white dark:border-slate-800 shadow-sm",
+          status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-yellow-500' : 'bg-slate-400'
+        )} />
+      )}
     </div>
-    {status && (
-      <div className={cn(
-        "absolute -bottom-1 -right-1 size-4 rounded-full border-2 border-white dark:border-slate-800 shadow-sm",
-        status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-yellow-500' : 'bg-slate-400'
-      )} />
-    )}
-  </div>
-);
+  );
+};

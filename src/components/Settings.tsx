@@ -311,9 +311,12 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      updateUser({ avatar: url });
-      setShowAvatarPicker(false);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        updateUser({ avatar: reader.result as string });
+        setShowAvatarPicker(false);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
