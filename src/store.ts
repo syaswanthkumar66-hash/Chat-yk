@@ -211,6 +211,7 @@ interface AppState {
   transfers: Transfer[];
   acceptTransfer: (transferId: string) => void;
   declineTransfer: (transferId: string) => void;
+  offlineMessageQueue: { id: string, chatId: string | null, recipientId: string | null, text: string, type: string, fileUrl?: string, fileSize?: string, e2eData?: any }[];
 }
 
 export const DEFAULT_PRESETS: UserProfile[] = [];
@@ -256,6 +257,7 @@ const cachedSentFriendRequests = getLocalStorageJSON<string[]>('proto_sentFriend
 
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
+  offlineMessageQueue: [],
   devices: [
     { id: 'd1', name: 'MacBook Pro', type: 'desktop', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '45.2 Mbps', totalSent: '12.4 GB', totalReceived: '8.7 GB' },
     { id: 'd2', name: 'iPhone 15 Pro', type: 'mobile', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '32.1 Mbps', totalSent: '4.1 GB', totalReceived: '2.3 GB' },
@@ -517,6 +519,7 @@ export const useAppStore = create<AppState>((set) => ({
       friendRequests: [], 
       sentFriendRequests: [], 
       groupJoinRequests: [], 
+      offlineMessageQueue: [],
       socket: null 
     });
   },
@@ -747,7 +750,7 @@ export const useAppStore = create<AppState>((set) => ({
       set({ wssStatus: 'connected', isWssConnected: true, wssMessage: 'Connected & Secure' });
       startHeartbeat();
       const { cryptoService } = await import('./services/cryptoService');
-      const publicKey = await cryptoService.getMyPublicKeyBase64();
+      const publicKey = await cryptoService.getMyPublicKeyBase64(userId);
       socket.emit('register', { userId, publicKey });
       
       // Auto join group rooms on connect
@@ -757,6 +760,49 @@ export const useAppStore = create<AppState>((set) => ({
           socket.emit('join_group', c.id);
         }
       });
+
+      // Resend offline queued messages automatically on connect
+      if (activeState.offlineMessageQueue && activeState.offlineMessageQueue.length > 0) {
+        console.log(`Resending ${activeState.offlineMessageQueue.length} offline queued messages...`);
+        activeState.offlineMessageQueue.forEach((msg) => {
+          const chatObj = activeState.chats.find(c => c.id === msg.chatId);
+          const isGrp = chatObj?.isGroup;
+          if (isGrp && chatObj?.participants) {
+            socket.emit('send_message', {
+              groupId: msg.chatId,
+              text: msg.e2eData ? msg.e2eData.encryptedText : msg.text,
+              type: msg.type,
+              fileUrl: msg.fileUrl,
+              fileSize: msg.fileSize,
+              iv: msg.e2eData?.iv,
+              encryptedFileKey: msg.e2eData?.encryptedFileKey,
+              recipientIds: chatObj.participants.map(p => p.id)
+            });
+          } else {
+            const targetId = msg.recipientId || chatObj?.participants.find(p => p.id !== activeState.user?.id)?.id;
+            if (targetId) {
+              socket.emit('send_message', {
+                recipientId: targetId,
+                text: msg.e2eData ? msg.e2eData.encryptedText : msg.text,
+                type: msg.type,
+                fileUrl: msg.fileUrl,
+                fileSize: msg.fileSize,
+                iv: msg.e2eData?.iv,
+                encryptedFileKey: msg.e2eData?.encryptedFileKey
+              });
+            }
+          }
+          // Update the message status to 'sent' in our local state
+          useAppStore.setState((s) => ({
+            chats: s.chats.map(c => 
+              c.id === msg.chatId
+                ? { ...c, messages: c.messages.map(m => m.id === msg.id ? { ...m, status: 'sent' as const } : m) }
+                : c
+            )
+          }));
+        });
+        useAppStore.setState({ offlineMessageQueue: [] });
+      }
     });
 
     // === FIREBASE USER DETAILS SYNCHRONIZATION (WRITE ONLY, NO LISTENERS) ===
@@ -764,7 +810,7 @@ export const useAppStore = create<AppState>((set) => ({
       import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
           // Broadcast my public key via Firebase:
           import('./services/cryptoService').then(async ({ cryptoService }) => {
-              const publicKey = await cryptoService.getMyPublicKeyBase64();
+              const publicKey = await cryptoService.getMyPublicKeyBase64(userId);
               setDoc(doc(db, 'users', userId), { publicKey }, { merge: true }).catch((err) => {
                 try {
                   handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
@@ -841,7 +887,7 @@ export const useAppStore = create<AppState>((set) => ({
             }
           });
           if (remotePubKeyBase64) {
-            const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64);
+            const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64, userId);
             const encryptedObj = JSON.parse(data.text);
             decryptedText = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
           }
@@ -1337,6 +1383,10 @@ export const useAppStore = create<AppState>((set) => ({
     }));
   },
   leaveChat: (chatId, userId) => {
+    const state = useAppStore.getState();
+    if (state.socket && state.socket.connected) {
+      state.socket.emit('leave_group', chatId);
+    }
     set((state) => ({
       chats: state.chats.map(c => {
         if (c.id === chatId) {
@@ -1513,6 +1563,8 @@ export const useAppStore = create<AppState>((set) => ({
     };
   }),
   sendMessage: (chatId, recipientId, text, type = 'text', fileUrl, fileSize, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean) => set((state) => {
+    const isSocketConnected = state.socket && state.socket.connected;
+    let offlineMessageQueue = [...state.offlineMessageQueue];
     const newMessage: Message = {
       id: `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       senderId: state.user?.id || 'u1',
@@ -1523,22 +1575,24 @@ export const useAppStore = create<AppState>((set) => ({
       fileUrl,
       fileSize,
       isOwn: true,
-      status: 'sent',
+      status: isSocketConnected ? 'sent' : 'pending',
       isE2E: !!e2eData,
       iv: e2eData?.iv,
       encryptedFileKey: e2eData?.encryptedFileKey
     };
 
     // Simulate read receipt since we don't have full socket ack logic here
-    setTimeout(() => {
-      useAppStore.setState((s) => ({
-        chats: s.chats.map(c => 
-          (c.id === chatId || (recipientId && c.participants.some(p => p.id === recipientId)))
-            ? { ...c, messages: c.messages.map(m => m.id === newMessage.id ? { ...m, status: 'read' as const } : m) }
-            : c
-        )
-      }));
-    }, 2000);
+    if (isSocketConnected) {
+      setTimeout(() => {
+        useAppStore.setState((s) => ({
+          chats: s.chats.map(c => 
+            (c.id === chatId || (recipientId && c.participants.some(p => p.id === recipientId)))
+              ? { ...c, messages: c.messages.map(m => m.id === newMessage.id ? { ...m, status: 'read' as const } : m) }
+              : c
+          )
+        }));
+      }, 2000);
+    }
 
     // Emit via socket or fallback to Firebase
     const chat = state.chats.find(c => c.id === chatId);
@@ -1598,6 +1652,17 @@ export const useAppStore = create<AppState>((set) => ({
         }
       }
     } else {
+      offlineMessageQueue.push({
+        id: newMessage.id,
+        chatId,
+        recipientId,
+        text,
+        type,
+        fileUrl,
+        fileSize,
+        e2eData
+      });
+
       // Only store offline messages if they are plain text messages
       if (type === 'text' && !fileUrl && state.authMethod !== 'local') {
         if (isGroup && chat?.participants) {
@@ -1685,7 +1750,7 @@ export const useAppStore = create<AppState>((set) => ({
           lastMessage: newMessage
         };
         updatedChats.push(newChat);
-        return { chats: updatedChats, activeChatId: newChat.id, activeRecipientId: null };
+        return { chats: updatedChats, offlineMessageQueue, activeChatId: newChat.id, activeRecipientId: null };
       }
     }
 
@@ -1702,7 +1767,7 @@ export const useAppStore = create<AppState>((set) => ({
       });
     }
 
-    return { chats: updatedChats, ...additionalState };
+    return { chats: updatedChats, offlineMessageQueue, ...additionalState };
   }),
 }));
 

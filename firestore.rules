@@ -34,6 +34,10 @@ service cloud.firestore {
         data.id == request.auth.uid;
     }
 
+    match /test/connection {
+      allow read: if true;
+    }
+
     match /users/{userId} {
       allow read: if isVerified();
 
@@ -53,8 +57,26 @@ service cloud.firestore {
       allow read, write: if isOwner(userId);
     }
 
+    function isValidOfflineMessage(data) {
+       return data.keys().hasAll(['id', 'senderId', 'recipientId', 'text', 'type', 'timestamp', 'to']) &&
+         data.id is string && data.id.size() <= 128 &&
+         data.senderId is string && data.senderId.size() <= 128 &&
+         data.senderId == request.auth.uid &&
+         data.recipientId is string && data.recipientId.size() <= 128 &&
+         data.text is string && data.text.size() <= 100000 &&
+         data.type is string && data.type.size() <= 64 &&
+         data.timestamp is string && data.timestamp.size() <= 128 &&
+         data.to is string && data.to.size() <= 128 &&
+         (!data.keys().contains('fileUrl') || data.fileUrl is string) &&
+         (!data.keys().contains('fileSize') || data.fileSize is int || data.fileSize is float) &&
+         (!data.keys().contains('iv') || data.iv is string) &&
+         (!data.keys().contains('encryptedFileKey') || data.encryptedFileKey is string) &&
+         (!data.keys().contains('isTemporaryFile') || data.isTemporaryFile is bool) &&
+         (!data.keys().contains('isForwarded') || data.isForwarded is bool);
+    }
+
     match /offline_messages/{messageId} {
-      allow create: if isVerified() && incoming().senderId == request.auth.uid;
+      allow create: if isVerified() && isValidId(messageId) && isValidOfflineMessage(incoming());
       allow read: if isVerified() && resource.data.to == request.auth.uid;
       allow delete: if isVerified() && (resource.data.to == request.auth.uid || resource.data.senderId == request.auth.uid);
     }

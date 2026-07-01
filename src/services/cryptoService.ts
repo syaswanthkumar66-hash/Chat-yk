@@ -3,12 +3,51 @@
  * Uses ECDH for key exchange and AES-GCM for message/file encryption
  */
 
+import { auth } from '../firebase';
+
 export class CryptoService {
   private keyPair: CryptoKeyPair | null = null;
+  private currentUserId: string | null = null;
   private derivedKeys: Map<string, CryptoKey> = new Map();
 
-  async initKeys() {
-    if (this.keyPair) return;
+  async initKeys(userId?: string) {
+    const activeUserId = userId || auth.currentUser?.uid || "default_user";
+    if (this.keyPair && this.currentUserId === activeUserId) return;
+
+    const storageKey = `e2e_keys_${activeUserId}`;
+    let cached: string | null = null;
+    try {
+      cached = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
+    } catch (e) {
+      console.warn("localStorage is not accessible:", e);
+    }
+
+    if (cached) {
+      try {
+        const { publicJwk, privateJwk } = JSON.parse(cached);
+        const publicKey = await crypto.subtle.importKey(
+          "jwk",
+          publicJwk,
+          { name: "ECDH", namedCurve: "P-256" },
+          true,
+          []
+        );
+        const privateKey = await crypto.subtle.importKey(
+          "jwk",
+          privateJwk,
+          { name: "ECDH", namedCurve: "P-256" },
+          true,
+          ["deriveKey"]
+        );
+        this.keyPair = { publicKey, privateKey };
+        this.currentUserId = activeUserId;
+        return;
+      } catch (err) {
+        console.error("Failed to import E2E keys from localStorage, regenerating...", err);
+      }
+    }
+
+    // Generate brand new keys if not found or import failed
     this.keyPair = await crypto.subtle.generateKey(
       {
         name: "ECDH",
@@ -17,10 +56,21 @@ export class CryptoService {
       true,
       ["deriveKey"]
     );
+    this.currentUserId = activeUserId;
+
+    try {
+      const publicJwk = await crypto.subtle.exportKey("jwk", this.keyPair.publicKey);
+      const privateJwk = await crypto.subtle.exportKey("jwk", this.keyPair.privateKey);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(storageKey, JSON.stringify({ publicJwk, privateJwk }));
+      }
+    } catch (err) {
+      console.error("Failed to save E2E keys to localStorage", err);
+    }
   }
 
-  async getMyPublicKeyBase64(): Promise<string> {
-    await this.initKeys();
+  async getMyPublicKeyBase64(userId?: string): Promise<string> {
+    await this.initKeys(userId);
     const exported = await crypto.subtle.exportKey("spki", this.keyPair!.publicKey);
     return btoa(String.fromCharCode(...new Uint8Array(exported)));
   }
@@ -39,10 +89,12 @@ export class CryptoService {
     );
   }
 
-  async deriveSharedSecret(remoteUserId: string, remotePublicKeyBase64: string): Promise<CryptoKey> {
-    if (this.derivedKeys.has(remoteUserId)) return this.derivedKeys.get(remoteUserId)!;
+  async deriveSharedSecret(remoteUserId: string, remotePublicKeyBase64: string, myUserId?: string): Promise<CryptoKey> {
+    const activeUserId = myUserId || auth.currentUser?.uid || "default_user";
+    const cacheKey = `${activeUserId}_${remoteUserId}`;
+    if (this.derivedKeys.has(cacheKey)) return this.derivedKeys.get(cacheKey)!;
     
-    await this.initKeys();
+    await this.initKeys(activeUserId);
     const remoteKey = await this.importPublicKey(remotePublicKeyBase64);
     
     const sharedSecret = await crypto.subtle.deriveKey(
@@ -56,7 +108,7 @@ export class CryptoService {
       ["encrypt", "decrypt"]
     );
     
-    this.derivedKeys.set(remoteUserId, sharedSecret);
+    this.derivedKeys.set(cacheKey, sharedSecret);
     return sharedSecret;
   }
 

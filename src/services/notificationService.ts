@@ -24,8 +24,13 @@ export async function registerPushNotifications(userId: string, force?: boolean)
 
   try {
     // 1. Register service worker
-    console.log("Registering service worker '/sw.js'...");
-    const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    let registration = await navigator.serviceWorker.getRegistration('/');
+    if (!registration) {
+      console.log("Registering service worker '/sw.js'...");
+      registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    } else {
+      console.log("Service Worker already registered, reusing existing registration");
+    }
     
     // Force service worker to look for updates immediately
     try {

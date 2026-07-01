@@ -21,7 +21,7 @@ export interface Message {
   fileSize?: string;
   encryptedFileKey?: number[];
   iv?: number[];
-  status?: 'sent' | 'delivered' | 'read';
+  status?: 'sent' | 'delivered' | 'read' | 'pending';
   fileInfo?: {
     name: string;
     size: string;

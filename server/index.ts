@@ -499,9 +499,44 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       console.log(`Socket ${socket.id} joined group room group-${groupId}`);
     });
 
+    socket.on("leave_group", (groupId) => {
+      socket.leave(`group-${groupId}`);
+      console.log(`Socket ${socket.id} left group room group-${groupId}`);
+    });
+
     socket.on("get_public_key", ({ userId }, callback) => {
       callback(userPublicKeys.get(userId));
     });
+
+    const typingTimeouts = new Map<string, NodeJS.Timeout>();
+
+    const clearTypingTimeout = (targetKey: string) => {
+      const timeout = typingTimeouts.get(targetKey);
+      if (timeout) {
+        clearTimeout(timeout);
+        typingTimeouts.delete(targetKey);
+      }
+    };
+
+    const startTypingTTL = (senderId: string, data: any, isGroup: boolean) => {
+      const targetKey = isGroup ? `group-${data.groupId}` : `user-${senderId}`;
+      clearTypingTimeout(targetKey);
+      
+      const timeout = setTimeout(() => {
+        typingTimeouts.delete(targetKey);
+        console.log(`Server typing TTL expired for ${targetKey}`);
+        if (isGroup && data.groupId) {
+          socket.to(`group-${data.groupId}`).emit("typing_stop", { senderId, groupId: data.groupId });
+        } else if (data.recipientId) {
+          const targetSocketId = users.get(data.recipientId);
+          if (targetSocketId) {
+            io.to(targetSocketId).emit("typing_stop", { senderId });
+          }
+        }
+      }, 5000); // 5s TTL
+      
+      typingTimeouts.set(targetKey, timeout);
+    };
 
     socket.on("typing", (data) => {
       const { recipientId, isTyping } = data;
@@ -510,6 +545,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
       if (targetSocketId && senderId) {
         io.to(targetSocketId).emit("typing", { senderId, isTyping });
+        if (isTyping) {
+          startTypingTTL(senderId, { recipientId }, false);
+        } else {
+          clearTypingTimeout(`user-${senderId}`);
+        }
       }
     });
 
@@ -520,10 +560,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
       if (groupId) {
         socket.to(`group-${groupId}`).emit("typing_start", { senderId, groupId });
+        startTypingTTL(senderId, data, true);
       } else if (recipientId) {
         const targetSocketId = users.get(recipientId);
         if (targetSocketId) {
           io.to(targetSocketId).emit("typing_start", { senderId });
+          startTypingTTL(senderId, data, false);
         }
       }
     });
@@ -532,6 +574,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const { recipientId, groupId } = data;
       const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
       if (!senderId) return;
+
+      const targetKey = groupId ? `group-${groupId}` : `user-${senderId}`;
+      clearTypingTimeout(targetKey);
 
       if (groupId) {
         socket.to(`group-${groupId}`).emit("typing_stop", { senderId, groupId });
@@ -786,12 +831,18 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     socket.on("disconnect", () => {
       const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
       if (senderId) {
+        clearTypingTimeout(`user-${senderId}`);
         if (users.get(senderId) === socket.id) {
           users.delete(senderId);
           io.emit("user_status", { userId: senderId, isOnline: false });
           console.log(`User ${senderId} disconnected`);
         }
       }
+      // Clean up any remaining timeouts for this socket connection
+      for (const timeout of typingTimeouts.values()) {
+        clearTimeout(timeout);
+      }
+      typingTimeouts.clear();
     });
   });
 

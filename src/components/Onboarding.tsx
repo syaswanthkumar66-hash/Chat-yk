@@ -97,7 +97,10 @@ export const Onboarding = () => {
   }, []);
 
   // Handle Firebase redirect results cleanly on mount
+  const redirectHandledRef = useRef(false);
   useEffect(() => {
+    if (redirectHandledRef.current) return;
+    redirectHandledRef.current = true;
     setIsLoading(true);
     const timeout = setTimeout(() => {
       setIsLoading(false);

@@ -307,29 +307,31 @@ export const ChatDetail = () => {
         ? { groupId: chat.id }
         : { recipientId: targetId };
 
-      if (!isCurrentlyTyping.current) {
-        isCurrentlyTyping.current = true;
-        socket.emit('typing_start', emitData);
-        
-        // Keep fallback typing emit
-        if (targetId && !chat.isGroup) {
-          socket.emit('typing', { recipientId: targetId, isTyping: true });
-        }
-      }
-      
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       
       typingTimeoutRef.current = setTimeout(() => {
-        isCurrentlyTyping.current = false;
-        socket.emit('typing_stop', emitData);
-        
-        // Keep fallback typing emit
-        if (targetId && !chat.isGroup) {
-          socket.emit('typing', { recipientId: targetId, isTyping: false });
+        if (!isCurrentlyTyping.current) {
+          isCurrentlyTyping.current = true;
+          socket.emit('typing_start', emitData);
+          
+          if (targetId && !chat.isGroup) {
+            socket.emit('typing', { recipientId: targetId, isTyping: true });
+          }
         }
-      }, 2000);
+        
+        // Setup stop timeout 3 seconds later
+        const stopTimeoutId = setTimeout(() => {
+          isCurrentlyTyping.current = false;
+          socket.emit('typing_stop', emitData);
+          if (targetId && !chat.isGroup) {
+            socket.emit('typing', { recipientId: targetId, isTyping: false });
+          }
+        }, 3000);
+        
+        typingTimeoutRef.current = stopTimeoutId;
+      }, 300);
     }
   };
 
@@ -1336,10 +1338,16 @@ export const ChatDetail = () => {
                       <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{msg.timestamp}</span>
                       {isOwn && !isGloballyDeleted && (() => {
                         const status = msg.status || 'read';
+                        const iconName = 
+                          status === 'pending' ? 'schedule' :
+                          (status === 'read' || status === 'delivered') ? 'done_all' : 'check';
+                        const iconColor = 
+                          status === 'pending' ? 'text-amber-500 animate-pulse' :
+                          status === 'read' ? 'text-blue-500' : 'text-slate-400';
                         return (
                           <Icon 
-                            name={status === 'read' || status === 'delivered' ? 'done_all' : 'check'} 
-                            className={cn("text-[14px]", status === 'read' ? 'text-blue-500' : 'text-slate-400')} 
+                            name={iconName} 
+                            className={cn("text-[14px]", iconColor)} 
                           />
                         );
                       })()}

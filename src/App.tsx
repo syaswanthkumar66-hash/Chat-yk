@@ -185,6 +185,22 @@ export default function App() {
   // Activate the real-time notification integration hook
   useNotifications();
 
+  const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Handle Firebase auth state changes cleanly
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -517,7 +533,7 @@ export default function App() {
   // Auth Loading Splash Screen
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen bg-[#FFF1E7] flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md space-y-6">
           <div className="size-16 rounded-2xl bg-primary flex items-center justify-center text-white shadow-2xl shadow-primary/30 rotate-3 animate-pulse mx-auto">
             <Icon name="share" className="text-3xl" />
@@ -537,19 +553,19 @@ export default function App() {
   // Maintenance Mode Screen
   if (systemSettings.maintenanceMode && mode !== 'admin') {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-center">
+      <div className="min-h-screen bg-[#FFF1E7] flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md space-y-6">
           <div className="size-20 rounded-3xl bg-amber-500/10 flex items-center justify-center text-amber-500 mx-auto animate-pulse">
             <Icon name="engineering" className="text-4xl" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-3xl font-black text-white uppercase italic tracking-tighter">System Offline</h1>
-            <p className="text-slate-400 text-sm font-medium leading-relaxed">
+            <h1 className="text-3xl font-black text-slate-800 uppercase italic tracking-tighter">System Offline</h1>
+            <p className="text-slate-600 text-sm font-medium leading-relaxed">
               We're currently performing scheduled maintenance to improve the Connect Protocol. We'll be back online shortly.
             </p>
           </div>
-          <div className="pt-6 border-t border-white/5">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Protocol v2.5 • Maintenance Mode</p>
+          <div className="pt-6 border-t border-slate-200 max-w-[180px] mx-auto">
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em]">Protocol v2.5 • Maintenance Mode</p>
           </div>
         </div>
       </div>
@@ -558,6 +574,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg-light overflow-hidden relative">
+      {/* Offline Banner */}
+      <AnimatePresence>
+        {isOffline && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-amber-500 text-white px-6 py-2.5 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest relative z-[250] shadow-md"
+          >
+            <Icon name="cloud_off" className="text-sm animate-pulse" />
+            <span>Working Offline • Changes will sync automatically upon reconnection</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Global Broadcast Banner */}
       <AnimatePresence>
         {broadcasts.length > 0 && (

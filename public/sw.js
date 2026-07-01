@@ -1,12 +1,42 @@
 // Service Worker for Web Push Notifications
+
+const CACHE_NAME = 'app-cache-v2';
+const ASSETS_TO_CACHE = [
+  '/',
+  '/index.html',
+  '/favicon.ico',
+  '/pwa-192x192.png',
+  '/pwa-512x512.png'
+];
+
 self.addEventListener('install', (event) => {
   console.log('Service Worker installing...');
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log('Caching initial assets');
+      return cache.addAll(ASSETS_TO_CACHE).catch(err => {
+        console.warn('Failed to cache some assets during install:', err);
+      });
+    })
+  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   console.log('Service Worker activating...');
-  event.waitUntil(self.clients.claim());
+  // Delete old caches
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('Deleting old Service Worker cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('push', (event) => {
@@ -87,6 +117,18 @@ self.addEventListener('notificationclick', (event) => {
           return client.focus();
         }
       }
+      
+      // If the app is open anywhere, focus it and navigate to targetUrl
+      if (windowClients.length > 0) {
+        const client = windowClients[0];
+        if ('focus' in client) {
+          client.focus();
+        }
+        if ('navigate' in client) {
+          return client.navigate(targetUrl);
+        }
+      }
+
       // Otherwise open a new window
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);
