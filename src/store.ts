@@ -311,16 +311,30 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       deletedMsgIds: [...state.deletedMsgIds, messageId]
     }));
+    if (useAppStore.getState().authMethod === 'local') return;
     import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, deleteDoc }) => {
-      deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
+      deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => {
+        try {
+          handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`);
+        } catch (e) {
+          console.error("Gracefully caught offline message delete error:", e);
+        }
+      });
     });
   },
   deleteMessageGlobally: (messageId) => {
     set((state) => ({
       globallyDeletedIds: [...state.globallyDeletedIds, messageId]
     }));
+    if (useAppStore.getState().authMethod === 'local') return;
     import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, deleteDoc }) => {
-      deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`));
+      deleteDoc(doc(db, 'offline_messages', messageId)).catch((err) => {
+        try {
+          handleFirestoreError(err, OperationType.DELETE, `offline_messages/${messageId}`);
+        } catch (e) {
+          console.error("Gracefully caught offline message delete error:", e);
+        }
+      });
     });
   },
   mode: 'hub',
@@ -343,7 +357,7 @@ export const useAppStore = create<AppState>((set) => ({
       localStorage.setItem('proto_user', JSON.stringify(updatedUser));
     }
     // Also update in Firestore in background if available
-    if (state.user) {
+    if (state.user && state.authMethod !== 'local') {
       import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, updateDoc }) => {
         updateDoc(doc(db, 'users', state.user!.id), data).catch(err => {
           console.error("Failed to sync user profile update to Firestore:", err);
@@ -746,23 +760,43 @@ export const useAppStore = create<AppState>((set) => ({
     });
 
     // === FIREBASE USER DETAILS SYNCHRONIZATION (WRITE ONLY, NO LISTENERS) ===
-    import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
-        // Broadcast my public key via Firebase:
-        import('./services/cryptoService').then(async ({ cryptoService }) => {
-            const publicKey = await cryptoService.getMyPublicKeyBase64();
-            setDoc(doc(db, 'users', userId), { publicKey }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
-        });
+    if (useAppStore.getState().authMethod !== 'local') {
+      import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
+          // Broadcast my public key via Firebase:
+          import('./services/cryptoService').then(async ({ cryptoService }) => {
+              const publicKey = await cryptoService.getMyPublicKeyBase64();
+              setDoc(doc(db, 'users', userId), { publicKey }, { merge: true }).catch((err) => {
+                try {
+                  handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
+                } catch (e) {
+                  console.error("Gracefully caught public key broadcast error:", e);
+                }
+              });
+          });
 
-        socket.on('disconnect', () => {
-           // Mark self as offline in Firebase
-           setDoc(doc(db, 'users', userId), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
-        });
+          socket.on('disconnect', () => {
+             // Mark self as offline in Firebase
+             setDoc(doc(db, 'users', userId), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => {
+                try {
+                  handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
+                } catch (e) {
+                  console.error("Gracefully caught offline status error:", e);
+                }
+             });
+          });
 
-        socket.on('connect', () => {
-           // Mark self as online in Firebase so other users can see status in search
-           setDoc(doc(db, 'users', userId), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userId}`));
-        });
-    });
+          socket.on('connect', () => {
+             // Mark self as online in Firebase so other users can see status in search
+             setDoc(doc(db, 'users', userId), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => {
+                try {
+                  handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
+                } catch (e) {
+                  console.error("Gracefully caught online status error:", e);
+                }
+             });
+          });
+      });
+    }
 
     socket.on('user_status', (data: { userId: string, isOnline: boolean }) => {
       const nowStr = new Date().toISOString();
@@ -1536,7 +1570,7 @@ export const useAppStore = create<AppState>((set) => ({
           });
 
           // Also store as temporary file if forwarded and contains a file URL
-          if (isForwarded && fileUrl) {
+          if (isForwarded && fileUrl && state.authMethod !== 'local') {
             import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
                 setDoc(doc(db, 'offline_messages', newMessage.id), {
                   id: newMessage.id,
@@ -1552,14 +1586,20 @@ export const useAppStore = create<AppState>((set) => ({
                   to: targetId,
                   isTemporaryFile: true,
                   isForwarded: true
-                }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
+                }).catch((err) => {
+                  try {
+                    handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`);
+                  } catch (e) {
+                    console.error("Gracefully caught offline message write error:", e);
+                  }
+                });
             });
           }
         }
       }
     } else {
       // Only store offline messages if they are plain text messages
-      if (type === 'text' && !fileUrl) {
+      if (type === 'text' && !fileUrl && state.authMethod !== 'local') {
         if (isGroup && chat?.participants) {
           import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
               chat.participants.forEach(p => {
@@ -1578,7 +1618,13 @@ export const useAppStore = create<AppState>((set) => ({
                     encryptedFileKey: e2eData?.encryptedFileKey,
                     timestamp: newMessage.timestamp,
                     to: p.id
-                  }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${uniqueMsgId}`));
+                  }).catch((err) => {
+                    try {
+                      handleFirestoreError(err, OperationType.WRITE, `offline_messages/${uniqueMsgId}`);
+                    } catch (e) {
+                      console.error("Gracefully caught offline message write error:", e);
+                    }
+                  });
                 }
               });
             });
@@ -1598,7 +1644,13 @@ export const useAppStore = create<AppState>((set) => ({
                       encryptedFileKey: e2eData?.encryptedFileKey,
                       timestamp: newMessage.timestamp,
                       to: targetId
-                  }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`));
+                  }).catch((err) => {
+                    try {
+                      handleFirestoreError(err, OperationType.WRITE, `offline_messages/${newMessage.id}`);
+                    } catch (e) {
+                      console.error("Gracefully caught offline message write error:", e);
+                    }
+                  });
               });
           }
         }

@@ -250,6 +250,10 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn || !user?.id) return;
 
+    // Skip Firestore sync for local/developer mode to prevent unauthenticated/Permission Denied crashes
+    const authMethod = useAppStore.getState().authMethod;
+    if (authMethod === 'local') return;
+
     let unsubscribeReceived = () => {};
     let unsubscribeSent = () => {};
     let unsubscribeNotifications = () => {};
@@ -318,7 +322,11 @@ export default function App() {
           useAppStore.getState().setFriendRequests(fullRequests);
         }, (err) => {
           console.error("Error in friendRequests onSnapshot:", err);
-          handleFirestoreError(err, OperationType.LIST, 'friendRequests');
+          try {
+            handleFirestoreError(err, OperationType.LIST, 'friendRequests');
+          } catch (e) {
+            console.error("Gracefully caught friendRequests snapshot error to prevent app crash:", e);
+          }
         });
 
         const qSent = query(requestsRef, where('fromUserId', '==', user.id));
