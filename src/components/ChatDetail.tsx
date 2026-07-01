@@ -49,7 +49,16 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
         const remoteId = isOwn ? msg.recipientId : msg.senderId;
         const state = useAppStore.getState();
         const pubKeyBase64 = await new Promise<string>((resolve) => {
-           state.socket?.emit("get_public_key", { userId: remoteId }, resolve);
+          const socket = state.socket;
+          if (socket && socket.connected) {
+            const timeout = setTimeout(() => resolve(''), 1000);
+            socket.emit("get_public_key", { userId: remoteId }, (res: string) => {
+              clearTimeout(timeout);
+              resolve(res || '');
+            });
+          } else {
+            resolve('');
+          }
         });
         sharedSecret = await cryptoService.deriveSharedSecret(remoteId, pubKeyBase64);
 
@@ -456,7 +465,16 @@ export const ChatDetail = () => {
       try {
         const { cryptoService } = await import('../services/cryptoService');
         const remotePubKeyBase64 = await new Promise<string>((resolve) => {
-          useAppStore.getState().socket?.emit("get_public_key", { userId: targetId }, resolve);
+          const socket = useAppStore.getState().socket;
+          if (socket && socket.connected) {
+            const timeout = setTimeout(() => resolve(''), 1000);
+            socket.emit("get_public_key", { userId: targetId }, (res: string) => {
+              clearTimeout(timeout);
+              resolve(res || '');
+            });
+          } else {
+            resolve('');
+          }
         });
         if (remotePubKeyBase64) {
           sharedSecret = await cryptoService.deriveSharedSecret(targetId, remotePubKeyBase64);

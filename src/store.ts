@@ -795,7 +795,16 @@ export const useAppStore = create<AppState>((set) => ({
       if (data.iv && data.text) {
         try {
           const remotePubKeyBase64 = await new Promise<string>((resolve) => {
-            state.socket?.emit("get_public_key", { userId: data.senderId }, resolve);
+            const socket = state.socket;
+            if (socket && socket.connected) {
+              const timeout = setTimeout(() => resolve(''), 1000);
+              socket.emit("get_public_key", { userId: data.senderId }, (res: string) => {
+                clearTimeout(timeout);
+                resolve(res || '');
+              });
+            } else {
+              resolve('');
+            }
           });
           if (remotePubKeyBase64) {
             const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64);
@@ -1599,10 +1608,12 @@ export const useAppStore = create<AppState>((set) => ({
     let updatedChats = [...state.chats];
     let targetChatId = chatId;
 
+    let additionalState = {};
     if (!chatId && recipientId) {
       const existingChat = state.chats.find(c => !c.isGroup && c.participants.some(p => p.id === recipientId));
       if (existingChat) {
         targetChatId = existingChat.id;
+        additionalState = { activeChatId: existingChat.id, activeRecipientId: null };
       } else {
         const recipient = state.users.find(u => u.id === recipientId) || {
           id: recipientId,
@@ -1639,7 +1650,7 @@ export const useAppStore = create<AppState>((set) => ({
       });
     }
 
-    return { chats: updatedChats };
+    return { chats: updatedChats, ...additionalState };
   }),
 }));
 
