@@ -63,6 +63,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     setActiveGroupCall,
     users
   } = useAppStore();
+  const currentUser = useAppStore(state => state.user);
   const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
@@ -72,6 +73,50 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
   const [reportReason, setReportReason] = useState('');
   const [showReportSuccess, setShowReportSuccess] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [sendingNotification, setSendingNotification] = useState(false);
+
+  const handleSendTestNotification = async () => {
+    if (!currentUser || !user) return;
+    setSendingNotification(true);
+    
+    if (useAppStore.getState().authMethod === 'local') {
+      const currentStore = useAppStore.getState();
+      currentStore.addInAppToast({
+        title: "Test Notification",
+        body: `System check: Test notification received from Admin friend ${currentUser.displayName || currentUser.username}!`,
+        avatar: currentUser.avatar,
+        chatId: ''
+      });
+      setToast("Test notification sent locally (Demo mode)!");
+      setTimeout(() => setToast(null), 3000);
+      setSendingNotification(false);
+      return;
+    }
+
+    try {
+      const { db, collection, addDoc } = await import('../firebase');
+      await addDoc(collection(db, 'notifications'), {
+        recipientId: user.id,
+        senderId: currentUser.id,
+        senderName: currentUser.displayName || currentUser.username,
+        senderAvatar: currentUser.avatar,
+        title: "Test Notification",
+        body: `System check: Test notification successfully received from your Admin friend, ${currentUser.displayName || currentUser.username}!`,
+        createdAt: new Date().toISOString(),
+        status: 'created',
+        type: 'system',
+        chatId: ''
+      });
+      setToast("Test notification sent successfully!");
+      setTimeout(() => setToast(null), 3000);
+    } catch (err) {
+      console.error("Failed to send test notification:", err);
+      setToast("Failed to send test notification.");
+      setTimeout(() => setToast(null), 3000);
+    } finally {
+      setSendingNotification(false);
+    }
+  };
 
   useEffect(() => {
     let isActive = true;
@@ -451,6 +496,26 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
                   <span className="text-[10px] font-bold text-slate-700 uppercase tracking-tighter">Video</span>
                 </button>
               </div>
+            )}
+
+            {user.relationship === 'friend' && (currentUser?.isAdmin || users.find(u => u.id === user.id)?.isAdmin) && (
+              <button 
+                onClick={handleSendTestNotification}
+                disabled={sendingNotification}
+                className="w-full py-4 bg-amber-500/10 text-amber-600 rounded-3xl font-black uppercase tracking-wider hover:bg-amber-500 hover:text-white transition-all flex items-center justify-center gap-2 active:scale-[0.98] border border-amber-500/20 disabled:opacity-50 text-[10px]"
+              >
+                {sendingNotification ? (
+                  <>
+                    <div className="size-4 rounded-full border-2 border-amber-600 border-t-transparent animate-spin" />
+                    Sending Test...
+                  </>
+                ) : (
+                  <>
+                    <Icon name="notifications" className="text-sm" />
+                    Send Test Notification
+                  </>
+                )}
+              </button>
             )}
 
             {user.relationship === 'blocked' && (

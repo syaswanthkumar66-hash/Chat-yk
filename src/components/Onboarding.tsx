@@ -26,7 +26,7 @@ const PRELOADED_AVATARS = [
 ];
 
 export const Onboarding = () => {
-  const { login } = useAppStore();
+  const { login, setMode } = useAppStore();
   const [step, setStep] = useState<'login' | 'profile'>('login');
   const [profile, setProfile] = useState({
     username: '',
@@ -409,6 +409,15 @@ export const Onboarding = () => {
         <div className="absolute -top-24 -left-24 size-64 md:size-96 bg-primary/10 blur-[80px] md:blur-[100px] rounded-full" />
         <div className="absolute -bottom-24 -right-24 size-64 md:size-96 bg-primary/5 blur-[80px] md:blur-[100px] rounded-full" />
       </div>
+
+      {/* Exit Button back to Dashboard */}
+      <button 
+        onClick={() => setMode('hub')}
+        className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-md border border-slate-100 px-4 py-2 rounded-full shadow-sm hover:bg-primary hover:text-white hover:border-primary transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest text-slate-500"
+      >
+        <Icon name="arrow_back" className="text-sm" />
+        Dashboard
+      </button>
 
       {/* Network Connection Badge */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-md border border-slate-100 px-3 py-1.5 rounded-full shadow-sm">
