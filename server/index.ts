@@ -621,6 +621,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("update_active_view", (data) => {
+      const { activeViewId, isVisible } = data || {};
+      (socket as any).activeViewId = activeViewId;
+      (socket as any).isVisible = isVisible;
+      console.log(`Socket ${socket.id} (user ${(socket as any).userId}) updated active view:`, { activeViewId, isVisible });
+    });
+
     socket.on("join_group", (groupId) => {
       socket.join(`group-${groupId}`);
       console.log(`Socket ${socket.id} joined group room group-${groupId}`);
@@ -824,7 +831,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             }
 
             const targetSocketId = users.get(targetId);
-            if (!targetSocketId) {
+            let shouldPush = true;
+
+            if (targetSocketId) {
+              const targetSocket = io.sockets.sockets.get(targetSocketId);
+              if (targetSocket) {
+                const isTabVisible = (targetSocket as any).isVisible !== false;
+                const isActiveInGroup = (targetSocket as any).activeViewId === groupId;
+                if (isTabVisible && isActiveInGroup) {
+                  shouldPush = false;
+                  console.log(`Skipping group push notification for ${targetId} because they are actively viewing the group.`);
+                }
+              }
+            } else {
               const storeData = { ...messageData, recipientId: targetId, to: targetId };
               const offlineMsgId = `${messageData.id}-${targetId}`;
               let savedToFirestore = false;
@@ -848,13 +867,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
               }
             }
 
-            // Send web push notification ALWAYS to ensure delivery (since they might be online but backgrounded)
-            sendPushNotification(targetId, {
-              title: data.groupName || "New Group Message",
-              body: messageData.type === 'text' ? "You have a new group message 💬" : `📎 Shared a ${messageData.type}`,
-              icon: '/pwa-192x192.png',
-              data: { url: '/' }
-            });
+            if (shouldPush) {
+              sendPushNotification(targetId, {
+                title: data.groupName || "New Group Message",
+                body: messageData.type === 'text' ? "You have a new group message 💬" : `📎 Shared a ${messageData.type}`,
+                icon: '/pwa-192x192.png',
+                data: { url: '/' }
+              });
+            }
           }
         }
       } else if (recipientId) {
@@ -914,11 +934,23 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         }
 
         const targetSocketId = users.get(recipientId);
+        let shouldPush = true;
+
         if (targetSocketId) {
           io.to(targetSocketId).emit("receive_message", messageData);
           console.log(`Message sent from ${senderId} to ${recipientId}`);
+
+          const targetSocket = io.sockets.sockets.get(targetSocketId);
+          if (targetSocket) {
+            const isTabVisible = (targetSocket as any).isVisible !== false;
+            const isActiveInChat = (targetSocket as any).activeViewId === senderId;
+            if (isTabVisible && isActiveInChat) {
+              shouldPush = false;
+              console.log(`Skipping direct push notification for ${recipientId} because they are actively viewing the chat with sender ${senderId}.`);
+            }
+          }
         } else {
-          // Store any message type offline in Firestore/Memory and send push notification
+          // Store any message type offline in Firestore/Memory
           const storeData = { ...messageData, to: recipientId };
           let savedToFirestore = false;
           if (db) {
@@ -942,13 +974,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           }
         }
 
-        // Send web push notification ALWAYS to ensure delivery (since they might be online but backgrounded)
-        sendPushNotification(recipientId, {
-          title: data.senderName || "New Message",
-          body: messageData.type === 'text' ? "You have a new message 💬" : `📎 Shared a ${messageData.type}`,
-          icon: '/pwa-192x192.png',
-          data: { url: '/' }
-        });
+        if (shouldPush) {
+          sendPushNotification(recipientId, {
+            title: data.senderName || "New Message",
+            body: messageData.type === 'text' ? "You have a new message 💬" : `📎 Shared a ${messageData.type}`,
+            icon: '/pwa-192x192.png',
+            data: { url: '/' }
+          });
+        }
       }
     });
 

@@ -30,10 +30,59 @@ function useNotifications() {
   const socket = useAppStore((state) => state.socket);
   const user = useAppStore((state) => state.user);
   const activeChatId = useAppStore((state) => state.activeChatId);
+  const activeRecipientId = useAppStore((state) => state.activeRecipientId);
   const chats = useAppStore((state) => state.chats);
   const users = useAppStore((state) => state.users);
   const mode = useAppStore((state) => state.mode);
   const addInAppToast = useAppStore((state) => state.addInAppToast);
+
+  // Synchronize active view and tab focus visibility state with the backend server
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const emitActiveState = () => {
+      const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
+      let activeViewId: string | null = null;
+      
+      if (activeChatId) {
+        const chat = chats.find(c => c.id === activeChatId);
+        if (chat) {
+          if (chat.isGroup) {
+            activeViewId = chat.id;
+          } else {
+            const otherParticipant = chat.participants.find(p => p.id !== user.id);
+            if (otherParticipant) {
+              activeViewId = otherParticipant.id;
+            }
+          }
+        }
+      } else if (activeRecipientId) {
+        activeViewId = activeRecipientId;
+      }
+
+      socket.emit('update_active_view', {
+        activeViewId,
+        isVisible
+      });
+      console.log('Synchronized active view state with server:', { activeViewId, isVisible });
+    };
+
+    emitActiveState();
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', emitActiveState);
+      window.addEventListener('focus', emitActiveState);
+      window.addEventListener('blur', emitActiveState);
+    }
+
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', emitActiveState);
+        window.removeEventListener('focus', emitActiveState);
+        window.removeEventListener('blur', emitActiveState);
+      }
+    };
+  }, [socket, user, activeChatId, activeRecipientId, chats]);
 
   // Permission is requested by <NotificationPrompt /> which shows a proper
   // contextual UI prompt. A silent requestPermission() call here would conflict

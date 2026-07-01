@@ -77,29 +77,20 @@ self.addEventListener('push', (event) => {
     data: data.data || {}
   };
 
-  console.log('Showing notification (if not focused):', title, options);
+  console.log('Showing notification:', title, options);
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // If the user has a focused browser tab open, suppress the redundant push notification
-      const isFocused = windowClients.some(client => client.focused);
-      if (isFocused) {
-        console.log('App tab is currently active and focused. Suppressing push notification.');
-        return;
-      }
-
-      return self.registration.showNotification(title, options)
-        .then(() => {
-          console.log('Notification successfully displayed');
-        })
-        .catch((err) => {
-          console.error('Failed to show standard notification, trying minimal fallback:', err);
-          // Fallback to absolute minimal properties if browser complains about advanced features (like tag, renotify, etc.)
-          return self.registration.showNotification(title, {
-            body: body
-          });
+    self.registration.showNotification(title, options)
+      .then(() => {
+        console.log('Notification successfully displayed');
+      })
+      .catch((err) => {
+        console.error('Failed to show standard notification, trying minimal fallback:', err);
+        // Fallback to absolute minimal properties if browser complains about advanced features (like tag, renotify, etc.)
+        return self.registration.showNotification(title, {
+          body: body
         });
-    })
+      })
   );
 });
 
