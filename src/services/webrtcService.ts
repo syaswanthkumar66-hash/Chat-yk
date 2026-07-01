@@ -8,12 +8,10 @@ export interface RemoteTrackInfo {
 }
 
 class WebRTCService {
-  private pc: RTCPeerConnection | null = null;
-  private sessionId: string | null = null;
+  private pcs: Map<string, RTCPeerConnection> = new Map();
   private localStream: MediaStream | null = null;
-  private remoteStreams: Map<string, MediaStream> = new Map();
-  private subscribedSessions: Set<string> = new Set();
   private iceServers: any[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+  private currentRoomId: string | null = null;
 
   constructor() {
     this.fetchIceConfig();
@@ -27,7 +25,7 @@ class WebRTCService {
           const data = await response.json();
           if (data && data.iceServers) {
             this.iceServers = data.iceServers;
-            console.log("Successfully fetched WebRTC ICE config");
+            console.log("Successfully fetched WebRTC ICE config with STUN/TURN servers");
             return;
           }
         }
@@ -41,176 +39,190 @@ class WebRTCService {
     console.error('Failed to fetch ICE config after retries, using default STUN server');
   }
 
-  private async apiRequest(path: string, method: string = 'POST', body?: any) {
-    const res = await fetch(`${BACKEND_URL}/api/realtime/${path}`, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined
-    });
-    if (!res.ok) {
-      throw new Error(`Realtime API error: ${res.statusText}`);
-    }
-    return res.json();
-  }
+  async publishLocalStream(stream: MediaStream, roomId: string) {
+    this.localStream = stream;
+    this.currentRoomId = roomId;
 
-  async initSession() {
-    if (this.sessionId) return this.sessionId;
-
-    // If we only have the default STUN server, try one quick final fetch
+    // Fetch TURN server credentials quickly if we haven't already
     if (this.iceServers.length <= 1) {
       await this.fetchIceConfig(2, 500);
     }
 
-    const data = await this.apiRequest('sessions/new');
-    this.sessionId = data.sessionId;
-    
-    this.pc = new RTCPeerConnection({
-      iceServers: this.iceServers,
-      bundlePolicy: 'max-bundle'
-    });
+    console.log(`Publishing local stream in room ${roomId}. Broadcasting presence...`);
 
-    this.pc.ontrack = (event) => {
-      const stream = event.streams[0];
-      if (stream) {
-        // We use the stream ID as the remote user identifier for now
-        this.remoteStreams.set(stream.id, stream);
-        window.dispatchEvent(new CustomEvent('webrtc_stream', { 
-          detail: { from: stream.id, stream } 
-        }));
-      }
-    };
-
-    this.pc.oniceconnectionstatechange = () => {
-      console.log('ICE Connection State:', this.pc?.iceConnectionState);
-    };
-
-    return this.sessionId;
-  }
-
-  private async waitForIceGathering() {
-    if (this.pc!.iceGatheringState === 'complete') return;
-    return new Promise<void>((resolve) => {
-      const checkState = () => {
-        if (this.pc!.iceGatheringState === 'complete') {
-          this.pc!.removeEventListener('icegatheringstatechange', checkState);
-          resolve();
-        }
-      };
-      this.pc!.addEventListener('icegatheringstatechange', checkState);
-      
-      // Fallback timeout just in case
-      setTimeout(() => {
-        this.pc!.removeEventListener('icegatheringstatechange', checkState);
-        resolve();
-      }, 3000);
-    });
-  }
-
-  async publishLocalStream(stream: MediaStream, roomId: string) {
-    if (!this.pc || !this.sessionId) await this.initSession();
-    this.localStream = stream;
-
-    const tracksToPublish: any[] = [];
-    const transceivers = [];
-
-    for (const track of stream.getTracks()) {
-      const transceiver = this.pc!.addTransceiver(track, {
-        direction: 'sendonly',
-        streams: [stream]
-      });
-      transceivers.push(transceiver);
-      tracksToPublish.push({
-        location: 'local',
-        mid: transceiver.mid,
-        trackName: `${useAppStore.getState().user?.id}-${track.kind}`
-      });
-    }
-
-    const offer = await this.pc!.createOffer();
-    await this.pc!.setLocalDescription(offer);
-    
-    await this.waitForIceGathering();
-
-    const data = await this.apiRequest(`sessions/${this.sessionId}/tracks/new`, 'POST', {
-      sessionDescription: {
-        type: 'offer',
-        sdp: this.pc!.localDescription!.sdp
-      },
-      tracks: tracksToPublish
-    });
-
-    if (data.sessionDescription) {
-      await this.pc!.setRemoteDescription(new RTCSessionDescription(data.sessionDescription));
-    }
-
-    // Notify others in the room about our published tracks
     const socket = useAppStore.getState().socket;
     if (socket) {
+      // Announce our presence to everyone in the room
       socket.emit('sfu_signal', {
         roomId,
         from: useAppStore.getState().user?.id,
         signal: {
-          type: 'tracks_published',
-          sessionId: this.sessionId,
-          tracks: tracksToPublish.map(t => ({
-            trackName: t.trackName,
-            kind: t.trackName.endsWith('video') ? 'video' : 'audio'
-          }))
+          type: 'peer_joined',
+          peerId: useAppStore.getState().user?.id
         }
       });
     }
   }
 
-  async subscribeToRemoteTracks(remoteSessionId: string, tracks: { trackName: string, kind: string }[]) {
-    if (this.subscribedSessions.has(remoteSessionId)) return;
-    this.subscribedSessions.add(remoteSessionId);
+  private createPeerConnection(peerId: string, roomId: string): RTCPeerConnection {
+    if (this.pcs.has(peerId)) {
+      return this.pcs.get(peerId)!;
+    }
 
-    if (!this.pc || !this.sessionId) await this.initSession();
-
-    const tracksToSubscribe = tracks.map(t => ({
-      location: 'remote',
-      sessionId: remoteSessionId,
-      trackName: t.trackName
-    }));
-
-    const data = await this.apiRequest(`sessions/${this.sessionId}/tracks/new`, 'POST', {
-      tracks: tracksToSubscribe
+    console.log(`Creating RTCPeerConnection for peer ${peerId} using ICE servers:`, this.iceServers);
+    const pc = new RTCPeerConnection({
+      iceServers: this.iceServers,
+      bundlePolicy: 'max-bundle'
     });
 
-    if (data.requiresImmediateRenegotiation && data.sessionDescription) {
-      await this.pc!.setRemoteDescription(new RTCSessionDescription(data.sessionDescription));
-      const answer = await this.pc!.createAnswer();
-      await this.pc!.setLocalDescription(answer);
+    this.pcs.set(peerId, pc);
 
-      await this.waitForIceGathering();
-
-      await this.apiRequest(`sessions/${this.sessionId}/renegotiate`, 'PUT', {
-        sessionDescription: {
-          type: 'answer',
-          sdp: this.pc!.localDescription!.sdp
-        }
+    // Add all local tracks to this connection
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => {
+        pc.addTrack(track, this.localStream!);
       });
     }
-  }
 
-  handleSignal(from: string, signal: any, roomId: string) {
-    if (signal.type === 'tracks_published') {
-      // Subscribe to the newly published tracks
-      this.subscribeToRemoteTracks(signal.sessionId, signal.tracks).catch(console.error);
-    } else if (signal.type === 'request_tracks') {
-      if (this.localStream && this.sessionId) {
+    // Handle ICE candidates and transmit them via Socket.io
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
         const socket = useAppStore.getState().socket;
         if (socket) {
           socket.emit('sfu_signal', {
             roomId,
             from: useAppStore.getState().user?.id,
             signal: {
-              type: 'tracks_published',
-              sessionId: this.sessionId,
-              tracks: this.localStream.getTracks().map(t => ({
-                trackName: `${useAppStore.getState().user?.id}-${t.kind}`,
-                kind: t.kind
-              }))
+              type: 'ice_candidate',
+              candidate: event.candidate,
+              to: peerId
+            }
+          });
+        }
+      }
+    };
+
+    // Handle remote stream tracks being added
+    pc.ontrack = (event) => {
+      const stream = event.streams[0];
+      if (stream) {
+        console.log(`Successfully received remote track/stream from peer ${peerId}`);
+        // Dispatch custom event to notify GroupCall component
+        window.dispatchEvent(new CustomEvent('webrtc_stream', {
+          detail: { from: peerId, stream }
+        }));
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`ICE Connection State for peer ${peerId}:`, pc.iceConnectionState);
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+        this.removePeer(peerId);
+      }
+    };
+
+    return pc;
+  }
+
+  private removePeer(peerId: string) {
+    const pc = this.pcs.get(peerId);
+    if (pc) {
+      console.log(`Cleaning up connection for peer ${peerId}`);
+      pc.close();
+      this.pcs.delete(peerId);
+    }
+  }
+
+  async handleSignal(from: string, signal: any, roomId: string) {
+    const myId = useAppStore.getState().user?.id;
+    if (from === myId) return; // Skip our own signals
+
+    if (signal.type === 'peer_joined') {
+      const peerId = signal.peerId;
+      if (peerId && peerId !== myId) {
+        console.log(`Peer ${peerId} joined. Initiating WebRTC connection offer...`);
+        const pc = this.createPeerConnection(peerId, roomId);
+
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          
+          const socket = useAppStore.getState().socket;
+          if (socket) {
+            socket.emit('sfu_signal', {
+              roomId,
+              from: myId,
+              signal: {
+                type: 'offer',
+                sdp: offer.sdp,
+                to: peerId
+              }
+            });
+          }
+        } catch (err) {
+          console.error(`Failed to create/send offer to peer ${peerId}:`, err);
+        }
+      }
+    } else if (signal.type === 'offer') {
+      if (signal.to === myId) {
+        console.log(`Received WebRTC connection offer from peer ${from}`);
+        const pc = this.createPeerConnection(from, roomId);
+
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          const socket = useAppStore.getState().socket;
+          if (socket) {
+            socket.emit('sfu_signal', {
+              roomId,
+              from: myId,
+              signal: {
+                type: 'answer',
+                sdp: answer.sdp,
+                to: from
+              }
+            });
+          }
+        } catch (err) {
+          console.error(`Failed to handle offer from peer ${from}:`, err);
+        }
+      }
+    } else if (signal.type === 'answer') {
+      if (signal.to === myId) {
+        console.log(`Received WebRTC connection answer from peer ${from}`);
+        const pc = this.pcs.get(from);
+        if (pc) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+          } catch (err) {
+            console.error(`Failed to set remote description from peer ${from}:`, err);
+          }
+        }
+      }
+    } else if (signal.type === 'ice_candidate') {
+      if (signal.to === myId) {
+        const pc = this.pcs.get(from);
+        if (pc && signal.candidate) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          } catch (err) {
+            console.error(`Failed to add ICE candidate from peer ${from}:`, err);
+          }
+        }
+      }
+    } else if (signal.type === 'request_tracks') {
+      if (this.localStream) {
+        console.log(`Received track request. Re-broadcasting peer presence...`);
+        const socket = useAppStore.getState().socket;
+        if (socket) {
+          socket.emit('sfu_signal', {
+            roomId,
+            from: myId,
+            signal: {
+              type: 'peer_joined',
+              peerId: myId
             }
           });
         }
@@ -219,14 +231,13 @@ class WebRTCService {
   }
 
   closeSession() {
-    if (this.pc) {
-      this.pc.close();
-      this.pc = null;
-    }
-    this.sessionId = null;
+    console.log("Closing WebRTC session, cleaning up all peer connections.");
+    this.pcs.forEach((pc, peerId) => {
+      pc.close();
+    });
+    this.pcs.clear();
     this.localStream = null;
-    this.remoteStreams.clear();
-    this.subscribedSessions.clear();
+    this.currentRoomId = null;
   }
 }
 

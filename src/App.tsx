@@ -422,6 +422,7 @@ export default function App() {
 
     const notificationsRef = collection(db, 'notifications');
     const qNotifications = query(notificationsRef, where('recipientId', '==', user.id));
+    let isInitial = true;
     unsubscribeNotifications = onSnapshot(qNotifications, async (snapshot) => {
       const notificationsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as AppNotification);
       notificationsList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -466,7 +467,13 @@ export default function App() {
             console.error("Failed to update notification delivery status:", e);
           }
 
-          // 2. Prevent UI & audio flood of historical/past notifications on initial subscription load
+          // If this is the initial snapshot, do not show popups, toast, or play sound for existing notifications
+          if (isInitial) {
+            console.log(`Processing initial notification ${notif.id} silently on startup.`);
+            continue;
+          }
+
+          // 2. Prevent UI & audio flood of historical/past notifications on subsequent loads
           const notifTime = new Date(notif.createdAt).getTime();
           if (isNaN(notifTime) || notifTime < syncStartTime - 5000) {
             console.log(`Processing historical notification ${notif.id} silently.`);
@@ -518,6 +525,7 @@ export default function App() {
           }
         }
       }
+      isInitial = false;
     }, (err) => {
       console.error("Error in notifications onSnapshot:", err);
       handleFirestoreError(err, OperationType.LIST, 'notifications');
