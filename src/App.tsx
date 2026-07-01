@@ -156,6 +156,15 @@ function InAppToastItem({
 
 export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // Fallback safety timeout to prevent getting stuck in splash loading screen under any circumstances
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsAuthLoading(false);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
   const { 
     mode, 
     isLoggedIn, 
@@ -508,17 +517,17 @@ export default function App() {
   // Auth Loading Splash Screen
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md space-y-6">
           <div className="size-16 rounded-2xl bg-primary flex items-center justify-center text-white shadow-2xl shadow-primary/30 rotate-3 animate-pulse mx-auto">
             <Icon name="share" className="text-3xl" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-2xl font-black text-white uppercase italic tracking-tighter">Connecting Protocol</h1>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Initializing Secure Digital Ecosystem...</p>
+            <h1 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">Connecting Protocol</h1>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] animate-pulse">Initializing Secure Digital Ecosystem...</p>
           </div>
-          <div className="pt-6 border-t border-white/5 max-w-[180px] mx-auto">
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em]">Protocol v2.5 • Loading</p>
+          <div className="pt-6 border-t border-slate-200 max-w-[180px] mx-auto">
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em]">Protocol v2.5 • Loading</p>
           </div>
         </div>
       </div>

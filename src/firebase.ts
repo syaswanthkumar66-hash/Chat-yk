@@ -118,33 +118,75 @@ function convertTimestamps(val: any): any {
   return val;
 }
 
-// Wrapped execution functions using standard native Firebase Web SDK directly
+// Wrapped execution functions using standard native Firebase Web SDK directly with robust safety timeouts to prevent iframe sandbox hangs
 export async function getDoc(docRef: any): Promise<any> {
-  return (await firestoreGetDoc(docRef)) as any;
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Firestore getDoc timeout")), 2500)
+  );
+  return Promise.race([
+    firestoreGetDoc(docRef),
+    timeoutPromise
+  ]) as Promise<any>;
 }
 
 export async function getDocFromServer(docRef: any): Promise<any> {
-  return (await firestoreGetDocFromServer(docRef)) as any;
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Firestore getDocFromServer timeout")), 2500)
+  );
+  return Promise.race([
+    firestoreGetDocFromServer(docRef),
+    timeoutPromise
+  ]) as Promise<any>;
 }
 
 export async function setDoc(docRef: any, data: any, options?: any) {
-  await firestoreSetDoc(docRef, data, options);
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Firestore setDoc timeout")), 3000)
+  );
+  await Promise.race([
+    firestoreSetDoc(docRef, data, options),
+    timeoutPromise
+  ]);
 }
 
 export async function updateDoc(docRef: any, data: any) {
-  await firestoreUpdateDoc(docRef, data);
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Firestore updateDoc timeout")), 3000)
+  );
+  await Promise.race([
+    firestoreUpdateDoc(docRef, data),
+    timeoutPromise
+  ]);
 }
 
 export async function deleteDoc(docRef: any) {
-  await firestoreDeleteDoc(docRef);
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Firestore deleteDoc timeout")), 3000)
+  );
+  await Promise.race([
+    firestoreDeleteDoc(docRef),
+    timeoutPromise
+  ]);
 }
 
 export async function addDoc(collectionRef: any, data: any): Promise<any> {
-  return (await firestoreAddDoc(collectionRef, data)) as any;
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Firestore addDoc timeout")), 3000)
+  );
+  return Promise.race([
+    firestoreAddDoc(collectionRef, data),
+    timeoutPromise
+  ]) as Promise<any>;
 }
 
 export async function getDocs(queryObj: any): Promise<any> {
-  return (await firestoreGetDocs(queryObj)) as any;
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Firestore getDocs timeout")), 3000)
+  );
+  return Promise.race([
+    firestoreGetDocs(queryObj),
+    timeoutPromise
+  ]) as Promise<any>;
 }
 
 export function onSnapshot(queryRef: any, onNext: (snapshot: any) => void, onError?: (error: any) => void) {

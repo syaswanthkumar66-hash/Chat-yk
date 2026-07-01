@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../store';
@@ -64,7 +64,6 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     users
   } = useAppStore();
   const currentUser = useAppStore(state => state.user);
-  const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
@@ -74,6 +73,36 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
   const [showReportSuccess, setShowReportSuccess] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [sendingNotification, setSendingNotification] = useState(false);
+
+  // Derive user state from store data reactively to completely avoid duplicate state synchronization loops
+  const storeUser = users.find(u => u.id === userId);
+
+  let relationship: Relationship = 'not_friend';
+  if (blockedUserIds.includes(userId)) {
+    relationship = 'blocked';
+  } else if (friendRequests.some(r => r.userId === userId)) {
+    relationship = 'pending_received';
+  } else if (sentFriendRequests.includes(userId)) {
+    relationship = 'pending_sent';
+  } else if (removedFriendIds.includes(userId)) {
+    relationship = 'not_friend';
+  } else if (storeUser?.isFriend) {
+    relationship = 'friend';
+  } else {
+    relationship = 'not_friend';
+  }
+
+  const user = storeUser ? {
+    id: storeUser.id,
+    name: storeUser.displayName || storeUser.username,
+    username: storeUser.username,
+    avatar: storeUser.avatar,
+    bio: storeUser.description || '',
+    status: (storeUser.isOnline ? 'online' : (storeUser.isInactive ? 'away' : 'offline')) as 'online' | 'offline' | 'away',
+    relationship,
+    joinedDate: storeUser.joinDate ? new Date(storeUser.joinDate).toLocaleDateString() : 'Recently',
+    lastSeen: storeUser.lastSeen
+  } : null;
 
   const handleSendTestNotification = async () => {
     if (!currentUser || !user) return;
@@ -94,12 +123,16 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     }
 
     try {
-      const { db, collection, addDoc } = await import('../firebase');
-      await addDoc(collection(db, 'notifications'), {
+      const { db, doc, setDoc, handleFirestoreError, OperationType } = await import('../firebase');
+      const notifId = `notif-test-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const notifRef = doc(db, 'notifications', notifId);
+      
+      await setDoc(notifRef, {
+        id: notifId,
         recipientId: user.id,
         senderId: currentUser.id,
         senderName: currentUser.displayName || currentUser.username,
-        senderAvatar: currentUser.avatar,
+        senderAvatar: currentUser.avatar || '',
         title: "Test Notification",
         body: `System check: Test notification successfully received from your Admin friend, ${currentUser.displayName || currentUser.username}!`,
         createdAt: new Date().toISOString(),
@@ -113,6 +146,12 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
       console.error("Failed to send test notification:", err);
       setToast("Failed to send test notification.");
       setTimeout(() => setToast(null), 3000);
+      try {
+        const { handleFirestoreError, OperationType } = await import('../firebase');
+        handleFirestoreError(err, OperationType.WRITE, `notifications`);
+      } catch (innerErr) {
+        // Let it throw or log
+      }
     } finally {
       setSendingNotification(false);
     }
@@ -120,11 +159,16 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
 
   useEffect(() => {
     let isActive = true;
-    setLoading(true);
+    
+    // Only trigger full skeleton loading if the user details aren't in the store cache already
+    const hasCache = useAppStore.getState().users.some(u => u.id === userId);
+    if (!hasCache) {
+      setLoading(true);
+    } else {
+      setLoading(false);
+    }
     
     const loadUserProfile = async () => {
-      let storeUser = users.find(u => u.id === userId);
-      
       // Try to fetch the latest state from Firestore
       try {
         const { db, doc, getDoc } = await import('../firebase');
@@ -139,68 +183,25 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
           const freshIsOnline = userData.isOnline || false;
           const freshLastSeen = userData.lastSeen || null;
 
-          const currentStoreUser = useAppStore.getState().users.find(u => u.id === userId);
-          const needsUpdate = !currentStoreUser ||
-                              currentStoreUser.username !== userData.username ||
-                              currentStoreUser.displayName !== freshDisplayName ||
-                              currentStoreUser.avatar !== freshAvatar ||
-                              currentStoreUser.description !== freshDescription ||
-                              currentStoreUser.isAdmin !== freshIsAdmin ||
-                              currentStoreUser.isOnline !== freshIsOnline ||
-                              currentStoreUser.lastSeen !== freshLastSeen;
-
-          if (needsUpdate) {
-            // Update store user state so other components also get the fresh details!
-            useAppStore.getState().addUser({
-              id: userId,
-              username: userData.username,
-              displayName: freshDisplayName,
-              avatar: freshAvatar,
-              description: freshDescription,
-              isAdmin: freshIsAdmin,
-              joinDate: userData.joinDate || currentStoreUser?.joinDate || new Date().toISOString(),
-              isOnline: freshIsOnline,
-              lastSeen: freshLastSeen
-            });
-          }
-          // Retrieve updated store user
-          storeUser = useAppStore.getState().users.find(u => u.id === userId);
+          useAppStore.getState().addUser({
+            id: userId,
+            username: userData.username,
+            displayName: freshDisplayName,
+            avatar: freshAvatar,
+            description: freshDescription,
+            isAdmin: freshIsAdmin,
+            joinDate: userData.joinDate || new Date().toISOString(),
+            isOnline: freshIsOnline,
+            lastSeen: freshLastSeen
+          });
         }
       } catch (err) {
         console.error("Error fetching fresh user profile from Firestore:", err);
-      }
-
-      if (!isActive) return;
-
-      if (storeUser) {
-        let relationship: Relationship = 'not_friend';
-        if (blockedUserIds.includes(userId)) {
-          relationship = 'blocked';
-        } else if (friendRequests.some(r => r.userId === userId)) {
-          relationship = 'pending_received';
-        } else if (sentFriendRequests.includes(userId)) {
-          relationship = 'pending_sent';
-        } else if (removedFriendIds.includes(userId)) {
-          relationship = 'not_friend';
-        } else {
-          relationship = 'friend';
+      } finally {
+        if (isActive) {
+          setLoading(false);
         }
-        
-        setUser({ 
-          id: storeUser.id,
-          name: storeUser.displayName,
-          username: storeUser.username,
-          avatar: storeUser.avatar,
-          bio: storeUser.description || '',
-          status: storeUser.isOnline ? 'online' : (storeUser.isInactive ? 'away' : 'offline'),
-          relationship,
-          joinedDate: storeUser.joinDate ? new Date(storeUser.joinDate).toLocaleDateString() : 'Recently',
-          lastSeen: storeUser.lastSeen
-        });
-      } else {
-        setUser(null);
       }
-      setLoading(false);
     };
 
     loadUserProfile();
@@ -208,7 +209,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     return () => {
       isActive = false;
     };
-  }, [userId, blockedUserIds, removedFriendIds, friendRequests, sentFriendRequests, users]);
+  }, [userId]);
 
   const handleCopyUsername = () => {
     if (!user) return;
@@ -255,23 +256,19 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
       const request = friendRequests.find(r => r.userId === user.id);
       if (request) {
         acceptFriendRequest(request.id);
-        setUser({ ...user, relationship: 'friend' });
       }
     } else if (action === 'decline_request') {
       const request = friendRequests.find(r => r.userId === user.id);
       if (request) {
         rejectFriendRequest(request.id);
-        setUser({ ...user, relationship: 'not_friend' });
       }
     } else if (action === 'add_friend') {
       if (removedFriendIds.includes(user.id)) {
         restoreFriend(user.id);
       }
       sendFriendRequest(user.id);
-      setUser({ ...user, relationship: 'pending_sent' });
     } else if (action === 'cancel_request') {
       cancelFriendRequest(user.id);
-      setUser({ ...user, relationship: 'not_friend' });
     }
     setShowMenu(false);
   };
@@ -703,7 +700,6 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
                       className="flex-1" 
                       onClick={() => {
                         removeFriend(user.id);
-                        setUser({ ...user, relationship: 'not_friend' });
                         setActiveModal(null);
                       }}
                     >

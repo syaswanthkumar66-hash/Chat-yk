@@ -99,8 +99,13 @@ export const Onboarding = () => {
   // Handle Firebase redirect results cleanly on mount
   useEffect(() => {
     setIsLoading(true);
+    const timeout = setTimeout(() => {
+      setIsLoading(false);
+    }, 1500); // 1.5s max wait for getRedirectResult to prevent onboarding page from being blocked!
+
     getRedirectResult(auth)
       .then(async (result) => {
+        clearTimeout(timeout);
         if (result?.user) {
           const user = result.user;
           try {
@@ -143,6 +148,7 @@ export const Onboarding = () => {
         }
       })
       .catch((err: any) => {
+        clearTimeout(timeout);
         console.error("Redirect error: ", err);
         if (err.code === 'auth/unauthorized-domain') {
           setError('This domain is not authorized for Firebase Auth. Please add your Vercel domain to Firebase Console > Authentication > Settings > Authorized Domains.');
@@ -151,6 +157,7 @@ export const Onboarding = () => {
         }
       })
       .finally(() => {
+        clearTimeout(timeout);
         setIsLoading(false);
       });
   }, [login]);
@@ -370,10 +377,12 @@ export const Onboarding = () => {
         joinDate: new Date().toISOString()
       };
       
-      try {
-        await setDoc(doc(db, 'users', uid), userData);
-      } catch (firestoreErr: any) {
-        console.warn("Could not save developer profile to Firestore (using memory/local storage fallback):", firestoreErr.message);
+      if (!isLocalDev) {
+        try {
+          await setDoc(doc(db, 'users', uid), userData);
+        } catch (firestoreErr: any) {
+          console.warn("Could not save profile to Firestore (using memory/local storage fallback):", firestoreErr.message);
+        }
       }
       
       login(userData, isLocalDev ? 'local' : 'google');
