@@ -370,7 +370,11 @@ export const Onboarding = () => {
         joinDate: new Date().toISOString()
       };
       
-      await setDoc(doc(db, 'users', uid), userData);
+      try {
+        await setDoc(doc(db, 'users', uid), userData);
+      } catch (firestoreErr: any) {
+        console.warn("Could not save developer profile to Firestore (using memory/local storage fallback):", firestoreErr.message);
+      }
       
       login(userData, isLocalDev ? 'local' : 'google');
     } catch (err: any) {

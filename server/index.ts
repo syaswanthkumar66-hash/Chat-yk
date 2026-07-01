@@ -56,17 +56,18 @@ if (process.env.FIREBASE_CONFIG) {
   }
 } else if (appletConfig) {
   try {
-    console.log("Initializing using appletConfig projectId:", appletConfig.projectId, "databaseId:", appletConfig.firestoreDatabaseId);
+    console.log("Initializing using appletConfig databaseId:", appletConfig.firestoreDatabaseId);
     if (getApps().length === 0) {
-      firebaseApp = initializeApp({
-        projectId: appletConfig.projectId
-      });
+      // In Cloud Run, the container service account credentials are authorized inside the native container project.
+      // Calling initializeApp() without an explicit projectId lets Firebase Admin automatically discover and use the native project ID,
+      // resolving "PERMISSION_DENIED: Missing or insufficient permissions" errors when using ADC.
+      firebaseApp = initializeApp();
     } else {
       firebaseApp = getApps()[0];
     }
     const dbId = appletConfig.firestoreDatabaseId;
     db = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
-    console.log(`Firebase Admin initialized using applet config (database: ${dbId || 'default'})`);
+    console.log(`Firebase Admin initialized using applet config auto-discovery (database: ${dbId || 'default'})`);
   } catch (e) {
     console.error("Failed to initialize Firebase Admin via applet config:", e);
   }

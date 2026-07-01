@@ -302,7 +302,11 @@ export default function App() {
                     userId: r.fromUserId,
                     name: senderData.displayName || senderData.username || 'Unknown',
                     avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
-                    timestamp: r.createdAt ? new Date(r.createdAt.toMillis()).toISOString() : new Date().toISOString()
+                    timestamp: r.createdAt 
+                      ? (typeof r.createdAt.toMillis === 'function' 
+                          ? new Date(r.createdAt.toMillis()).toISOString() 
+                          : new Date(r.createdAt).toISOString())
+                      : new Date().toISOString()
                   });
                 }
               }

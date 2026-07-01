@@ -16,7 +16,8 @@ export default defineConfig(({mode}) => {
         filename: 'precache-sw.js',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
         workbox: {
-          maximumFileSizeToCacheInBytes: 5000000
+          maximumFileSizeToCacheInBytes: 5000000,
+          navigateFallbackDenylist: [/^\/api/]
         },
         manifest: {
           name: 'Encrypted Chat App',
@@ -55,17 +56,7 @@ export default defineConfig(({mode}) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      proxy: {
-        '/api': {
-          target: 'http://127.0.0.1:3001',
-          changeOrigin: true,
-        },
-        '/socket.io': {
-          target: 'http://127.0.0.1:3001',
-          ws: true,
-          changeOrigin: true,
-        },
-      },
+
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
