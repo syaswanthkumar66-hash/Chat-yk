@@ -11,28 +11,7 @@ service cloud.firestore {
     function isVerified() { return isSignedIn(); }
     function isOwner(userId) { return isVerified() && request.auth.uid == userId; }
 
-    // Request evaluation helpers
     function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // Role helpers
-    function isAdmin() {
-      // Allow the original platform dev or anyone whose email is explicitly admin@protocol.net
-      return isSignedIn() && (request.auth.token.email == 'admin@protocol.net' || request.auth.token.email == 'syaswanthkumar66@gmail.com');
-    }
-
-    function isValidUserConfig(data) {
-       return data.keys().hasAll(['id', 'email', 'username', 'displayName']) &&
-        data.id is string && data.id.size() <= 128 &&
-        data.email is string && data.email.size() <= 128 &&
-        data.username is string && data.username.size() <= 128 &&
-        data.displayName is string && data.displayName.size() <= 128 &&
-        data.id == request.auth.uid;
-    }
 
     match /test/connection {
       allow read: if true;
@@ -40,79 +19,26 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isVerified();
-
-      allow create: if isOwner(userId) &&
-        isValidId(userId) &&
-        isValidUserConfig(incoming()) &&
-        incoming().keys().size() <= 15;
-        
-      allow update: if isOwner(userId) &&
-        isValidId(userId) &&
-        isValidUserConfig(incoming()) && (
-           isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'avatar', 'description', 'isOnline', 'lastSeen', 'publicKey', 'blockedUserIds', 'removedFriendIds', 'profileVisibility', 'notificationSettings'])
-        );
+      allow write: if isVerified() && request.auth.uid == userId;
     }
 
     match /pushSubscriptions/{userId} {
-      allow read, write: if isOwner(userId);
-    }
-
-    function isValidOfflineMessage(data) {
-       return data.keys().hasAll(['id', 'senderId', 'recipientId', 'text', 'type', 'timestamp', 'to']) &&
-         data.id is string && data.id.size() <= 128 &&
-         data.senderId is string && data.senderId.size() <= 128 &&
-         data.senderId == request.auth.uid &&
-         data.recipientId is string && data.recipientId.size() <= 128 &&
-         data.text is string && data.text.size() <= 100000 &&
-         data.type is string && data.type.size() <= 64 &&
-         data.timestamp is string && data.timestamp.size() <= 128 &&
-         data.to is string && data.to.size() <= 128 &&
-         (!data.keys().contains('fileUrl') || data.fileUrl is string) &&
-         (!data.keys().contains('fileSize') || data.fileSize is int || data.fileSize is float) &&
-         (!data.keys().contains('iv') || data.iv is string) &&
-         (!data.keys().contains('encryptedFileKey') || data.encryptedFileKey is string) &&
-         (!data.keys().contains('isTemporaryFile') || data.isTemporaryFile is bool) &&
-         (!data.keys().contains('isForwarded') || data.isForwarded is bool);
+      allow read, write: if isVerified() && request.auth.uid == userId;
     }
 
     match /offline_messages/{messageId} {
-      allow create: if isVerified() && isValidId(messageId) && isValidOfflineMessage(incoming());
-      allow read: if isVerified() && resource.data.to == request.auth.uid;
-      allow delete: if isVerified() && (resource.data.to == request.auth.uid || resource.data.senderId == request.auth.uid);
-    }
-
-    function isValidFriendRequest(data) {
-       return data.keys().hasAll(['fromUserId', 'toUserId', 'createdAt', 'status']) &&
-         data.fromUserId is string && data.fromUserId.size() <= 128 &&
-         data.fromUserId == request.auth.uid &&
-         data.toUserId is string && data.toUserId.size() <= 128 &&
-         data.createdAt == request.time &&
-         data.status == 'pending';
+      allow create: if isVerified() && (incoming().senderId == request.auth.uid || incoming().from == request.auth.uid);
+      allow read, delete: if isVerified() && (resource == null || resource.data.to == request.auth.uid || resource.data.senderId == request.auth.uid);
     }
 
     match /friendRequests/{requestId} {
-      allow read: if isVerified() && (resource.data.toUserId == request.auth.uid || resource.data.fromUserId == request.auth.uid);
-      allow create: if isVerified() && isValidId(requestId) && isValidFriendRequest(incoming());
-      allow delete: if isVerified() && (existing().fromUserId == request.auth.uid || existing().toUserId == request.auth.uid);
-      allow update: if isVerified() && (existing().toUserId == request.auth.uid || existing().fromUserId == request.auth.uid) && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
-    }
-
-    function isValidNotification(data) {
-       return data.keys().hasAll(['id', 'type', 'recipientId', 'title', 'body', 'status', 'createdAt']) &&
-         data.id is string && data.id.size() <= 128 &&
-         data.type is string && data.type.size() <= 64 &&
-         data.recipientId is string && data.recipientId.size() <= 128 &&
-         data.title is string && data.title.size() <= 256 &&
-         data.body is string && data.body.size() <= 2048 &&
-         data.status is string && (data.status == 'created' || data.status == 'delivered' || data.status == 'read') &&
-         (data.createdAt is string || data.createdAt is timestamp);
+      allow create: if isVerified() && incoming().fromUserId == request.auth.uid;
+      allow read, update, delete: if isVerified() && (resource == null || resource.data.toUserId == request.auth.uid || resource.data.fromUserId == request.auth.uid);
     }
 
     match /notifications/{notificationId} {
-      allow read: if isVerified() && resource.data.recipientId == request.auth.uid;
-      allow create: if isVerified() && isValidId(notificationId) && isValidNotification(incoming());
-      allow update: if isVerified() && resource.data.recipientId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
-      allow delete: if isVerified() && resource.data.recipientId == request.auth.uid;
+      allow create: if isVerified();
+      allow read, update, delete: if isVerified() && (resource == null || resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid);
     }
   }
 }

@@ -29,7 +29,42 @@ try {
   console.warn("Failed to load firebase-applet-config.json:", e);
 }
 
-if (process.env.FIREBASE_CONFIG) {
+if (appletConfig) {
+  try {
+    console.log("Initializing using appletConfig:", appletConfig.projectId, "database:", appletConfig.firestoreDatabaseId);
+    if (getApps().length === 0) {
+      const options: any = {
+        projectId: appletConfig.projectId
+      };
+      
+      if (process.env.FIREBASE_CONFIG) {
+        try {
+          const configObj = JSON.parse(process.env.FIREBASE_CONFIG);
+          if (configObj.private_key) {
+            options.credential = cert(configObj);
+            console.log("Adding FIREBASE_CONFIG credential to App options");
+          }
+        } catch (e) {
+          console.warn("Could not parse FIREBASE_CONFIG for credential:", e);
+        }
+      }
+      
+      firebaseApp = initializeApp(options);
+    } else {
+      firebaseApp = getApps()[0];
+    }
+    const dbId = appletConfig.firestoreDatabaseId;
+    db = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
+    try {
+      db.settings({ ignoreUndefinedProperties: true });
+    } catch (err) {
+      console.warn("Could not set ignoreUndefinedProperties on firestore:", err);
+    }
+    console.log(`Firebase Admin initialized using applet config (projectId: ${appletConfig.projectId}, database: ${dbId || 'default'})`);
+  } catch (e) {
+    console.error("Failed to initialize Firebase Admin via applet config:", e);
+  }
+} else if (process.env.FIREBASE_CONFIG) {
   try {
     const configObj = JSON.parse(process.env.FIREBASE_CONFIG);
     console.log("FIREBASE_CONFIG keys present:", Object.keys(configObj));
@@ -50,26 +85,14 @@ if (process.env.FIREBASE_CONFIG) {
     }
     const dbId = appletConfig?.firestoreDatabaseId || undefined;
     db = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
+    try {
+      db.settings({ ignoreUndefinedProperties: true });
+    } catch (err) {
+      console.warn("Could not set ignoreUndefinedProperties on firestore:", err);
+    }
     console.log(`Firebase Admin initialized for store-and-forward (database: ${dbId || 'default'})`);
   } catch(e: any) {
     console.error("Failed to initialize Firebase Admin via FIREBASE_CONFIG:", e);
-  }
-} else if (appletConfig) {
-  try {
-    console.log("Initializing using appletConfig databaseId:", appletConfig.firestoreDatabaseId);
-    if (getApps().length === 0) {
-      // In Cloud Run, the container service account credentials are authorized inside the native container project.
-      // Calling initializeApp() without an explicit projectId lets Firebase Admin automatically discover and use the native project ID,
-      // resolving "PERMISSION_DENIED: Missing or insufficient permissions" errors when using ADC.
-      firebaseApp = initializeApp();
-    } else {
-      firebaseApp = getApps()[0];
-    }
-    const dbId = appletConfig.firestoreDatabaseId;
-    db = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
-    console.log(`Firebase Admin initialized using applet config auto-discovery (database: ${dbId || 'default'})`);
-  } catch (e) {
-    console.error("Failed to initialize Firebase Admin via applet config:", e);
   }
 } else {
   try {
@@ -80,10 +103,60 @@ if (process.env.FIREBASE_CONFIG) {
       firebaseApp = getApps()[0];
     }
     db = getFirestore(firebaseApp);
+    try {
+      db.settings({ ignoreUndefinedProperties: true });
+    } catch (err) {
+      console.warn("Could not set ignoreUndefinedProperties on firestore:", err);
+    }
     console.log("Firebase Admin initialized using default credentials");
   } catch (e) {
     console.warn("Failed to initialize Firebase Admin default, proxy is disabled:", e);
   }
+}
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, userId?: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const errInfo: FirestoreErrorInfo = {
+    error: errMsg,
+    authInfo: {
+      userId: userId || null,
+      email: null,
+      emailVerified: null,
+      isAnonymous: false,
+      tenantId: null,
+      providerInfo: []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
 }
 
 import webpush from "web-push";
@@ -202,7 +275,12 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
           }
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.message?.includes('PERMISSION_DENIED') || err.message?.includes('permissions')) {
+        try {
+          handleFirestoreError(err, OperationType.GET, `pushSubscriptions/${recipientId}`, recipientId);
+        } catch (e) {}
+      }
       console.error(`Error fetching push subscription from Firestore for ${recipientId}:`, err);
     }
   }
@@ -275,7 +353,12 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
             }
             console.log(`Cleaned up ${expiredEndpoints.size} expired subscriptions for user ${recipientId} in Firestore`);
           }
-        } catch (cleanErr) {
+        } catch (cleanErr: any) {
+          if (cleanErr.message?.includes('PERMISSION_DENIED') || cleanErr.message?.includes('permissions')) {
+            try {
+              handleFirestoreError(cleanErr, OperationType.WRITE, `pushSubscriptions/${recipientId}`, recipientId);
+            } catch (e) {}
+          }
           console.error("Error cleaning up expired subscriptions in Firestore:", cleanErr);
         }
       }
@@ -653,7 +736,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
                     isTargetBlocked = true;
                   }
                 }
-              } catch (e) {
+              } catch (e: any) {
+                if (e.message?.includes('PERMISSION_DENIED') || e.message?.includes('permissions')) {
+                  try {
+                    handleFirestoreError(e, OperationType.GET, `users/${targetId}`, senderId);
+                  } catch (_) {}
+                }
                 console.warn(`Block check failed for target ${targetId}`, e);
               }
             }
@@ -682,6 +770,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
                 });
                 console.log(`Durable group notification created for member ${targetId}`);
               } catch (e: any) {
+                if (e.message?.includes('PERMISSION_DENIED') || e.message?.includes('permissions')) {
+                  try {
+                    handleFirestoreError(e, OperationType.WRITE, `notifications/notif-msg-${messageData.id}-${targetId}`, senderId);
+                  } catch (_) {}
+                }
                 console.warn(`Failed to create durable group notification for ${targetId}:`, e.message);
               }
             }
@@ -697,6 +790,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
                   console.log(`Group member ${targetId} offline. Saved group message to Firestore.`);
                   savedToFirestore = true;
                 } catch(e: any) {
+                  if (e.message?.includes('PERMISSION_DENIED') || e.message?.includes('permissions')) {
+                    try {
+                      handleFirestoreError(e, OperationType.WRITE, `offline_messages/${offlineMsgId}`, senderId);
+                    } catch (_) {}
+                  }
                   console.warn("Firebase save error for group member, falling back to memory:", e.message);
                 }
               }
@@ -728,7 +826,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
                 isRecipientBlocked = true;
               }
             }
-          } catch (e) {
+          } catch (e: any) {
+            if (e.message?.includes('PERMISSION_DENIED') || e.message?.includes('permissions')) {
+              try {
+                handleFirestoreError(e, OperationType.GET, `users/${recipientId}`, senderId);
+              } catch (_) {}
+            }
             console.warn(`Block check failed for recipient ${recipientId}`, e);
           }
         }
@@ -757,6 +860,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             });
             console.log(`Durable direct notification created for recipient ${recipientId}`);
           } catch (e: any) {
+            if (e.message?.includes('PERMISSION_DENIED') || e.message?.includes('permissions')) {
+              try {
+                handleFirestoreError(e, OperationType.WRITE, `notifications/notif-msg-${messageData.id}`, senderId);
+              } catch (_) {}
+            }
             console.warn(`Failed to create durable direct notification for ${recipientId}:`, e.message);
           }
         }
@@ -775,6 +883,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
               console.log(`User ${recipientId} offline. Message saved to Firebase.`);
               savedToFirestore = true;
             } catch(e: any) {
+              if (e.message?.includes('PERMISSION_DENIED') || e.message?.includes('permissions')) {
+                try {
+                  handleFirestoreError(e, OperationType.WRITE, `offline_messages/${messageData.id}`, senderId);
+                } catch (_) {}
+              }
               console.warn("Firebase save error, falling back to memory:", e.message);
             }
           }
@@ -907,6 +1020,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         res.json({ exists: false, data: null });
       }
     } catch (err: any) {
+      if (err.message?.includes('PERMISSION_DENIED') || err.message?.includes('permissions')) {
+        try {
+          handleFirestoreError(err, OperationType.GET, docPath);
+        } catch (_) {}
+      }
       console.warn(`Backend getDoc warning for ${docPath}:`, err.message);
       res.json({ exists: false, data: null, isFallback: true, error: err.message });
     }
@@ -925,6 +1043,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       await docRef.set(data, { merge: merge !== false });
       res.json({ success: true });
     } catch (err: any) {
+      if (err.message?.includes('PERMISSION_DENIED') || err.message?.includes('permissions')) {
+        try {
+          handleFirestoreError(err, OperationType.WRITE, docPath);
+        } catch (_) {}
+      }
       console.warn(`Backend setDoc warning for ${docPath}:`, err.message);
       res.json({ success: true, isFallback: true, error: err.message });
     }
@@ -943,6 +1066,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       await docRef.update(data);
       res.json({ success: true });
     } catch (err: any) {
+      if (err.message?.includes('PERMISSION_DENIED') || err.message?.includes('permissions')) {
+        try {
+          handleFirestoreError(err, OperationType.UPDATE, docPath);
+        } catch (_) {}
+      }
       console.warn(`Backend updateDoc warning for ${docPath}:`, err.message);
       res.json({ success: true, isFallback: true, error: err.message });
     }
@@ -961,6 +1089,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       await docRef.delete();
       res.json({ success: true });
     } catch (err: any) {
+      if (err.message?.includes('PERMISSION_DENIED') || err.message?.includes('permissions')) {
+        try {
+          handleFirestoreError(err, OperationType.DELETE, docPath);
+        } catch (_) {}
+      }
       console.warn(`Backend deleteDoc warning for ${docPath}:`, err.message);
       res.json({ success: true, isFallback: true, error: err.message });
     }
@@ -995,6 +1128,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       });
       res.json({ success: true, results });
     } catch (err: any) {
+      if (err.message?.includes('PERMISSION_DENIED') || err.message?.includes('permissions')) {
+        try {
+          handleFirestoreError(err, OperationType.LIST, colName);
+        } catch (_) {}
+      }
       console.warn(`Backend query warning for collection ${colName}:`, err.message);
       res.json({ success: true, results: [], isFallback: true, error: err.message });
     }

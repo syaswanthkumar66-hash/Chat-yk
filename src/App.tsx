@@ -240,8 +240,25 @@ export default function App() {
             }
           } else {
             // Document does not exist in Firestore, but Firebase User exists.
-            // This means they are mid-onboarding or a new user. We must not treat them as logged in yet.
-            if (!cachedUserObj || cachedUserObj.id !== firebaseUser.uid) {
+            if (cachedUserObj && cachedUserObj.id === firebaseUser.uid) {
+              console.log("Auto-restoring cached user profile to Firestore...");
+              try {
+                const userDataToRestore = {
+                  id: cachedUserObj.id,
+                  email: firebaseUser.email || 'developer@protocol.net',
+                  username: cachedUserObj.username,
+                  displayName: cachedUserObj.displayName,
+                  avatar: cachedUserObj.avatar || '',
+                  description: cachedUserObj.description || '',
+                  isAdmin: cachedUserObj.isAdmin || false,
+                  joinDate: cachedUserObj.joinDate || new Date().toISOString()
+                };
+                await setDoc(doc(db, 'users', firebaseUser.uid), userDataToRestore);
+                console.log("Cached user profile successfully auto-restored.");
+              } catch (restoreErr) {
+                console.error("Failed to auto-restore cached user profile:", restoreErr);
+              }
+            } else {
               useAppStore.setState({ isLoggedIn: false, user: null });
             }
           }
