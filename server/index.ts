@@ -159,7 +159,8 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-import webpush from "web-push";
+import * as webpushModule from "web-push";
+const webpush = ((webpushModule as any).default || webpushModule) as typeof webpushModule;
 
 let vapidKeys = {
   publicKey: "",
@@ -168,93 +169,136 @@ let vapidKeys = {
 
 async function initVapid() {
   const localKeysPath = path.join(process.cwd(), 'vapid-keys.json');
-  
-  if (fs.existsSync(localKeysPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(localKeysPath, 'utf8'));
-      if (data.publicKey && data.privateKey) {
-        vapidKeys = {
-          publicKey: data.publicKey,
-          privateKey: data.privateKey
-        };
-        console.log("Loaded stable VAPID keys from local vapid-keys.json");
+
+  // Priority 1: Environment Variables (highest authority)
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    vapidKeys = {
+      publicKey: process.env.VAPID_PUBLIC_KEY,
+      privateKey: process.env.VAPID_PRIVATE_KEY
+    };
+    console.log("Loaded VAPID keys from environment variables (Priority 1)");
+    // Sync to Firestore if db is available to keep database updated
+    if (db) {
+      try {
+        await db.collection('system_config').doc('vapid').set(vapidKeys);
+        console.log("Synced environment VAPID keys to Firestore system_config");
+      } catch (err) {
+        console.warn("Failed to sync environment VAPID keys to Firestore:", err);
       }
-    } catch (e) {
-      console.warn("Failed to read local vapid-keys.json:", e);
     }
   }
 
-  if (!vapidKeys.publicKey) {
-    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-      vapidKeys = {
-        publicKey: process.env.VAPID_PUBLIC_KEY,
-        privateKey: process.env.VAPID_PRIVATE_KEY
-      };
-      console.log("Loaded VAPID keys from environment variables");
-    } else if (db) {
-      try {
-        const vapidDoc = await db.collection('system_config').doc('vapid').get();
-        if (vapidDoc.exists) {
-          const data = vapidDoc.data();
+  // Priority 2: Shared database (so multiple instances/containers share same keys)
+  if (!vapidKeys.publicKey && db) {
+    try {
+      const vapidDoc = await db.collection('system_config').doc('vapid').get();
+      if (vapidDoc.exists) {
+        const data = vapidDoc.data();
+        if (data && data.publicKey && data.privateKey) {
           vapidKeys = {
             publicKey: data.publicKey,
             privateKey: data.privateKey
           };
-          console.log("Loaded existing VAPID keys from Firestore");
-        } else {
-          const generated = webpush.generateVAPIDKeys();
-          vapidKeys = {
-            publicKey: generated.publicKey,
-            privateKey: generated.privateKey
-          };
-          await db.collection('system_config').doc('vapid').set(vapidKeys);
-          console.log("Generated new VAPID keys and saved securely in Firestore");
+          console.log("Loaded VAPID keys from Firestore system_config (Priority 2)");
+          // Persist locally for caching/offline fallback
+          try {
+            fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
+          } catch (_) {}
         }
-      } catch (err) {
-        console.warn("Could not load/save VAPID keys from/to Firestore, generating dynamic in-memory ones:", err);
       }
+    } catch (err) {
+      console.warn("Could not load VAPID keys from Firestore:", err);
     }
   }
 
-  // If we still don't have VAPID keys, generate a stable pair and write it to vapid-keys.json
+  // Priority 3: Local file cache
+  if (!vapidKeys.publicKey && fs.existsSync(localKeysPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(localKeysPath, 'utf8'));
+      if (data && data.publicKey && data.privateKey) {
+        vapidKeys = {
+          publicKey: data.publicKey,
+          privateKey: data.privateKey
+        };
+        console.log("Loaded VAPID keys from local vapid-keys.json cache (Priority 3)");
+        // Back up to Firestore if available
+        if (db) {
+          try {
+            await db.collection('system_config').doc('vapid').set(vapidKeys);
+            console.log("Saved cached VAPID keys to Firestore system_config");
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to read local VAPID keys cache:", e);
+    }
+  }
+
+  // Priority 4: Dynamic generation (fallback)
   if (!vapidKeys.publicKey) {
-    console.log("No stable VAPID keys found. Generating new stable VAPID keys and persisting locally...");
+    console.log("No VAPID keys found in environment, DB, or cache. Generating new keys...");
     const generated = webpush.generateVAPIDKeys();
     vapidKeys = {
       publicKey: generated.publicKey,
       privateKey: generated.privateKey
     };
+    
+    // Persist to local cache
     try {
       fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
-      console.log("Saved new stable VAPID keys to local vapid-keys.json");
+      console.log("Saved newly generated stable VAPID keys to local cache");
     } catch (e) {
       console.error("Failed to save VAPID keys locally:", e);
     }
+
+    // Persist to Firestore
+    if (db) {
+      try {
+        await db.collection('system_config').doc('vapid').set(vapidKeys);
+        console.log("Saved newly generated VAPID keys to Firestore system_config");
+      } catch (err) {
+        console.error("Failed to save generated VAPID keys to Firestore:", err);
+      }
+    }
   }
 
+  // Configure webpush details
   try {
     let subject = process.env.VAPID_SUBJECT || 'mailto:syaswanthkumar66@gmail.com';
-    if (subject && !subject.startsWith('mailto:') && subject.includes('@')) {
-      subject = `mailto:${subject}`;
+    if (subject && !subject.startsWith('mailto:') && !subject.startsWith('https://')) {
+      if (subject.includes('@')) {
+        subject = `mailto:${subject}`;
+      } else {
+        subject = `mailto:syaswanthkumar66@gmail.com`;
+      }
     }
     webpush.setVapidDetails(
       subject,
       vapidKeys.publicKey,
       vapidKeys.privateKey
     );
+    console.log("Successfully configured WebPush VAPID details with public key:", vapidKeys.publicKey.slice(0, 20) + "...");
   } catch (err) {
     console.error("Failed to set VAPID details:", err);
   }
 }
 
-// IMPORTANT: initVapid() is async. Keys load from Firestore/env/disk.
-// If a push fires before it resolves (cold start race), keys will be empty.
-// The .catch() ensures startup failures are always visible in logs.
-initVapid().catch((e) => console.error('VAPID init failed:', e));
+// Store initialization promise to handle any startup race conditions gracefully
+const vapidInitPromise = initVapid().catch((e) => {
+  console.error('VAPID init failed:', e);
+});
 
 const memorySubscriptions = new Map<string, any[]>();
 
 async function sendPushNotification(recipientId: string, payload: { title: string, body: string, icon?: string, data?: any }) {
+  // Gracefully wait for VAPID initialization to finish before trying to dispatch any notifications
+  try {
+    await vapidInitPromise;
+  } catch (err) {
+    console.error(`Cannot send push notification to ${recipientId}: VAPID initialization failed`, err);
+    return;
+  }
+
   // Guard: if VAPID keys aren't loaded yet, skip silently with a clear log
   if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
     console.warn(`sendPushNotification skipped for ${recipientId}: VAPID keys not yet initialized`);
@@ -1183,8 +1227,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
   });
 
-  app.get("/api/vapid-public-key", (req, res) => {
-    res.json({ publicKey: vapidKeys.publicKey });
+  app.get("/api/vapid-public-key", async (req, res) => {
+    try {
+      await vapidInitPromise;
+      res.json({ publicKey: vapidKeys.publicKey });
+    } catch (err: any) {
+      console.error("VAPID public key endpoint failed:", err);
+      res.status(500).json({ error: "VAPID key initialization failed: " + err.message });
+    }
   });
 
   app.post("/api/save-subscription", async (req, res) => {

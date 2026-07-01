@@ -156,6 +156,7 @@ function InAppToastItem({
 
 export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const processedNotificationsRef = React.useRef<Set<string>>(new Set());
 
   // Fallback safety timeout to prevent getting stuck in splash loading screen under any circumstances
   useEffect(() => {
@@ -291,6 +292,8 @@ export default function App() {
   // Handle Firestore syncing for both Google and Local logins Reactively
   useEffect(() => {
     if (!isLoggedIn || !user?.id) return;
+
+    const syncStartTime = Date.now();
 
     // Skip Firestore sync for local/developer mode to prevent unauthenticated/Permission Denied crashes
     const authMethod = useAppStore.getState().authMethod;
@@ -430,6 +433,12 @@ export default function App() {
         const currentStore = useAppStore.getState();
         
         for (const notif of newlyCreated) {
+          // 1. Prevent duplicate processing in the same session
+          if (processedNotificationsRef.current.has(notif.id)) {
+            continue;
+          }
+          processedNotificationsRef.current.add(notif.id);
+
           if (currentStore.blockedUserIds.includes(notif.senderId || '')) {
             try {
               await updateDoc(doc(db, 'notifications', notif.id), { status: 'read', readAt: new Date().toISOString() });
@@ -455,6 +464,13 @@ export default function App() {
             await updateDoc(doc(db, 'notifications', notif.id), { status: 'delivered', deliveredAt: new Date().toISOString() });
           } catch (e) {
             console.error("Failed to update notification delivery status:", e);
+          }
+
+          // 2. Prevent UI & audio flood of historical/past notifications on initial subscription load
+          const notifTime = new Date(notif.createdAt).getTime();
+          if (isNaN(notifTime) || notifTime < syncStartTime - 5000) {
+            console.log(`Processing historical notification ${notif.id} silently.`);
+            continue;
           }
 
           const userSettings = user.notificationSettings;
