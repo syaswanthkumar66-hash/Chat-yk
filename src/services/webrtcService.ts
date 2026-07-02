@@ -38,6 +38,26 @@ class WebRTCService {
   private isIceServersFetched = false;
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
 
+  private activeOutgoingTransfers = new Map<string, {
+    arrayBuffer: ArrayBuffer;
+    mimeType: string;
+    messageId?: string;
+    sentChunks: Map<number, { offset: number; size: number }>;
+    sentTimes: Map<number, number>;
+    currentChunkSize: number;
+    rtts: number[];
+  }>();
+
+  private activeIncomingTransfers = new Map<string, {
+    mimeType: string;
+    totalBytes: number;
+    messageId?: string;
+    chunks: Map<number, { offset: number; data: string }>;
+    receivedIndices: Set<number>;
+    expectedChunksCount?: number;
+    lastChunkReceivedAt: number;
+  }>();
+
   constructor() {
     this.fetchIceConfig();
   }
@@ -176,73 +196,184 @@ class WebRTCService {
       this.dataChannels.delete(peerId);
     };
 
-    // Buffer of received chunks for active transfers
-    // Map of transferId -> { mimeType, totalChunks, messageId, chunks: Map<number, string> }
-    const activeIncomingTransfers = new Map<string, {
-      mimeType: string;
-      totalChunks: number;
-      messageId?: string;
-      chunks: Map<number, string>;
-    }>();
-
-    channel.onmessage = (event) => {
+    channel.onmessage = async (event) => {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === 'transfer_start') {
+
+        // 1. Handle Sender feedback (ACK, NACK, ACK of transfer)
+        if (message.type === 'transfer_chunk_ack') {
+          const activeTx = this.activeOutgoingTransfers.get(message.transferId);
+          if (activeTx) {
+            const sentTime = activeTx.sentTimes.get(message.chunkIndex);
+            if (sentTime) {
+              const rtt = performance.now() - sentTime;
+              activeTx.rtts.push(rtt);
+              if (activeTx.rtts.length > 8) activeTx.rtts.shift();
+
+              const averageRtt = activeTx.rtts.reduce((a, b) => a + b, 0) / activeTx.rtts.length;
+
+              // Dynamically adjust chunk size based on estimated connection RTT
+              if (averageRtt < 80) {
+                // High-speed link: expand chunk size up to 64KB for maximum transport efficiency
+                activeTx.currentChunkSize = Math.min(65536, activeTx.currentChunkSize + 4096);
+              } else if (averageRtt > 180) {
+                // Low-speed / congestion: contract chunk size down to 4KB to maintain transport stability
+                activeTx.currentChunkSize = Math.max(4096, activeTx.currentChunkSize - 2048);
+              }
+            }
+          }
+        } else if (message.type === 'transfer_request_missing') {
+          const activeTx = this.activeOutgoingTransfers.get(message.transferId);
+          if (activeTx) {
+            console.warn(`Peer requested retransmission of ${message.missingIndices.length} missing chunks for transfer ${message.transferId}`);
+            for (const idx of message.missingIndices) {
+              const chunkInfo = activeTx.sentChunks.get(idx);
+              if (chunkInfo) {
+                const chunkBuffer = activeTx.arrayBuffer.slice(chunkInfo.offset, chunkInfo.offset + chunkInfo.size);
+                const base64 = btoa(
+                  new Uint8Array(chunkBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+                );
+
+                channel.send(JSON.stringify({
+                  type: 'transfer_chunk',
+                  transferId: message.transferId,
+                  chunkIndex: idx,
+                  offset: chunkInfo.offset,
+                  data: base64,
+                  isRetransmit: true
+                }));
+              }
+            }
+            // Notify receiver that missing pack retransmission loop is complete
+            channel.send(JSON.stringify({
+              type: 'transfer_complete',
+              transferId: message.transferId,
+              messageId: activeTx.messageId,
+              totalChunksCount: activeTx.sentChunks.size
+            }));
+          }
+        } else if (message.type === 'transfer_acknowledged') {
+          console.log(`Transfer ${message.transferId} fully received and acknowledged by peer! Cleaning up memory.`);
+          this.activeOutgoingTransfers.delete(message.transferId);
+        }
+
+        // 2. Handle Receiver side messages
+        else if (message.type === 'transfer_start') {
           console.log(`Starting incoming audio transfer:`, message);
-          activeIncomingTransfers.set(message.transferId, {
+          this.activeIncomingTransfers.set(message.transferId, {
             mimeType: message.mimeType || 'audio/webm',
-            totalChunks: message.totalChunks,
+            totalBytes: message.totalBytes,
             messageId: message.messageId,
-            chunks: new Map()
+            chunks: new Map(),
+            receivedIndices: new Set(),
+            lastChunkReceivedAt: Date.now()
           });
         } else if (message.type === 'transfer_chunk') {
-          const transfer = activeIncomingTransfers.get(message.transferId);
+          const transfer = this.activeIncomingTransfers.get(message.transferId);
           if (transfer) {
-            transfer.chunks.set(message.chunkIndex, message.data);
-            console.log(`Received chunk ${message.chunkIndex + 1}/${transfer.totalChunks} for transfer ${message.transferId}`);
+            transfer.chunks.set(message.chunkIndex, { offset: message.offset, data: message.data });
+            transfer.receivedIndices.add(message.chunkIndex);
+            transfer.lastChunkReceivedAt = Date.now();
+
+            // ACK the received chunk immediately
+            channel.send(JSON.stringify({
+              type: 'transfer_chunk_ack',
+              transferId: message.transferId,
+              chunkIndex: message.chunkIndex,
+              receivedAt: Date.now()
+            }));
+
+            // Compute approximate progress
+            let bytesReceived = 0;
+            transfer.chunks.forEach(c => {
+              const decodedLength = Math.floor(c.data.length * 0.75);
+              bytesReceived += decodedLength;
+            });
+            const progress = Math.min(100, Math.round((bytesReceived / transfer.totalBytes) * 100));
+
+            // Notify UI with dynamic chunk progress and speed indicators
+            window.dispatchEvent(new CustomEvent('webrtc_transfer_progress', {
+              detail: {
+                transferId: message.transferId,
+                messageId: transfer.messageId,
+                progress,
+                chunkIndex: message.chunkIndex,
+                isRetransmit: !!message.isRetransmit
+              }
+            }));
           }
         } else if (message.type === 'transfer_complete') {
-          const transfer = activeIncomingTransfers.get(message.transferId);
+          const transfer = this.activeIncomingTransfers.get(message.transferId);
           if (transfer) {
-            console.log(`Transfer complete for ${message.transferId}. Reassembling audio file...`);
-            // Reassemble
-            const chunkArray: string[] = [];
-            for (let i = 0; i < transfer.totalChunks; i++) {
-              const chunk = transfer.chunks.get(i);
-              if (chunk) {
-                chunkArray.push(chunk);
+            transfer.expectedChunksCount = message.totalChunksCount;
+
+            // Integrity check: look for missing packets
+            const missingIndices: number[] = [];
+            for (let i = 0; i < message.totalChunksCount; i++) {
+              if (!transfer.receivedIndices.has(i)) {
+                missingIndices.push(i);
               }
             }
 
-            // Convert Base64 chunks to blobs
-            const byteCharactersArray = chunkArray.map(base64 => atob(base64));
-            const byteArrays = byteCharactersArray.map(byteCharacters => {
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-              }
-              return new Uint8Array(byteNumbers);
-            });
-
-            const audioBlob = new Blob(byteArrays, { type: transfer.mimeType });
-            const audioUrl = URL.createObjectURL(audioBlob);
-
-            console.log(`Audio successfully reassembled! Playback URL:`, audioUrl);
-
-            // Dispatch a custom event to notify the ChatDetail component to show/play the received audio
-            window.dispatchEvent(new CustomEvent('webrtc_audio_received', {
-              detail: {
+            if (missingIndices.length > 0) {
+              console.warn(`Incoming transfer ${message.transferId} is missing ${missingIndices.length} chunks! Requesting retransmission...`, missingIndices);
+              channel.send(JSON.stringify({
+                type: 'transfer_request_missing',
                 transferId: message.transferId,
-                messageId: transfer.messageId || message.messageId,
-                from: peerId,
-                url: audioUrl,
-                blob: audioBlob,
-                fileSize: `${(audioBlob.size / 1024).toFixed(1)} KB`
-              }
-            }));
+                missingIndices
+              }));
+            } else {
+              console.log(`All ${message.totalChunksCount} chunks received successfully for ${message.transferId}! Reassembling...`);
 
-            activeIncomingTransfers.delete(message.transferId);
+              const chunkArray: string[] = [];
+              for (let i = 0; i < message.totalChunksCount; i++) {
+                const c = transfer.chunks.get(i);
+                if (c) chunkArray.push(c.data);
+              }
+
+              // Decode Base64 to Blobs
+              const byteCharactersArray = chunkArray.map(base64 => atob(base64));
+              const byteArrays = byteCharactersArray.map(byteCharacters => {
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                return new Uint8Array(byteNumbers);
+              });
+
+              const audioBlob = new Blob(byteArrays, { type: transfer.mimeType });
+              const audioUrl = URL.createObjectURL(audioBlob);
+
+              // Cache immediately in browser storage (IndexedDB)
+              const cacheKey = transfer.messageId || message.transferId;
+              try {
+                const { voiceNoteCache } = await import('./voiceNoteCache');
+                await voiceNoteCache.set(cacheKey, audioBlob);
+                console.log(`Saved voice note to IndexedDB cache successfully: ${cacheKey}`);
+              } catch (cacheErr) {
+                console.error("Failed to cache received voice note in IndexedDB:", cacheErr);
+              }
+
+              // Send fully acknowledged status to sender
+              channel.send(JSON.stringify({
+                type: 'transfer_acknowledged',
+                transferId: message.transferId
+              }));
+
+              // Dispatch success event to let ChatDetail display the new audio message
+              window.dispatchEvent(new CustomEvent('webrtc_audio_received', {
+                detail: {
+                  transferId: message.transferId,
+                  messageId: transfer.messageId || message.messageId,
+                  from: peerId,
+                  url: audioUrl,
+                  blob: audioBlob,
+                  fileSize: `${(audioBlob.size / 1024).toFixed(1)} KB`
+                }
+              }));
+
+              this.activeIncomingTransfers.delete(message.transferId);
+            }
           }
         }
       } catch (err) {
@@ -297,9 +428,6 @@ class WebRTCService {
     }
 
     const transferId = `tf-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    
-    // Chunk size: 16KB to stay safe with RTCDataChannel limits
-    const CHUNK_SIZE = 16384; 
     const reader = new FileReader();
 
     return new Promise<boolean>((resolve) => {
@@ -310,8 +438,25 @@ class WebRTCService {
           return;
         }
 
-        const totalChunks = Math.ceil(arrayBuffer.byteLength / CHUNK_SIZE);
-        console.log(`Sending audio over data channel to ${peerId}. Size: ${arrayBuffer.byteLength} bytes, total chunks: ${totalChunks}`);
+        const totalBytes = arrayBuffer.byteLength;
+        let sentBytes = 0;
+        let chunkIndex = 0;
+
+        const sentChunks = new Map<number, { offset: number, size: number }>();
+        const sentTimes = new Map<number, number>();
+
+        // Register outgoing transfer so that ACK and retransmit requests can be handled
+        this.activeOutgoingTransfers.set(transferId, {
+          arrayBuffer,
+          mimeType,
+          messageId,
+          sentChunks,
+          sentTimes,
+          currentChunkSize: 16384, // start with 16KB default
+          rtts: []
+        });
+
+        console.log(`Sending audio over data channel to ${peerId}. Size: ${totalBytes} bytes. Transfer ID: ${transferId}`);
 
         try {
           // 1. Send transfer_start
@@ -320,42 +465,96 @@ class WebRTCService {
             transferId,
             mimeType,
             messageId,
-            totalChunks
+            totalBytes
           }));
 
-          // 2. Send chunks sequentially
-          for (let i = 0; i < totalChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, arrayBuffer.byteLength);
+          // 2. Adaptive chunk-by-chunk sender loop
+          while (sentBytes < totalBytes) {
+            if (channel.readyState !== 'open') {
+              throw new Error("Data channel closed mid-transfer");
+            }
+
+            // RTCDataChannel Congestion Avoidance: pause if buffer exceeds 512KB
+            if (channel.bufferedAmount > 512 * 1024) {
+              await new Promise(r => {
+                const interval = setInterval(() => {
+                  if (channel.bufferedAmount < 64 * 1024 || channel.readyState !== 'open') {
+                    clearInterval(interval);
+                    r(null);
+                  }
+                }, 10);
+              });
+            }
+
+            const activeTx = this.activeOutgoingTransfers.get(transferId);
+            if (!activeTx) break; // Transfer canceled
+
+            const size = activeTx.currentChunkSize;
+            const start = sentBytes;
+            const end = Math.min(start + size, totalBytes);
+            const actualSize = end - start;
+
             const chunkBuffer = arrayBuffer.slice(start, end);
-            
-            // Convert array buffer to base64
             const base64 = btoa(
               new Uint8Array(chunkBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
             );
 
+            sentChunks.set(chunkIndex, { offset: start, size: actualSize });
+            sentTimes.set(chunkIndex, performance.now());
+
             channel.send(JSON.stringify({
               type: 'transfer_chunk',
               transferId,
-              chunkIndex: i,
+              chunkIndex,
+              offset: start,
               data: base64
             }));
 
-            // Avoid congestion by yielding/waiting slightly between chunks
-            await new Promise(r => setTimeout(r, 25));
+            // Dispatch sender progress event to UI
+            const progress = Math.min(100, Math.round((end / totalBytes) * 100));
+            window.dispatchEvent(new CustomEvent('webrtc_transfer_progress', {
+              detail: {
+                transferId,
+                messageId,
+                progress,
+                chunkIndex,
+                isSender: true,
+                chunkSize: actualSize
+              }
+            }));
+
+            sentBytes = end;
+
+            // Adaptive network delay pacing based on round-trip time (RTT)
+            const averageRtt = activeTx.rtts.length > 0
+              ? activeTx.rtts.reduce((a, b) => a + b, 0) / activeTx.rtts.length
+              : 50;
+            const waitTime = Math.max(5, Math.min(100, averageRtt * 0.15));
+            await new Promise(r => setTimeout(r, waitTime));
+
+            chunkIndex++;
           }
 
           // 3. Send transfer_complete
+          const totalChunksCount = chunkIndex;
           channel.send(JSON.stringify({
             type: 'transfer_complete',
             transferId,
-            messageId
+            messageId,
+            totalChunksCount
           }));
 
-          console.log(`Audio transfer completed for ${transferId}`);
+          console.log(`All audio chunks transmitted for ${transferId}. Awaiting receiver verification.`);
+
+          // Retain outgoing buffer for 30s so the receiver can request missed packets
+          setTimeout(() => {
+            this.activeOutgoingTransfers.delete(transferId);
+          }, 30000);
+
           resolve(true);
-        } catch (sendErr) {
-          console.error("Failed to transmit data chunks over RTCDataChannel:", sendErr);
+        } catch (err) {
+          console.error("Data channel sendAudioChunks error:", err);
+          this.activeOutgoingTransfers.delete(transferId);
           resolve(false);
         }
       };

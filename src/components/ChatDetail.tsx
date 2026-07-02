@@ -32,6 +32,33 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+
+  const [transferProgress, setTransferProgress] = useState<number | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [currentChunkSize, setCurrentChunkSize] = useState<number | null>(null);
+
+  useEffect(() => {
+    const handleProgress = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { messageId, progress, chunkSize } = customEvent.detail;
+      if (messageId === msg.id) {
+        setIsTransferring(true);
+        setTransferProgress(progress);
+        if (chunkSize) setCurrentChunkSize(chunkSize);
+        if (progress >= 100) {
+          setTimeout(() => {
+            setIsTransferring(false);
+            setTransferProgress(null);
+          }, 1200);
+        }
+      }
+    };
+
+    window.addEventListener('webrtc_transfer_progress', handleProgress);
+    return () => {
+      window.removeEventListener('webrtc_transfer_progress', handleProgress);
+    };
+  }, [msg.id]);
   
   useEffect(() => {
     let active = true;
@@ -39,8 +66,37 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
       const targetUrl = msg.fileUrl || msg.url;
       if (!targetUrl) return;
 
+      // Check cache first for audio messages (voice notes)
+      if (msg.type === 'audio') {
+        try {
+          const { voiceNoteCache } = await import('../services/voiceNoteCache');
+          const cacheKey = msg.id || targetUrl;
+          const cachedBlob = await voiceNoteCache.get(cacheKey);
+          if (cachedBlob && active) {
+            console.log("Loading voice note from IndexedDB Cache:", cacheKey);
+            setUrl(URL.createObjectURL(cachedBlob));
+            return;
+          }
+        } catch (err) {
+          console.error("IndexedDB voice note cache read error:", err);
+        }
+      }
+
       // If it is a local blob URL or not encrypted, set the URL directly and bypass decryption
       if (targetUrl.startsWith('blob:') || !msg.encryptedFileKey) {
+        if (msg.type === 'audio' && !targetUrl.startsWith('blob:')) {
+          try {
+            const { voiceNoteCache } = await import('../services/voiceNoteCache');
+            const cacheKey = msg.id || targetUrl;
+            const res = await fetch(targetUrl);
+            const blob = await res.blob();
+            await voiceNoteCache.set(cacheKey, blob);
+            if (active) setUrl(URL.createObjectURL(blob));
+            return;
+          } catch (err) {
+            console.error("Failed to fetch and cache unencrypted audio:", err);
+          }
+        }
         if (active) setUrl(targetUrl);
         return;
       }
@@ -52,9 +108,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
         const encryptedBlob = await res.blob();
         
         let sharedSecret: CryptoKey;
-        // Mock get proper shared secret
-        // For standard app we store the shared secret, but for brevity we'll use a mocked decrypt if we don't have it directly in state.
-        // Actually, we can fetch the remote pub key again.
+        // Fetch remote pub key to derive shared secret for E2EE decryption
         const remoteId = isOwn ? msg.recipientId : msg.senderId;
         const state = useAppStore.getState();
         const pubKeyBase64 = await new Promise<string>((resolve) => {
@@ -73,6 +127,19 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
 
         const decryptedBlob = await cryptoService.decryptFile(encryptedBlob, msg.iv, sharedSecret, msg.type === 'audio' ? 'audio/webm' : (msg.type === 'file' ? 'application/octet-stream' : 'image/jpeg'));
         const decompressed = await compressionService.decompressFile(decryptedBlob).catch(() => decryptedBlob);
+        
+        // Cache newly decrypted audio voice note
+        if (msg.type === 'audio') {
+          try {
+            const { voiceNoteCache } = await import('../services/voiceNoteCache');
+            const cacheKey = msg.id || targetUrl;
+            await voiceNoteCache.set(cacheKey, decompressed);
+            console.log("Cached decrypted voice note successfully:", cacheKey);
+          } catch (cacheErr) {
+            console.error("Failed to cache decrypted voice note in IndexedDB:", cacheErr);
+          }
+        }
+
         if (active) setUrl(URL.createObjectURL(decompressed));
       } catch (e) {
         console.error("Decryption/Decompression failed", e);
@@ -80,7 +147,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
     };
     fetchDecrypted();
     return () => { active = false; };
-  }, [msg.fileUrl, msg.url, msg.encryptedFileKey, msg.iv, isOwn, msg.recipientId, msg.senderId]);
+  }, [msg.fileUrl, msg.url, msg.encryptedFileKey, msg.iv, isOwn, msg.recipientId, msg.senderId, msg.id, msg.type]);
 
   useEffect(() => {
     if (msg.type === 'audio' && url) {
@@ -167,20 +234,40 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   if (msg.type === 'audio') {
     const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
     return (
-      <div className="flex items-center gap-3 min-w-[220px] py-1">
-        <button 
-          onClick={togglePlay}
-          className={cn("size-10 rounded-full flex items-center justify-center transition-transform active:scale-95 shrink-0 shadow-sm", isOwn ? "bg-white/25 text-white hover:bg-white/35" : "bg-primary/10 text-primary hover:bg-primary/20")}
-        >
-          <Icon name={isPlaying ? "pause" : "play_arrow"} className="text-xl" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className={cn("h-1 rounded-full overflow-hidden", isOwn ? "bg-white/20" : "bg-slate-200")}>
-             <div className="h-full bg-current transition-all duration-100" style={{ width: `${progress}%` }} />
-          </div>
-          <div className={cn("text-[9px] mt-1 flex justify-between font-bold", isOwn ? "text-white/75" : "text-slate-400")}>
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration) || msg.fileSize || 'Voice'}</span>
+      <div className="flex flex-col gap-1 min-w-[220px] py-1">
+        <div className="flex items-center gap-3">
+          <button 
+            disabled={isTransferring}
+            onClick={togglePlay}
+            className={cn("size-10 rounded-full flex items-center justify-center transition-transform active:scale-95 shrink-0 shadow-sm", isOwn ? "bg-white/25 text-white hover:bg-white/35" : "bg-primary/10 text-primary hover:bg-primary/20", isTransferring && "opacity-50 cursor-not-allowed")}
+          >
+            <Icon name={isTransferring ? "swap_horiz" : (isPlaying ? "pause" : "play_arrow")} className={cn("text-xl", isTransferring && "animate-pulse")} />
+          </button>
+          <div className="flex-1 min-w-0">
+            {isTransferring && transferProgress !== null ? (
+              <div className="space-y-1">
+                <div className={cn("h-1.5 rounded-full overflow-hidden", isOwn ? "bg-white/20" : "bg-slate-200")}>
+                  <div className="h-full bg-blue-500 animate-pulse transition-all duration-150" style={{ width: `${transferProgress}%` }} />
+                </div>
+                <div className={cn("text-[9px] font-mono flex justify-between", isOwn ? "text-white/75" : "text-slate-400")}>
+                  <span className="flex items-center gap-1">
+                    <span className="size-1.5 rounded-full bg-blue-500 animate-ping inline-block" />
+                    P2P {isOwn ? "Uploading" : "Downloading"}
+                  </span>
+                  <span>{transferProgress}% ({currentChunkSize ? `${(currentChunkSize / 1024).toFixed(0)}KB` : 'adaptive'})</span>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className={cn("h-1 rounded-full overflow-hidden", isOwn ? "bg-white/20" : "bg-slate-200")}>
+                  <div className="h-full bg-current transition-all duration-100" style={{ width: `${progress}%` }} />
+                </div>
+                <div className={cn("text-[9px] mt-1 flex justify-between font-bold", isOwn ? "text-white/75" : "text-slate-400")}>
+                  <span>{formatTime(currentTime)}</span>
+                  <span>{formatTime(duration) || msg.fileSize || 'Voice'}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
