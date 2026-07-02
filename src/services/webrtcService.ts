@@ -10,9 +10,33 @@ export interface RemoteTrackInfo {
 class WebRTCService {
   private pcs: Map<string, RTCPeerConnection> = new Map();
   private localStream: MediaStream | null = null;
-  private iceServers: any[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+  private iceServers: any[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    { 
+      urls: 'turn:openrelay.metered.ca:80?transport=udp', 
+      username: 'openrelayproject', 
+      credential: 'openrelayproject' 
+    },
+    { 
+      urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
+      username: 'openrelayproject', 
+      credential: 'openrelayproject' 
+    },
+    { 
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp', 
+      username: 'openrelayproject', 
+      credential: 'openrelayproject' 
+    }
+  ];
   private currentRoomId: string | null = null;
   private dataChannels: Map<string, RTCDataChannel> = new Map();
+  private isIceServersFetched = false;
+  private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
 
   constructor() {
     this.fetchIceConfig();
@@ -26,6 +50,7 @@ class WebRTCService {
           const data = await response.json();
           if (data && data.iceServers) {
             this.iceServers = data.iceServers;
+            this.isIceServersFetched = true;
             console.log("Successfully fetched WebRTC ICE config with STUN/TURN servers");
             return;
           }
@@ -45,7 +70,7 @@ class WebRTCService {
     this.currentRoomId = roomId;
 
     // Fetch TURN server credentials quickly if we haven't already
-    if (this.iceServers.length <= 1) {
+    if (!this.isIceServersFetched) {
       await this.fetchIceConfig(2, 500);
     }
 
@@ -231,7 +256,7 @@ class WebRTCService {
     console.log(`Joining WebRTC chat room: ${roomId} with peer ${peerId}`);
     
     // Fetch ICE config if needed
-    if (this.iceServers.length <= 1) {
+    if (!this.isIceServersFetched) {
       await this.fetchIceConfig(2, 500);
     }
 
@@ -351,6 +376,22 @@ class WebRTCService {
       dc.close();
       this.dataChannels.delete(peerId);
     }
+    this.pendingCandidates.delete(peerId);
+  }
+
+  private async applyPendingIceCandidates(peerId: string, pc: RTCPeerConnection) {
+    const candidates = this.pendingCandidates.get(peerId);
+    if (candidates && candidates.length > 0) {
+      console.log(`Applying ${candidates.length} queued ICE candidates for peer ${peerId}`);
+      this.pendingCandidates.delete(peerId);
+      for (const candidate of candidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.warn(`Failed to add queued ICE candidate for peer ${peerId}:`, err);
+        }
+      }
+    }
   }
 
   async handleSignal(from: string, signal: any, roomId: string) {
@@ -362,6 +403,13 @@ class WebRTCService {
       if (peerId && peerId !== myId) {
         console.log(`Peer ${peerId} joined. Initiating WebRTC connection offer...`);
         const pc = this.createPeerConnection(peerId, roomId);
+
+        // ALWAYS ensure that we create the DataChannel on the SDP offer creator side
+        if (roomId.startsWith('chat-webrtc-') && !this.dataChannels.has(peerId)) {
+          console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (SDP Offer Initiator)`);
+          const dc = pc.createDataChannel("audio_transfer", { ordered: true });
+          this.setupDataChannel(peerId, dc);
+        }
 
         try {
           const offer = await pc.createOffer();
@@ -390,6 +438,7 @@ class WebRTCService {
 
         try {
           await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+          await this.applyPendingIceCandidates(from, pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
@@ -416,6 +465,7 @@ class WebRTCService {
         if (pc) {
           try {
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+            await this.applyPendingIceCandidates(from, pc);
           } catch (err) {
             console.error(`Failed to set remote description from peer ${from}:`, err);
           }
@@ -424,12 +474,19 @@ class WebRTCService {
     } else if (signal.type === 'ice_candidate') {
       if (signal.to === myId) {
         const pc = this.pcs.get(from);
-        if (pc && signal.candidate) {
+        if (pc && pc.remoteDescription) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
           } catch (err) {
             console.error(`Failed to add ICE candidate from peer ${from}:`, err);
           }
+        } else {
+          // Queue the candidate until setRemoteDescription completes
+          console.log(`Queueing ICE candidate from peer ${from} (no remoteDescription yet)`);
+          if (!this.pendingCandidates.has(from)) {
+            this.pendingCandidates.set(from, []);
+          }
+          this.pendingCandidates.get(from)!.push(signal.candidate);
         }
       }
     } else if (signal.type === 'request_tracks') {
@@ -458,6 +515,7 @@ class WebRTCService {
     this.pcs.clear();
     this.localStream = null;
     this.currentRoomId = null;
+    this.pendingCandidates.clear();
   }
 }
 

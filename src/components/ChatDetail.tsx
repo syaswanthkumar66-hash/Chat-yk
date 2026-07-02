@@ -36,11 +36,19 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   useEffect(() => {
     let active = true;
     const fetchDecrypted = async () => {
-      if (!msg.encryptedFileKey) return; // not encrypted
+      const targetUrl = msg.fileUrl || msg.url;
+      if (!targetUrl) return;
+
+      // If it is a local blob URL or not encrypted, set the URL directly and bypass decryption
+      if (targetUrl.startsWith('blob:') || !msg.encryptedFileKey) {
+        if (active) setUrl(targetUrl);
+        return;
+      }
+
       try {
         const { cryptoService } = await import('../services/cryptoService');
         const { compressionService } = await import('../services/compressionService');
-        const res = await fetch(msg.fileUrl || msg.url);
+        const res = await fetch(targetUrl);
         const encryptedBlob = await res.blob();
         
         let sharedSecret: CryptoKey;
@@ -72,7 +80,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
     };
     fetchDecrypted();
     return () => { active = false; };
-  }, [msg, isOwn]);
+  }, [msg.fileUrl, msg.url, msg.encryptedFileKey, msg.iv, isOwn, msg.recipientId, msg.senderId]);
 
   useEffect(() => {
     if (msg.type === 'audio' && url) {

@@ -4,6 +4,7 @@ import {
   initializeFirestore, 
   persistentLocalCache, 
   persistentMultipleTabManager,
+  memoryLocalCache,
   doc as firestoreDoc,
   getDoc as firestoreGetDoc,
   getDocs as firestoreGetDocs,
@@ -22,13 +23,28 @@ import { BACKEND_URL } from './config';
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with persistent offline cache enabled
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  }),
-  experimentalForceLongPolling: true
-}, firebaseConfig.firestoreDatabaseId);
+// Initialize Firestore with persistent cache, falling back safely to memory local cache if storage is restricted (e.g. in iframe sandbox)
+let dbInstance;
+try {
+  const hasIndexedDB = typeof window !== 'undefined' && !!window.indexedDB;
+  if (!hasIndexedDB) {
+    throw new Error("indexedDB not available in this window context");
+  }
+  dbInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    }),
+    experimentalForceLongPolling: true
+  }, firebaseConfig.firestoreDatabaseId);
+} catch (e) {
+  console.warn("Firestore persistent local cache failed to initialize (likely due to iframe sandbox constraints). Falling back to memoryLocalCache:", e);
+  dbInstance = initializeFirestore(app, {
+    localCache: memoryLocalCache(),
+    experimentalForceLongPolling: true
+  }, firebaseConfig.firestoreDatabaseId);
+}
+
+export const db = dbInstance;
 
 export const auth = getAuth(app);
 
@@ -121,7 +137,7 @@ function convertTimestamps(val: any): any {
 // Wrapped execution functions using standard native Firebase Web SDK directly with robust safety timeouts to prevent iframe sandbox hangs
 export async function getDoc(docRef: any): Promise<any> {
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Firestore getDoc timeout")), 2500)
+    setTimeout(() => reject(new Error("Firestore getDoc timeout")), 30000)
   );
   return Promise.race([
     firestoreGetDoc(docRef),
@@ -131,7 +147,7 @@ export async function getDoc(docRef: any): Promise<any> {
 
 export async function getDocFromServer(docRef: any): Promise<any> {
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Firestore getDocFromServer timeout")), 2500)
+    setTimeout(() => reject(new Error("Firestore getDocFromServer timeout")), 30000)
   );
   return Promise.race([
     firestoreGetDocFromServer(docRef),
@@ -141,7 +157,7 @@ export async function getDocFromServer(docRef: any): Promise<any> {
 
 export async function setDoc(docRef: any, data: any, options?: any) {
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Firestore setDoc timeout")), 3000)
+    setTimeout(() => reject(new Error("Firestore setDoc timeout")), 30000)
   );
   await Promise.race([
     firestoreSetDoc(docRef, data, options),
@@ -151,7 +167,7 @@ export async function setDoc(docRef: any, data: any, options?: any) {
 
 export async function updateDoc(docRef: any, data: any) {
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Firestore updateDoc timeout")), 3000)
+    setTimeout(() => reject(new Error("Firestore updateDoc timeout")), 30000)
   );
   await Promise.race([
     firestoreUpdateDoc(docRef, data),
@@ -161,7 +177,7 @@ export async function updateDoc(docRef: any, data: any) {
 
 export async function deleteDoc(docRef: any) {
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Firestore deleteDoc timeout")), 3000)
+    setTimeout(() => reject(new Error("Firestore deleteDoc timeout")), 30000)
   );
   await Promise.race([
     firestoreDeleteDoc(docRef),
@@ -171,7 +187,7 @@ export async function deleteDoc(docRef: any) {
 
 export async function addDoc(collectionRef: any, data: any): Promise<any> {
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Firestore addDoc timeout")), 3000)
+    setTimeout(() => reject(new Error("Firestore addDoc timeout")), 30000)
   );
   return Promise.race([
     firestoreAddDoc(collectionRef, data),
@@ -181,7 +197,7 @@ export async function addDoc(collectionRef: any, data: any): Promise<any> {
 
 export async function getDocs(queryObj: any): Promise<any> {
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Firestore getDocs timeout")), 3000)
+    setTimeout(() => reject(new Error("Firestore getDocs timeout")), 30000)
   );
   return Promise.race([
     firestoreGetDocs(queryObj),
