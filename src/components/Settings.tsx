@@ -3,6 +3,7 @@ import { useAppStore } from '../store';
 import { Icon, Avatar, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { registerPushNotifications } from '../services/notificationService';
+import { sessionIntegrityService } from '../services/sessionIntegrityService';
 
 const PRELOADED_AVATARS = [
   'https://picsum.photos/seed/avatar1/200',
@@ -31,12 +32,31 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     wssMessage,
     connectionLogs,
     connectSpot,
-    disconnectSpot
+    disconnectSpot,
+    switchAccount
   } = useAppStore();
   const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection'>('main');
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [description, setDescription] = useState(user?.description || '');
+  const [savedAccounts, setSavedAccounts] = useState(() => sessionIntegrityService.getSavedAccounts());
+
+  const handleSwitchAccount = async (userId: string) => {
+    try {
+      await switchAccount(userId);
+      onClose(); // Close settings on successful switch
+    } catch (e) {
+      console.error("Failed to switch account", e);
+    }
+  };
+
+  const handleRemoveAccount = (userId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("Are you sure you want to remove this account? Your local cached messages and data for this profile will be purged.")) {
+      sessionIntegrityService.removeAccount(userId);
+      setSavedAccounts(sessionIntegrityService.getSavedAccounts());
+    }
+  };
 
   React.useEffect(() => {
     if (user && !isEditing) {
@@ -1420,6 +1440,86 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                     </div>
                   </div>
                   <Icon name="chevron_right" className="text-slate-400" />
+                </button>
+              </div>
+            </section>
+
+            {/* Account Switcher Section */}
+            <section className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted">Saved Profiles</h4>
+                <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-black">
+                  {savedAccounts.length} ACTIVE
+                </span>
+              </div>
+              <div className="space-y-2.5">
+                {savedAccounts.map((acc) => {
+                  const isActive = acc.id === user?.id;
+                  return (
+                    <div 
+                      key={`switch-acc-${acc.id}`}
+                      onClick={() => !isActive && handleSwitchAccount(acc.id)}
+                      className={cn(
+                        "w-full p-4 rounded-2xl flex items-center justify-between transition-all group border",
+                        isActive 
+                          ? "bg-primary/5 border-primary/20 ring-1 ring-primary/10" 
+                          : "bg-white border-slate-100 hover:border-primary/20 hover:bg-slate-50 cursor-pointer active:scale-[0.99]"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <Avatar src={acc.avatar} className="size-11 border border-white shadow-sm" />
+                          <div className={cn(
+                            "absolute -bottom-0.5 -right-0.5 size-4 rounded-full border border-white flex items-center justify-center text-[8px] text-white shadow-sm",
+                            acc.authMethod === 'google' ? "bg-red-500" : "bg-emerald-500"
+                          )}>
+                            <Icon name={acc.authMethod === 'google' ? "alternate_email" : "terminal"} className="scale-75" />
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-start leading-tight">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-bold text-slate-700">{acc.displayName}</span>
+                            {isActive && (
+                              <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.25 rounded-md font-black uppercase tracking-wider">
+                                Active
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-neutral-muted">@{acc.username}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {!isActive && (
+                          <button 
+                            onClick={(e) => handleRemoveAccount(acc.id, e)}
+                            className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            title="Remove account from switcher"
+                          >
+                            <Icon name="delete" className="text-base" />
+                          </button>
+                        )}
+                        {isActive ? (
+                          <div className="size-5 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-sm">
+                            <Icon name="check" className="text-xs" />
+                          </div>
+                        ) : (
+                          <Icon name="swap_horiz" className="text-slate-400 group-hover:text-primary transition-colors text-lg" />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <button 
+                  onClick={() => {
+                    if (window.confirm("Do you want to log out of the current profile to add/sign in to a different account? Your current session will remain saved in this switcher list.")) {
+                      logout();
+                      onClose();
+                    }
+                  }}
+                  className="w-full p-4 rounded-2xl border border-dashed border-primary/20 bg-primary/5 flex items-center justify-center gap-2 hover:bg-primary/10 hover:border-primary/40 text-primary transition-all active:scale-95 font-bold text-sm"
+                >
+                  <Icon name="person_add" />
+                  <span>Add / Switch to Another Account</span>
                 </button>
               </div>
             </section>

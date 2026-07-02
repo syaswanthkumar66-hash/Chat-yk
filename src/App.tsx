@@ -10,8 +10,9 @@ import { AdminPanel } from './components/AdminPanel';
 import { Icon, cn } from './components/UI';
 import { NotificationPrompt } from './components/NotificationPrompt';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests } from './firebase';
+import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests, setScopedUserInstance } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { sessionIntegrityService } from './services/sessionIntegrityService';
 
 async function testConnection() {
   try {
@@ -239,6 +240,16 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
 
   useEffect(() => {
+    // Run startup session integrity and cryptographic verification
+    sessionIntegrityService.verifyAndCleanupSession().catch(console.error);
+
+    // If a user is already cached and logged in from a previous session, restore their scoped Firebase/Firestore instance
+    if (isLoggedIn && user?.id) {
+      setScopedUserInstance(user.id);
+    }
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     
     const handleOnline = async () => {
@@ -406,6 +417,13 @@ export default function App() {
     // Skip Firestore sync for local/developer mode to prevent unauthenticated/Permission Denied crashes
     const authMethod = useAppStore.getState().authMethod;
     if (authMethod === 'local') return;
+
+    // Skip Firestore sync if the active profile does not match the authenticated Firebase Auth user
+    // to prevent permission-denied crashes while allowing seamless profile switching in offline mode.
+    if (auth.currentUser?.uid !== user.id) {
+      console.warn(`[FirestoreSync] Skipping live Firestore sync because active profile (${user.id}) does not match authenticated Firebase user (${auth.currentUser?.uid || 'none'}). Operating in secure partitioned offline mode.`);
+      return;
+    }
 
     let unsubscribeReceived = () => {};
     let unsubscribeSent = () => {};

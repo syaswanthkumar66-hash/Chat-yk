@@ -12,17 +12,19 @@ const getUserId = (): string => {
 };
 
 class VoiceNoteCache {
-  private dbName = 'voice-note-cache-db';
   private storeName = 'voice-notes';
   private chunkStoreName = 'voice-chunks';
-  private dbPromise: Promise<IDBDatabase> | null = null;
+  private dbPromises: Record<string, Promise<IDBDatabase>> = {};
 
   private getDB(): Promise<IDBDatabase> {
-    if (this.dbPromise) return this.dbPromise;
+    const userId = getUserId();
+    const dbName = userId ? `voice-note-cache-db_${userId}` : 'voice-note-cache-db_anonymous';
+    
+    if (this.dbPromises[dbName]) return this.dbPromises[dbName];
 
-    this.dbPromise = new Promise((resolve, reject) => {
+    this.dbPromises[dbName] = new Promise((resolve, reject) => {
       // Upgrade database to version 2 to create 'voice-chunks' store
-      const request = indexedDB.open(this.dbName, 2);
+      const request = indexedDB.open(dbName, 2);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(this.storeName)) {
@@ -40,7 +42,7 @@ class VoiceNoteCache {
       };
     });
 
-    return this.dbPromise;
+    return this.dbPromises[dbName];
   }
 
   // --- Existing cache methods for fully reassembled voice notes ---

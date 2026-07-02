@@ -12,15 +12,17 @@ const getUserId = (): string => {
 };
 
 class AudioStorageService {
-  private dbName = 'audio-storage-db';
   private storeName = 'audio-chunks';
-  private dbPromise: Promise<IDBDatabase> | null = null;
+  private dbPromises: Record<string, Promise<IDBDatabase>> = {};
 
   private getDB(): Promise<IDBDatabase> {
-    if (this.dbPromise) return this.dbPromise;
+    const userId = getUserId();
+    const dbName = userId ? `audio-storage-db_${userId}` : 'audio-storage-db_anonymous';
+    
+    if (this.dbPromises[dbName]) return this.dbPromises[dbName];
 
-    this.dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, 1);
+    this.dbPromises[dbName] = new Promise((resolve, reject) => {
+      const request = indexedDB.open(dbName, 1);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(this.storeName)) {
@@ -35,7 +37,7 @@ class AudioStorageService {
       };
     });
 
-    return this.dbPromise;
+    return this.dbPromises[dbName];
   }
 
   /**

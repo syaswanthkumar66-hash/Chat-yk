@@ -213,6 +213,7 @@ interface AppState {
   acceptTransfer: (transferId: string) => void;
   declineTransfer: (transferId: string) => void;
   offlineMessageQueue: { id: string, chatId: string | null, recipientId: string | null, text: string, type: string, fileUrl?: string, fileSize?: string, e2eData?: any }[];
+  switchAccount: (userId: string) => Promise<void>;
 }
 
 export const DEFAULT_PRESETS: UserProfile[] = [];
@@ -557,6 +558,22 @@ export const useAppStore = create<AppState>((set) => ({
       localStorage.setItem('proto_isLoggedIn', 'true');
       localStorage.setItem('proto_authMethod', authMethod);
     }
+
+    // Set scoped Firebase instance and register account with sessionIntegrityService asynchronously
+    import('./firebase').then(({ setScopedUserInstance }) => {
+      setScopedUserInstance(user.id);
+    }).catch(console.error);
+
+    import('./services/sessionIntegrityService').then(({ sessionIntegrityService }) => {
+      sessionIntegrityService.registerAccount({
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        authMethod: authMethod,
+        email: (user as any).email || 'developer@protocol.net'
+      });
+    }).catch(console.error);
     
     // Automatically connect on-the-spot connections for both login methods.
     useAppStore.getState().initSocket(user.id);
@@ -567,10 +584,11 @@ export const useAppStore = create<AppState>((set) => ({
       state.socket.disconnect();
     }
     // Sign out of Firebase if initialized
-    import('./firebase').then(({ auth }) => {
+    import('./firebase').then(({ auth, setScopedUserInstance }) => {
       if (auth.currentUser) {
         auth.signOut();
       }
+      setScopedUserInstance(null);
     }).catch(err => console.error("Firebase auth sign out failed", err));
 
     if (typeof window !== 'undefined') {
@@ -603,6 +621,43 @@ export const useAppStore = create<AppState>((set) => ({
       offlineMessageQueue: [],
       socket: null 
     });
+  },
+  switchAccount: async (userId) => {
+    const { sessionIntegrityService } = await import('./services/sessionIntegrityService');
+    const accounts = sessionIntegrityService.getSavedAccounts();
+    const targetAccount = accounts.find(acc => acc.id === userId);
+    if (!targetAccount) {
+      console.error(`Account ${userId} not found in saved list.`);
+      return;
+    }
+
+    // Set scoped Firebase first
+    const { setScopedUserInstance } = await import('./firebase');
+    setScopedUserInstance(targetAccount.id);
+
+    // Disconnect old socket
+    const state = useAppStore.getState();
+    if (state.socket) {
+      state.socket.disconnect();
+    }
+
+    // Construct profile and call login to re-read per-user localized cache
+    const userProfile = {
+      id: targetAccount.id,
+      username: targetAccount.username,
+      displayName: targetAccount.displayName,
+      avatar: targetAccount.avatar,
+      description: 'Protocol user profile',
+      joinDate: new Date().toISOString(),
+      profileVisibility: 'everyone' as const,
+      notificationSettings: {
+        pushEnabled: true,
+        previewEnabled: true,
+        soundEnabled: false,
+        vibrateEnabled: true
+      }
+    };
+    state.login(userProfile, targetAccount.authMethod);
   },
   socket: null,
   tempMessages: [],

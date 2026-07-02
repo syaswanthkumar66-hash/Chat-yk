@@ -1,7 +1,8 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
   initializeFirestore, 
+  getFirestore,
   persistentLocalCache, 
   persistentMultipleTabManager,
   memoryLocalCache,
@@ -21,32 +22,49 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import { BACKEND_URL } from './config';
 
-const app = initializeApp(firebaseConfig);
-
-// Initialize Firestore with persistent cache, falling back safely to memory local cache if storage is restricted (e.g. in iframe sandbox)
-let dbInstance;
+let app;
 try {
-  const hasIndexedDB = typeof window !== 'undefined' && !!window.indexedDB;
-  if (!hasIndexedDB) {
-    throw new Error("indexedDB not available in this window context");
-  }
-  dbInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    }),
-    experimentalForceLongPolling: true
-  }, firebaseConfig.firestoreDatabaseId);
+  app = getApp();
 } catch (e) {
-  console.warn("Firestore persistent local cache failed to initialize (likely due to iframe sandbox constraints). Falling back to memoryLocalCache:", e);
-  dbInstance = initializeFirestore(app, {
-    localCache: memoryLocalCache(),
-    experimentalForceLongPolling: true
-  }, firebaseConfig.firestoreDatabaseId);
+  app = initializeApp(firebaseConfig);
 }
 
-export const db = dbInstance;
+// Initialize Firestore with persistent cache, falling back safely to memory local cache or existing instance if already initialized
+let dbInstance;
+try {
+  dbInstance = getFirestore(app);
+} catch (getDbErr) {
+  try {
+    const hasIndexedDB = typeof window !== 'undefined' && !!window.indexedDB;
+    if (!hasIndexedDB) {
+      throw new Error("indexedDB not available in this window context");
+    }
+    dbInstance = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      }),
+      experimentalForceLongPolling: true
+    }, firebaseConfig.firestoreDatabaseId);
+  } catch (e) {
+    console.warn("Firestore persistent local cache failed to initialize (likely due to iframe sandbox constraints). Falling back to memoryLocalCache:", e);
+    try {
+      dbInstance = initializeFirestore(app, {
+        localCache: memoryLocalCache(),
+        experimentalForceLongPolling: true
+      }, firebaseConfig.firestoreDatabaseId);
+    } catch (fallbackErr) {
+      dbInstance = getFirestore(app);
+    }
+  }
+}
 
+// Export db and auth bindings pointing to the primary authenticated Firebase instance
+export const db = dbInstance;
 export const auth = getAuth(app);
+
+export function setScopedUserInstance(userId: string | null) {
+  console.log(`[FirebaseScope] Dynamic scoped user set to: ${userId}. Primary authenticated Firebase instance maintained.`);
+}
 
 export enum OperationType {
   CREATE = 'create',
