@@ -1,0 +1,51 @@
+# Render Blueprint Configuration
+# You can use this file to deploy your services on Render.
+
+services:
+  # ==========================================
+  # OPTION 1: UNIFIED FULL-STACK WEB SERVICE
+  # (Recommended: Single service, runs both frontend and backend)
+  # ==========================================
+  - type: web
+    name: fullstack-unified-app
+    env: node
+    plan: free # Change to starter/standard if needed
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      # Add Firebase Admin or TURN configs here if required
+      # - key: FIREBASE_PROJECT_ID
+      #   sync: false
+
+  # ==========================================
+  # OPTION 2: SPLIT SERVICES (FRONTEND & BACKEND)
+  # (Use this if you prefer hosting frontend on CDN separately)
+  # ==========================================
+  
+  # 1. Backend Web Service
+  - type: web
+    name: backend-web-service
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build:server
+    startCommand: node dist/server.cjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+
+  # 2. Frontend Static Site
+  - type: static
+    name: frontend-static-site
+    buildCommand: npm install && npm run build:frontend
+    publishPath: dist
+    routes:
+      # Rewrites all requests to index.html for React client-side routing
+      - type: rewrite
+        source: /*
+        destination: /index.html
