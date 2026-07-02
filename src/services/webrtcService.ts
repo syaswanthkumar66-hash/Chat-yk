@@ -289,7 +289,9 @@ class WebRTCService {
           // Pre-clear any stale chunks in IndexedDB for this transfer ID
           try {
             const { voiceNoteCache } = await import('./voiceNoteCache');
+            const { audioStorageService } = await import('./audioStorageService');
             await voiceNoteCache.clearChunks(message.transferId);
+            await audioStorageService.clearChunks(message.transferId);
           } catch (err) {
             console.warn("Failed to pre-clear IndexedDB chunks:", err);
           }
@@ -303,7 +305,9 @@ class WebRTCService {
             // Robust reassembly: Store chunk inside IndexedDB to ensure we survive intermittent disconnects
             try {
               const { voiceNoteCache } = await import('./voiceNoteCache');
+              const { audioStorageService } = await import('./audioStorageService');
               await voiceNoteCache.saveChunk(message.transferId, message.chunkIndex, message.offset, message.data);
+              await audioStorageService.saveChunk(message.transferId, message.chunkIndex, message.offset, message.data);
             } catch (err) {
               console.warn("IndexedDB chunk storage failed, using memory buffer fallback:", err);
             }
@@ -360,9 +364,15 @@ class WebRTCService {
 
               try {
                 const { voiceNoteCache } = await import('./voiceNoteCache');
+                const { audioStorageService } = await import('./audioStorageService');
                 
                 // Fetch and sort chunks from IndexedDB Browser Storage manager
-                let dbChunks = await voiceNoteCache.getChunks(message.transferId);
+                let dbChunks = await audioStorageService.getChunks(message.transferId);
+
+                if (!dbChunks || dbChunks.length < message.totalChunksCount) {
+                  console.warn("audioStorageService missing chunks, falling back to voiceNoteCache");
+                  dbChunks = await voiceNoteCache.getChunks(message.transferId);
+                }
 
                 if (!dbChunks || dbChunks.length < message.totalChunksCount) {
                   console.warn("IndexedDB missing chunks, falling back to memory chunks list");
@@ -404,6 +414,7 @@ class WebRTCService {
 
                 // Clean up transient chunks from DB
                 await voiceNoteCache.clearChunks(message.transferId);
+                await audioStorageService.clearChunks(message.transferId);
 
                 // Send fully acknowledged status to sender
                 channel.send(JSON.stringify({
@@ -543,6 +554,27 @@ class WebRTCService {
             const activeTx = this.activeOutgoingTransfers.get(transferId);
             if (!activeTx) break; // Transfer canceled
 
+            // Monitor RTCDataChannel performance using getStats and bufferedAmount to dynamically adjust chunk sizes
+            const peerStats = await this.getPeerStats(peerId);
+            if (peerStats.rtt !== undefined) {
+              activeTx.rtts.push(peerStats.rtt);
+              if (activeTx.rtts.length > 20) activeTx.rtts.shift();
+            }
+
+            const currentRtt = peerStats.rtt || (activeTx.rtts.length > 0 ? activeTx.rtts.reduce((a, b) => a + b, 0) / activeTx.rtts.length : 50);
+            const buffered = channel.bufferedAmount;
+            const isHighLatency = currentRtt > 150;
+            const isCongested = buffered > 128 * 1024; // 128KB buffer backlog
+
+            if (isHighLatency || isCongested) {
+              // Dynamically shrink audio packet size during high latency or congestion periods
+              activeTx.currentChunkSize = Math.max(4096, activeTx.currentChunkSize - 4096);
+              console.log(`[QoS Adaptive Sizing] Network degraded. Shrinking packet size to ${activeTx.currentChunkSize} bytes. RTT: ${currentRtt.toFixed(1)}ms, Buffered: ${buffered} bytes`);
+            } else if (currentRtt < 80 && buffered < 32 * 1024) {
+              // Enlarge packets during stable, low-latency, uncongested network conditions to maximize throughput
+              activeTx.currentChunkSize = Math.min(65536, activeTx.currentChunkSize + 4096);
+            }
+
             const size = activeTx.currentChunkSize;
             const start = sentBytes;
             const end = Math.min(start + size, totalBytes);
@@ -630,6 +662,37 @@ class WebRTCService {
       this.dataChannels.delete(peerId);
     }
     this.pendingCandidates.delete(peerId);
+  }
+
+  private async getPeerStats(peerId: string): Promise<{ rtt?: number, packetLoss?: number, jitter?: number }> {
+    const pc = this.pcs.get(peerId);
+    if (!pc) return {};
+    try {
+      const stats = await pc.getStats();
+      let rtt: number | undefined;
+      let packetLoss: number | undefined;
+      let jitter: number | undefined;
+      
+      stats.forEach(report => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          if (typeof report.currentRoundTripTime === 'number') {
+            rtt = report.currentRoundTripTime * 1000; // convert to ms
+          }
+        }
+        if (report.type === 'inbound-rtp' || report.type === 'remote-inbound-rtp') {
+          if (typeof report.packetsLost === 'number') {
+            packetLoss = report.packetsLost;
+          }
+          if (typeof report.jitter === 'number') {
+            jitter = report.jitter * 1000; // convert to ms
+          }
+        }
+      });
+      return { rtt, packetLoss, jitter };
+    } catch (e) {
+      console.warn("Failed to get RTC stats for peer:", peerId, e);
+      return {};
+    }
   }
 
   private async applyPendingIceCandidates(peerId: string, pc: RTCPeerConnection) {

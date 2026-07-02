@@ -206,6 +206,7 @@ function InAppToastItem({
 export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const processedNotificationsRef = React.useRef<Set<string>>(new Set());
+  const pendingSyncRef = React.useRef<{ uid: string; data: any } | null>(null);
 
   // Fallback safety timeout to prevent getting stuck in splash loading screen under any circumstances
   useEffect(() => {
@@ -239,7 +240,34 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handleOnline = () => setIsOffline(false);
+    
+    const handleOnline = async () => {
+      setIsOffline(false);
+      console.log("Device is online. Triggering pending Firestore user sync...");
+      let pending = pendingSyncRef.current;
+      if (!pending) {
+        const stored = localStorage.getItem('pending_profile_sync');
+        if (stored) {
+          try {
+            pending = JSON.parse(stored);
+          } catch (e) {
+            console.error("Error parsing stored sync:", e);
+          }
+        }
+      }
+      
+      if (pending && auth.currentUser && auth.currentUser.uid === pending.uid) {
+        try {
+          await setDoc(doc(db, 'users', pending.uid), pending.data);
+          console.log("Retry Sync: Profile successfully synchronized to Firestore on online transition.");
+          pendingSyncRef.current = null;
+          localStorage.removeItem('pending_profile_sync');
+        } catch (setDocErr) {
+          console.warn("Retry Sync: Firestore setDoc failed on online transition, will retry next time:", setDocErr);
+        }
+      }
+    };
+    
     const handleOffline = () => setIsOffline(true);
 
     window.addEventListener('online', handleOnline);
@@ -313,25 +341,33 @@ export default function App() {
             console.log("Creating or restoring user profile local session...");
             login(resolvedProfile);
 
-            // Attempt to sync/save this profile to Firestore if Firestore is accessible
-            if (!getDocError) {
+            // Explicit check for Firestore availability before initiating 'setDoc' user creation.
+            const isFirestoreAvailable = navigator.onLine && !getDocError;
+
+            const userDataToRestore = {
+              id: resolvedProfile.id,
+              email: firebaseUser.email || 'developer@protocol.net',
+              username: resolvedProfile.username,
+              displayName: resolvedProfile.displayName,
+              avatar: resolvedProfile.avatar || '',
+              description: resolvedProfile.description || '',
+              isAdmin: resolvedProfile.isAdmin || false,
+              joinDate: resolvedProfile.joinDate || new Date().toISOString()
+            };
+
+            if (isFirestoreAvailable) {
               try {
-                const userDataToRestore = {
-                  id: resolvedProfile.id,
-                  email: firebaseUser.email || 'developer@protocol.net',
-                  username: resolvedProfile.username,
-                  displayName: resolvedProfile.displayName,
-                  avatar: resolvedProfile.avatar || '',
-                  description: resolvedProfile.description || '',
-                  isAdmin: resolvedProfile.isAdmin || false,
-                  joinDate: resolvedProfile.joinDate || new Date().toISOString()
-                };
                 await setDoc(doc(db, 'users', firebaseUser.uid), userDataToRestore);
                 console.log("Profile successfully synchronized to Firestore.");
               } catch (setDocErr) {
-                console.warn("Firestore setDoc failed during initial registration/restore (permission denied or unreachable):", setDocErr);
-                // We do NOT log out or fail because we have already successfully created/restored the local session!
+                console.warn("Firestore setDoc failed during initial registration, queuing for offline retry:", setDocErr);
+                pendingSyncRef.current = { uid: firebaseUser.uid, data: userDataToRestore };
+                localStorage.setItem('pending_profile_sync', JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
               }
+            } else {
+              console.log("Firestore currently unreachable. Keeping local session and queuing profile for offline retry.");
+              pendingSyncRef.current = { uid: firebaseUser.uid, data: userDataToRestore };
+              localStorage.setItem('pending_profile_sync', JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
             }
           }
         } catch (err) {
