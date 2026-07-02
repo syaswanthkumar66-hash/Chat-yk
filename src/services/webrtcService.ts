@@ -12,6 +12,7 @@ class WebRTCService {
   private localStream: MediaStream | null = null;
   private iceServers: any[] = [{ urls: 'stun:stun.l.google.com:19302' }];
   private currentRoomId: string | null = null;
+  private dataChannels: Map<string, RTCDataChannel> = new Map();
 
   constructor() {
     this.fetchIceConfig();
@@ -84,6 +85,20 @@ class WebRTCService {
       });
     }
 
+    // Setup DataChannel for Chat (if we are the deterministic initiator)
+    const myId = useAppStore.getState().user?.id;
+    const isInitiator = myId && peerId && myId < peerId;
+    if (roomId.startsWith('chat-webrtc-') && isInitiator) {
+      console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (initiator: true)`);
+      const dc = pc.createDataChannel("audio_transfer", { ordered: true });
+      this.setupDataChannel(peerId, dc);
+    }
+
+    pc.ondatachannel = (event) => {
+      console.log(`Received remote data channel from peer ${peerId}:`, event.channel.label);
+      this.setupDataChannel(peerId, event.channel);
+    };
+
     // Handle ICE candidates and transmit them via Socket.io
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -124,12 +139,217 @@ class WebRTCService {
     return pc;
   }
 
+  private setupDataChannel(peerId: string, channel: RTCDataChannel) {
+    this.dataChannels.set(peerId, channel);
+
+    channel.onopen = () => {
+      console.log(`Data channel with peer ${peerId} is OPEN`);
+    };
+
+    channel.onclose = () => {
+      console.log(`Data channel with peer ${peerId} is CLOSED`);
+      this.dataChannels.delete(peerId);
+    };
+
+    // Buffer of received chunks for active transfers
+    // Map of transferId -> { mimeType, totalChunks, messageId, chunks: Map<number, string> }
+    const activeIncomingTransfers = new Map<string, {
+      mimeType: string;
+      totalChunks: number;
+      messageId?: string;
+      chunks: Map<number, string>;
+    }>();
+
+    channel.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'transfer_start') {
+          console.log(`Starting incoming audio transfer:`, message);
+          activeIncomingTransfers.set(message.transferId, {
+            mimeType: message.mimeType || 'audio/webm',
+            totalChunks: message.totalChunks,
+            messageId: message.messageId,
+            chunks: new Map()
+          });
+        } else if (message.type === 'transfer_chunk') {
+          const transfer = activeIncomingTransfers.get(message.transferId);
+          if (transfer) {
+            transfer.chunks.set(message.chunkIndex, message.data);
+            console.log(`Received chunk ${message.chunkIndex + 1}/${transfer.totalChunks} for transfer ${message.transferId}`);
+          }
+        } else if (message.type === 'transfer_complete') {
+          const transfer = activeIncomingTransfers.get(message.transferId);
+          if (transfer) {
+            console.log(`Transfer complete for ${message.transferId}. Reassembling audio file...`);
+            // Reassemble
+            const chunkArray: string[] = [];
+            for (let i = 0; i < transfer.totalChunks; i++) {
+              const chunk = transfer.chunks.get(i);
+              if (chunk) {
+                chunkArray.push(chunk);
+              }
+            }
+
+            // Convert Base64 chunks to blobs
+            const byteCharactersArray = chunkArray.map(base64 => atob(base64));
+            const byteArrays = byteCharactersArray.map(byteCharacters => {
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              return new Uint8Array(byteNumbers);
+            });
+
+            const audioBlob = new Blob(byteArrays, { type: transfer.mimeType });
+            const audioUrl = URL.createObjectURL(audioBlob);
+
+            console.log(`Audio successfully reassembled! Playback URL:`, audioUrl);
+
+            // Dispatch a custom event to notify the ChatDetail component to show/play the received audio
+            window.dispatchEvent(new CustomEvent('webrtc_audio_received', {
+              detail: {
+                transferId: message.transferId,
+                messageId: transfer.messageId || message.messageId,
+                from: peerId,
+                url: audioUrl,
+                blob: audioBlob,
+                fileSize: `${(audioBlob.size / 1024).toFixed(1)} KB`
+              }
+            }));
+
+            activeIncomingTransfers.delete(message.transferId);
+          }
+        }
+      } catch (err) {
+        console.error("Error handling data channel message:", err);
+      }
+    };
+  }
+
+  async joinChatRoom(roomId: string, peerId: string) {
+    this.currentRoomId = roomId;
+    console.log(`Joining WebRTC chat room: ${roomId} with peer ${peerId}`);
+    
+    // Fetch ICE config if needed
+    if (this.iceServers.length <= 1) {
+      await this.fetchIceConfig(2, 500);
+    }
+
+    const socket = useAppStore.getState().socket;
+    if (socket) {
+      // Join room
+      socket.emit('join_call', { roomId, userId: useAppStore.getState().user?.id });
+
+      // Announce presence
+      socket.emit('sfu_signal', {
+        roomId,
+        from: useAppStore.getState().user?.id,
+        signal: {
+          type: 'peer_joined',
+          peerId: useAppStore.getState().user?.id
+        }
+      });
+    }
+  }
+
+  leaveChatRoom(roomId: string, peerId: string) {
+    console.log(`Leaving WebRTC chat room: ${roomId} with peer ${peerId}`);
+    const socket = useAppStore.getState().socket;
+    if (socket) {
+      socket.emit('end_call', { roomId });
+    }
+    this.removePeer(peerId);
+    if (this.currentRoomId === roomId) {
+      this.currentRoomId = null;
+    }
+  }
+
+  async sendAudioChunks(peerId: string, blob: Blob, mimeType: string, messageId?: string): Promise<boolean> {
+    const channel = this.dataChannels.get(peerId);
+    if (!channel || channel.readyState !== 'open') {
+      console.warn(`Data channel with peer ${peerId} is not open or available.`);
+      return false;
+    }
+
+    const transferId = `tf-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    
+    // Chunk size: 16KB to stay safe with RTCDataChannel limits
+    const CHUNK_SIZE = 16384; 
+    const reader = new FileReader();
+
+    return new Promise<boolean>((resolve) => {
+      reader.onload = async (e) => {
+        const arrayBuffer = e.target?.result as ArrayBuffer;
+        if (!arrayBuffer) {
+          resolve(false);
+          return;
+        }
+
+        const totalChunks = Math.ceil(arrayBuffer.byteLength / CHUNK_SIZE);
+        console.log(`Sending audio over data channel to ${peerId}. Size: ${arrayBuffer.byteLength} bytes, total chunks: ${totalChunks}`);
+
+        try {
+          // 1. Send transfer_start
+          channel.send(JSON.stringify({
+            type: 'transfer_start',
+            transferId,
+            mimeType,
+            messageId,
+            totalChunks
+          }));
+
+          // 2. Send chunks sequentially
+          for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, arrayBuffer.byteLength);
+            const chunkBuffer = arrayBuffer.slice(start, end);
+            
+            // Convert array buffer to base64
+            const base64 = btoa(
+              new Uint8Array(chunkBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+            );
+
+            channel.send(JSON.stringify({
+              type: 'transfer_chunk',
+              transferId,
+              chunkIndex: i,
+              data: base64
+            }));
+
+            // Avoid congestion by yielding/waiting slightly between chunks
+            await new Promise(r => setTimeout(r, 25));
+          }
+
+          // 3. Send transfer_complete
+          channel.send(JSON.stringify({
+            type: 'transfer_complete',
+            transferId,
+            messageId
+          }));
+
+          console.log(`Audio transfer completed for ${transferId}`);
+          resolve(true);
+        } catch (sendErr) {
+          console.error("Failed to transmit data chunks over RTCDataChannel:", sendErr);
+          resolve(false);
+        }
+      };
+
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+
   private removePeer(peerId: string) {
     const pc = this.pcs.get(peerId);
     if (pc) {
       console.log(`Cleaning up connection for peer ${peerId}`);
       pc.close();
       this.pcs.delete(peerId);
+    }
+    const dc = this.dataChannels.get(peerId);
+    if (dc) {
+      dc.close();
+      this.dataChannels.delete(peerId);
     }
   }
 

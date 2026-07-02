@@ -194,7 +194,8 @@ interface AppState {
   promoteUser: (userId: string) => void;
   updateUserByAdmin: (userId: string, data: Partial<UserProfile>) => void;
   addUser: (user: Partial<UserProfile> & Omit<UserProfile, 'id'>) => void;
-  sendMessage: (chatId: string | null, recipientId: string | null, text: string, type?: Message['type'], fileUrl?: string, fileSize?: string, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean) => void;
+  sendMessage: (chatId: string | null, recipientId: string | null, text: string, type?: Message['type'], fileUrl?: string, fileSize?: string, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean, customId?: string) => void;
+  updateMessageFileUrl: (messageId: string, fileUrl: string, fileSize?: string) => void;
   deletedMsgIds: string[];
   globallyDeletedIds: string[];
   deleteMessageLocally: (messageId: string) => void;
@@ -897,14 +898,24 @@ export const useAppStore = create<AppState>((set) => ({
         }
       }
 
+      const messageId = data.id || data.messageId || `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      
+      let resolvedFileUrl = data.fileUrl;
+      let resolvedFileSize = data.fileSize;
+      const cached = (window as any).__webrtcAudioUrlCache?.[messageId];
+      if (cached) {
+        resolvedFileUrl = cached.fileUrl;
+        resolvedFileSize = cached.fileSize;
+      }
+
       const newMessage: Message = {
-        id: data.id || data.messageId || `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        id: messageId,
         senderId: data.senderId,
         text: decryptedText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         type: data.type || 'text',
-        fileUrl: data.fileUrl,
-        fileSize: data.fileSize,
+        fileUrl: resolvedFileUrl,
+        fileSize: resolvedFileSize,
         encryptedFileKey: data.encryptedFileKey,
         iv: data.iv,
         isE2E: !!(data.iv || data.encryptedFileKey || (data.text && typeof data.text === 'string' && data.text.includes('"iv"'))),
@@ -1562,11 +1573,11 @@ export const useAppStore = create<AppState>((set) => ({
       ]
     };
   }),
-  sendMessage: (chatId, recipientId, text, type = 'text', fileUrl, fileSize, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean) => set((state) => {
+  sendMessage: (chatId, recipientId, text, type = 'text', fileUrl, fileSize, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean, customId?: string) => set((state) => {
     const isSocketConnected = state.socket && state.socket.connected;
     let offlineMessageQueue = [...state.offlineMessageQueue];
     const newMessage: Message = {
-      id: `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: customId || `m-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       senderId: state.user?.id || 'u1',
       senderName: state.user?.displayName || 'You',
       text,
@@ -1601,6 +1612,7 @@ export const useAppStore = create<AppState>((set) => ({
     if (state.socket && state.socket.connected) {
       if (isGroup && chat?.participants) {
         state.socket.emit('send_message', {
+          id: newMessage.id,
           groupId: chatId,
           text: e2eData ? e2eData.encryptedText : text,
           type,
@@ -1614,6 +1626,7 @@ export const useAppStore = create<AppState>((set) => ({
         const targetId = recipientId || chat?.participants.find(p => p.id !== state.user?.id)?.id;
         if (targetId) {
           state.socket.emit('send_message', {
+            id: newMessage.id,
             recipientId: targetId,
             text: e2eData ? e2eData.encryptedText : text,
             type,
@@ -1768,6 +1781,14 @@ export const useAppStore = create<AppState>((set) => ({
     }
 
     return { chats: updatedChats, offlineMessageQueue, ...additionalState };
+  }),
+  updateMessageFileUrl: (messageId, fileUrl, fileSize) => set((state) => {
+    return {
+      chats: state.chats.map(c => ({
+        ...c,
+        messages: c.messages?.map(m => m.id === messageId ? { ...m, fileUrl, fileSize: fileSize || m.fileSize } : m) || []
+      }))
+    };
   }),
 }));
 

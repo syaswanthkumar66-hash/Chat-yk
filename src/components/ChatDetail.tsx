@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
+import { webrtcService } from '../services/webrtcService';
 import { Icon, Avatar, Button, Card, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GroupInfo } from './GroupInfo';
@@ -391,6 +392,48 @@ export const ChatDetail = () => {
   const recipient = users.find(u => u.id === activeRecipientId);
   const messages = chat?.messages || [];
 
+  useEffect(() => {
+    if (!user || (!activeRecipientId && !chat)) return;
+    const peerId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
+    if (!peerId) return;
+
+    // Sort IDs alphabetically to generate a unique, deterministic room name
+    const sortedIds = [user.id, peerId].sort();
+    const roomName = `chat-webrtc-${sortedIds[0]}-${sortedIds[1]}`;
+
+    console.log(`Connecting direct WebRTC session for room ${roomName} with peer ${peerId}`);
+    webrtcService.joinChatRoom(roomName, peerId);
+
+    const handleAudioReceived = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { messageId, from, url, fileSize } = customEvent.detail;
+      if (from === peerId) {
+        console.log(`WebRTC: Audio received from ${from}. Message ID: ${messageId || "unknown"}. URL: ${url}`);
+        
+        // Cache globally so any delayed socket message picks it up instantly
+        if (messageId) {
+          (window as any).__webrtcAudioUrlCache = (window as any).__webrtcAudioUrlCache || {};
+          (window as any).__webrtcAudioUrlCache[messageId] = { fileUrl: url, fileSize };
+
+          // Update message in real-time in our store if it has already been rendered!
+          const { updateMessageFileUrl } = useAppStore.getState();
+          updateMessageFileUrl(messageId, url, fileSize);
+        }
+
+        setToast("Voice message received directly via WebRTC!");
+        setTimeout(() => setToast(null), 3000);
+      }
+    };
+
+    window.addEventListener('webrtc_audio_received', handleAudioReceived);
+
+    return () => {
+      console.log(`Disconnecting direct WebRTC session for room ${roomName} with peer ${peerId}`);
+      window.removeEventListener('webrtc_audio_received', handleAudioReceived);
+      webrtcService.leaveChatRoom(roomName, peerId);
+    };
+  }, [user, activeRecipientId, chat]);
+
   const handleEmojiClick = (emojiData: EmojiClickData) => {
     setMessageText(prev => prev + emojiData.emoji);
   };
@@ -398,21 +441,45 @@ export const ChatDetail = () => {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder.current = new MediaRecorder(stream);
+      
+      let options: any = {};
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/aac',
+        'audio/wav'
+      ];
+      
+      let selectedMimeType = '';
+      for (const type of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          options = { mimeType: type };
+          selectedMimeType = type;
+          break;
+        }
+      }
+      
+      console.log("Selected recording mimeType:", selectedMimeType);
+      mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
 
       mediaRecorder.current.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunks.current.push(e.data);
+        if (e.data.size > 0) {
+          audioChunks.current.push(e.data);
+        }
       };
 
       mediaRecorder.current.onstop = () => {
-        const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
+        const finalMime = selectedMimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunks.current, { type: finalMime });
         const audioUrl = URL.createObjectURL(audioBlob);
         setCapturedMedia(prev => [...prev, { type: 'audio', url: audioUrl, blob: audioBlob }]);
         stream.getTracks().forEach(track => track.stop());
       };
 
-      mediaRecorder.current.start();
+      mediaRecorder.current.start(250); // Periodic chunks every 250ms for maximum reliability
       setIsRecording(true);
       setRecordingDuration(0);
       recordingTimer.current = setInterval(() => {
@@ -545,6 +612,18 @@ export const ChatDetail = () => {
 
         const fileSizeStr = `${(uploadBlob.size / 1024 / 1024).toFixed(2)} MB`;
         const isOffline = !navigator.onLine || !useAppStore.getState().socket?.connected;
+        
+        const generatedMessageId = `m-webrtc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+        // WebRTC direct chunk-by-chunk P2P audio transmission
+        if (media.type === 'audio' && targetId && !isGroup) {
+          try {
+            console.log(`WebRTC: Sending chunk-by-chunk audio message ${generatedMessageId} directly to peer ${targetId}...`);
+            webrtcService.sendAudioChunks(targetId, media.blob, media.blob.type, generatedMessageId);
+          } catch (rtcErr) {
+            console.warn("Direct WebRTC audio chunk sending failed, relying on server backup", rtcErr);
+          }
+        }
 
         if (isOffline) {
           console.log("Offline detected, converting media to base64 data URL for offline Firebase storage...");
@@ -560,7 +639,7 @@ export const ChatDetail = () => {
             iv: e2eFileIv!
           } : undefined;
 
-          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData);
+          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData, undefined, generatedMessageId);
           continue;
         }
 
@@ -587,7 +666,7 @@ export const ChatDetail = () => {
               iv: e2eFileIv! // using file iv just as placeholder, actual is inside encTextStr JSON
             } : undefined;
 
-            sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData);
+            sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData, undefined, generatedMessageId);
             uploadSuccess = true;
           } else {
             console.error("Failed to upload media to server");
@@ -610,7 +689,7 @@ export const ChatDetail = () => {
             iv: e2eFileIv!
           } : undefined;
 
-          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData);
+          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData, undefined, generatedMessageId);
         }
       } catch (error) {
         console.error("Error uploading media:", error);
