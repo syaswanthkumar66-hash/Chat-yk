@@ -46,6 +46,7 @@ class WebRTCService {
     sentTimes: Map<number, number>;
     currentChunkSize: number;
     rtts: number[];
+    estimatedBandwidth?: number; // Real-time estimated throughput in bytes/sec
   }>();
 
   private activeIncomingTransfers = new Map<string, {
@@ -212,13 +213,24 @@ class WebRTCService {
 
               const averageRtt = activeTx.rtts.reduce((a, b) => a + b, 0) / activeTx.rtts.length;
 
-              // Dynamically adjust chunk size based on estimated connection RTT
-              if (averageRtt < 80) {
-                // High-speed link: expand chunk size up to 64KB for maximum transport efficiency
+              // Monitor real-time bandwidth performance
+              const chunkInfo = activeTx.sentChunks.get(message.chunkIndex);
+              const chunkSize = chunkInfo ? chunkInfo.size : 16384;
+              const durationSeconds = Math.max(0.001, rtt / 1000); // Avoid division by zero
+              const instantaneousBps = chunkSize / durationSeconds;
+
+              // Exponential Moving Average (EMA) of bandwidth
+              activeTx.estimatedBandwidth = activeTx.estimatedBandwidth
+                ? (0.7 * activeTx.estimatedBandwidth + 0.3 * instantaneousBps)
+                : instantaneousBps;
+
+              // Dynamically adjust audio data block (chunk) sizes based on estimated bandwidth and RTT
+              if (averageRtt < 90 && activeTx.estimatedBandwidth > 150000) {
+                // High-performance network: safely expand block size up to 64KB
                 activeTx.currentChunkSize = Math.min(65536, activeTx.currentChunkSize + 4096);
-              } else if (averageRtt > 180) {
-                // Low-speed / congestion: contract chunk size down to 4KB to maintain transport stability
-                activeTx.currentChunkSize = Math.max(4096, activeTx.currentChunkSize - 2048);
+              } else if (averageRtt > 180 || activeTx.estimatedBandwidth < 50000) {
+                // High latency or low bandwidth: immediately throttle chunk size down to maintain sync and prevent packet loss
+                activeTx.currentChunkSize = Math.max(4096, activeTx.currentChunkSize - 4096);
               }
             }
           }
@@ -226,6 +238,11 @@ class WebRTCService {
           const activeTx = this.activeOutgoingTransfers.get(message.transferId);
           if (activeTx) {
             console.warn(`Peer requested retransmission of ${message.missingIndices.length} missing chunks for transfer ${message.transferId}`);
+            
+            // Network performance indicator: Packet loss detected!
+            // Adjust audio block sizes downwards to stabilize transport
+            activeTx.currentChunkSize = Math.max(4096, Math.floor(activeTx.currentChunkSize * 0.75));
+
             for (const idx of message.missingIndices) {
               const chunkInfo = activeTx.sentChunks.get(idx);
               if (chunkInfo) {
@@ -268,12 +285,28 @@ class WebRTCService {
             receivedIndices: new Set(),
             lastChunkReceivedAt: Date.now()
           });
+
+          // Pre-clear any stale chunks in IndexedDB for this transfer ID
+          try {
+            const { voiceNoteCache } = await import('./voiceNoteCache');
+            await voiceNoteCache.clearChunks(message.transferId);
+          } catch (err) {
+            console.warn("Failed to pre-clear IndexedDB chunks:", err);
+          }
         } else if (message.type === 'transfer_chunk') {
           const transfer = this.activeIncomingTransfers.get(message.transferId);
           if (transfer) {
             transfer.chunks.set(message.chunkIndex, { offset: message.offset, data: message.data });
             transfer.receivedIndices.add(message.chunkIndex);
             transfer.lastChunkReceivedAt = Date.now();
+
+            // Robust reassembly: Store chunk inside IndexedDB to ensure we survive intermittent disconnects
+            try {
+              const { voiceNoteCache } = await import('./voiceNoteCache');
+              await voiceNoteCache.saveChunk(message.transferId, message.chunkIndex, message.offset, message.data);
+            } catch (err) {
+              console.warn("IndexedDB chunk storage failed, using memory buffer fallback:", err);
+            }
 
             // ACK the received chunk immediately
             channel.send(JSON.stringify({
@@ -323,56 +356,77 @@ class WebRTCService {
                 missingIndices
               }));
             } else {
-              console.log(`All ${message.totalChunksCount} chunks received successfully for ${message.transferId}! Reassembling...`);
+              console.log(`All ${message.totalChunksCount} chunks received successfully for ${message.transferId}! Reassembling from IndexedDB...`);
 
-              const chunkArray: string[] = [];
-              for (let i = 0; i < message.totalChunksCount; i++) {
-                const c = transfer.chunks.get(i);
-                if (c) chunkArray.push(c.data);
-              }
-
-              // Decode Base64 to Blobs
-              const byteCharactersArray = chunkArray.map(base64 => atob(base64));
-              const byteArrays = byteCharactersArray.map(byteCharacters => {
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i);
-                }
-                return new Uint8Array(byteNumbers);
-              });
-
-              const audioBlob = new Blob(byteArrays, { type: transfer.mimeType });
-              const audioUrl = URL.createObjectURL(audioBlob);
-
-              // Cache immediately in browser storage (IndexedDB)
-              const cacheKey = transfer.messageId || message.transferId;
               try {
                 const { voiceNoteCache } = await import('./voiceNoteCache');
+                
+                // Fetch and sort chunks from IndexedDB Browser Storage manager
+                let dbChunks = await voiceNoteCache.getChunks(message.transferId);
+
+                if (!dbChunks || dbChunks.length < message.totalChunksCount) {
+                  console.warn("IndexedDB missing chunks, falling back to memory chunks list");
+                  dbChunks = [];
+                  for (let i = 0; i < message.totalChunksCount; i++) {
+                    const c = transfer.chunks.get(i);
+                    if (c) {
+                      dbChunks.push({
+                        chunkIndex: i,
+                        offset: c.offset,
+                        data: c.data
+                      });
+                    }
+                  }
+                }
+
+                // Explicit sorting to ensure proper order during reassembly
+                dbChunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+                const chunkArray = dbChunks.map(c => c.data);
+
+                // Decode Base64 to Blobs
+                const byteCharactersArray = chunkArray.map(base64 => atob(base64));
+                const byteArrays = byteCharactersArray.map(byteCharacters => {
+                  const byteNumbers = new Array(byteCharacters.length);
+                  for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                  }
+                  return new Uint8Array(byteNumbers);
+                });
+
+                const audioBlob = new Blob(byteArrays, { type: transfer.mimeType });
+                const audioUrl = URL.createObjectURL(audioBlob);
+
+                // Cache immediately in browser storage (IndexedDB)
+                const cacheKey = transfer.messageId || message.transferId;
                 await voiceNoteCache.set(cacheKey, audioBlob);
                 console.log(`Saved voice note to IndexedDB cache successfully: ${cacheKey}`);
-              } catch (cacheErr) {
-                console.error("Failed to cache received voice note in IndexedDB:", cacheErr);
+
+                // Clean up transient chunks from DB
+                await voiceNoteCache.clearChunks(message.transferId);
+
+                // Send fully acknowledged status to sender
+                channel.send(JSON.stringify({
+                  type: 'transfer_acknowledged',
+                  transferId: message.transferId
+                }));
+
+                // Dispatch success event to let ChatDetail display the new audio message
+                window.dispatchEvent(new CustomEvent('webrtc_audio_received', {
+                  detail: {
+                    transferId: message.transferId,
+                    messageId: transfer.messageId || message.messageId,
+                    from: peerId,
+                    url: audioUrl,
+                    blob: audioBlob,
+                    fileSize: `${(audioBlob.size / 1024).toFixed(1)} KB`
+                  }
+                }));
+
+                this.activeIncomingTransfers.delete(message.transferId);
+              } catch (reassembleErr) {
+                console.error("Failed to reassemble received voice note chunks:", reassembleErr);
               }
-
-              // Send fully acknowledged status to sender
-              channel.send(JSON.stringify({
-                type: 'transfer_acknowledged',
-                transferId: message.transferId
-              }));
-
-              // Dispatch success event to let ChatDetail display the new audio message
-              window.dispatchEvent(new CustomEvent('webrtc_audio_received', {
-                detail: {
-                  transferId: message.transferId,
-                  messageId: transfer.messageId || message.messageId,
-                  from: peerId,
-                  url: audioUrl,
-                  blob: audioBlob,
-                  fileSize: `${(audioBlob.size / 1024).toFixed(1)} KB`
-                }
-              }));
-
-              this.activeIncomingTransfers.delete(message.transferId);
             }
           }
         }

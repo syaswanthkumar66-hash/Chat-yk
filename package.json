@@ -7,7 +7,7 @@
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build:frontend": "vite build",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "build": "npm run build:frontend && npm run build:server",
+    "build": "mkdir -p dist && cp -r server/ tsconfig.json package.json vapid-keys.json dist/ 2>/dev/null || true && npm run build:frontend && npm run build:server",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",

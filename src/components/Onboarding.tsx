@@ -123,7 +123,13 @@ export const Onboarding = () => {
           }
           
           const userDocRef = doc(db, 'users', user.uid);
-          const userDoc = await getDoc(userDocRef);
+          let userDoc;
+          try {
+            userDoc = await getDoc(userDocRef);
+          } catch (e) {
+            console.warn("Firestore getDoc failed during redirect handling, falling back safely:", e);
+            userDoc = { exists: () => false, data: () => null };
+          }
           
           if (userDoc.exists()) {
             const userData = userDoc.data();
@@ -172,7 +178,13 @@ export const Onboarding = () => {
         try {
           setIsLoading(true);
           const userDocRef = doc(db, 'users', firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
+          let userDoc;
+          try {
+            userDoc = await getDoc(userDocRef);
+          } catch (e) {
+            console.warn("Firestore getDoc failed during active session check, falling back safely:", e);
+            userDoc = { exists: () => false, data: () => null };
+          }
           
           if (userDoc.exists()) {
             const userData = userDoc.data();
@@ -229,7 +241,13 @@ export const Onboarding = () => {
       }
       
       const userDocRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userDocRef);
+      let userDoc;
+      try {
+        userDoc = await getDoc(userDocRef);
+      } catch (e) {
+        console.warn("Firestore getDoc failed during Google login, falling back safely:", e);
+        userDoc = { exists: () => false, data: () => null };
+      }
       
       if (userDoc.exists()) {
         const userData = userDoc.data();
@@ -302,7 +320,13 @@ export const Onboarding = () => {
 
       // Sync user profile
       const userDocRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userDocRef);
+      let userDoc;
+      try {
+        userDoc = await getDoc(userDocRef);
+      } catch (e) {
+        console.warn("Firestore getDoc failed during email auth, falling back safely:", e);
+        userDoc = { exists: () => false, data: () => null };
+      }
 
       if (userDoc.exists()) {
         const userData = userDoc.data();

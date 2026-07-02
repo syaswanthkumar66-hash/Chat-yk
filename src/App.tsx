@@ -265,8 +265,17 @@ export default function App() {
         }
 
         try {
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          if (userDoc.exists()) {
+          let userDoc = null;
+          let getDocError = null;
+          
+          try {
+            userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          } catch (e) {
+            getDocError = e;
+            console.warn("Firestore getDoc failed (possibly due to permission-denied or offline):", e);
+          }
+
+          if (userDoc && userDoc.exists()) {
             const userData = userDoc.data();
             login({
               id: firebaseUser.uid,
@@ -289,34 +298,47 @@ export default function App() {
               }
             }
           } else {
-            // Document does not exist in Firestore, but Firebase User exists.
-            if (cachedUserObj && cachedUserObj.id === firebaseUser.uid) {
-              console.log("Auto-restoring cached user profile to Firestore...");
+            // Document does not exist in Firestore, or getDoc failed.
+            // Determine the best profile data to use (cached or default)
+            const resolvedProfile = (cachedUserObj && cachedUserObj.id === firebaseUser.uid) ? cachedUserObj : {
+              id: firebaseUser.uid,
+              username: firebaseUser.email?.split('@')[0] || 'user_' + firebaseUser.uid.substring(0, 5),
+              displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'New User',
+              avatar: firebaseUser.photoURL || '',
+              description: 'Protocol user profile',
+              isAdmin: false,
+              joinDate: new Date().toISOString()
+            };
+
+            console.log("Creating or restoring user profile local session...");
+            login(resolvedProfile);
+
+            // Attempt to sync/save this profile to Firestore if Firestore is accessible
+            if (!getDocError) {
               try {
                 const userDataToRestore = {
-                  id: cachedUserObj.id,
+                  id: resolvedProfile.id,
                   email: firebaseUser.email || 'developer@protocol.net',
-                  username: cachedUserObj.username,
-                  displayName: cachedUserObj.displayName,
-                  avatar: cachedUserObj.avatar || '',
-                  description: cachedUserObj.description || '',
-                  isAdmin: cachedUserObj.isAdmin || false,
-                  joinDate: cachedUserObj.joinDate || new Date().toISOString()
+                  username: resolvedProfile.username,
+                  displayName: resolvedProfile.displayName,
+                  avatar: resolvedProfile.avatar || '',
+                  description: resolvedProfile.description || '',
+                  isAdmin: resolvedProfile.isAdmin || false,
+                  joinDate: resolvedProfile.joinDate || new Date().toISOString()
                 };
                 await setDoc(doc(db, 'users', firebaseUser.uid), userDataToRestore);
-                console.log("Cached user profile successfully auto-restored.");
-              } catch (restoreErr) {
-                console.error("Failed to auto-restore cached user profile:", restoreErr);
+                console.log("Profile successfully synchronized to Firestore.");
+              } catch (setDocErr) {
+                console.warn("Firestore setDoc failed during initial registration/restore (permission denied or unreachable):", setDocErr);
+                // We do NOT log out or fail because we have already successfully created/restored the local session!
               }
-            } else {
-              useAppStore.setState({ isLoggedIn: false, user: null });
             }
           }
         } catch (err) {
-          console.error("Error fetching user data:", err);
-          // Firestore connection failed (offline / unavailable). Fallback to cached user if matching!
+          console.error("General error during user auth state handling:", err);
+          // General fallback: if we have a cached user, let them continue using the app
           if (cachedUserObj && cachedUserObj.id === firebaseUser.uid) {
-            console.log("Firestore error occurred. Continuing with cached user session to maintain offline/local storage compatibility.");
+            console.log("Continuing with cached user session to maintain offline/local storage compatibility.");
             useAppStore.setState({ isLoggedIn: true });
           } else {
             useAppStore.setState({ isLoggedIn: false, user: null });
