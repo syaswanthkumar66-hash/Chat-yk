@@ -739,6 +739,32 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("message_delivered", (data) => {
+      const { messageId, senderId, chatId } = data;
+      console.log(`Message delivered: ${messageId} from ${senderId} in chat ${chatId}`);
+      const senderSocketId = users.get(senderId);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("message_status_update", {
+          chatId,
+          messageId,
+          status: 'delivered'
+        });
+      }
+    });
+
+    socket.on("message_read", (data) => {
+      const { messageId, senderId, chatId } = data;
+      console.log(`Message read: ${messageId} from ${senderId} in chat ${chatId}`);
+      const senderSocketId = users.get(senderId);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("message_status_update", {
+          chatId,
+          messageId,
+          status: 'read'
+        });
+      }
+    });
+
     socket.on("send_message", async (data) => {
       const { recipientId, groupId, recipientIds, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
       const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, sid]) => sid === socket.id)?.[0];
@@ -1286,9 +1312,35 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       userMemSubs.push(subscription);
       memorySubscriptions.set(userId, userMemSubs);
 
+      // Remove this endpoint from any other users' memory subscriptions to prevent duplicate delivery/collisions
+      for (const [memUserId, memSubs] of memorySubscriptions.entries()) {
+        if (memUserId !== userId && Array.isArray(memSubs)) {
+          const updated = memSubs.filter((s: any) => s.endpoint !== subscription.endpoint);
+          if (updated.length !== memSubs.length) {
+            memorySubscriptions.set(memUserId, updated);
+            console.log(`Removed duplicate subscription endpoint from user memory: ${memUserId}`);
+          }
+        }
+      }
+
       // Save to Firestore if available
       if (db) {
         try {
+          // Scan and clean other users' Firestore subscriptions containing this endpoint
+          const allSubsSnap = await db.collection('pushSubscriptions').get();
+          for (const doc of allSubsSnap.docs) {
+            if (doc.id === userId) continue;
+            const subData = doc.data();
+            if (subData && Array.isArray(subData.subscriptions)) {
+              const matched = subData.subscriptions.some((s: any) => s.endpoint === subscription.endpoint);
+              if (matched) {
+                const updated = subData.subscriptions.filter((s: any) => s.endpoint !== subscription.endpoint);
+                await doc.ref.set({ subscriptions: updated });
+                console.log(`Removed duplicate subscription endpoint from other user: ${doc.id}`);
+              }
+            }
+          }
+
           const docRef = db.collection('pushSubscriptions').doc(userId);
           const docSnap = await docRef.get();
           let subscriptions: any[] = [];
@@ -1325,6 +1377,45 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     } catch (err: any) {
       console.error("Error saving subscription on backend:", err);
       res.status(500).json({ error: err.message || "Failed to save subscription" });
+    }
+  });
+
+  app.post("/api/remove-subscription", async (req, res) => {
+    try {
+      const { userId, endpoint } = req.body;
+      if (!userId || !endpoint) {
+        return res.status(400).json({ error: "Missing userId or endpoint" });
+      }
+
+      // Update memory cache
+      let userMemSubs = memorySubscriptions.get(userId) || [];
+      if (Array.isArray(userMemSubs)) {
+        userMemSubs = userMemSubs.filter((s: any) => s.endpoint !== endpoint);
+        memorySubscriptions.set(userId, userMemSubs);
+      }
+
+      // Update Firestore if available
+      if (db) {
+        try {
+          const docRef = db.collection('pushSubscriptions').doc(userId);
+          const docSnap = await docRef.get();
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            if (data && Array.isArray(data.subscriptions)) {
+              const updated = data.subscriptions.filter((s: any) => s.endpoint !== endpoint);
+              await docRef.set({ subscriptions: updated });
+              console.log(`Removed subscription endpoint from Firestore for user ${userId}`);
+            }
+          }
+        } catch (dbErr: any) {
+          console.warn("Failed to remove push subscription from Firestore:", dbErr.message);
+        }
+      }
+
+      res.json({ success: true, message: "Subscription removed successfully" });
+    } catch (err: any) {
+      console.error("Error removing subscription on backend:", err);
+      res.status(500).json({ error: err.message || "Failed to remove subscription" });
     }
   });
 

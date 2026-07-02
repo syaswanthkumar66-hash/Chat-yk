@@ -150,12 +150,32 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   }, [msg.fileUrl, msg.url, msg.encryptedFileKey, msg.iv, isOwn, msg.recipientId, msg.senderId, msg.id, msg.type]);
 
   useEffect(() => {
+    if (msg.type === 'audio' && msg.fileSize && msg.fileSize.includes('|')) {
+      const parts = msg.fileSize.split('|');
+      const timePart = parts[0].trim();
+      const timeParts = timePart.split(':');
+      if (timeParts.length === 2) {
+        const mins = parseInt(timeParts[0], 10);
+        const secs = parseInt(timeParts[1], 10);
+        if (!isNaN(mins) && !isNaN(secs)) {
+          setDuration(mins * 60 + secs);
+        }
+      }
+    }
+  }, [msg.fileSize, msg.type]);
+
+  useEffect(() => {
     if (msg.type === 'audio' && url) {
       const audio = new Audio(url);
       audioRef.current = audio;
 
       const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
-      const handleLoadedMetadata = () => setDuration(audio.duration || 0);
+      const handleLoadedMetadata = () => {
+        const d = audio.duration;
+        if (d && isFinite(d) && !isNaN(d)) {
+          setDuration(d);
+        }
+      };
       const handleEnded = () => setIsPlaying(false);
 
       audio.addEventListener('timeupdate', handleTimeUpdate);
@@ -277,17 +297,33 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   return null;
 };
 
-const AudioPreviewPlayer = ({ url }: { url: string }) => {
+const AudioPreviewPlayer = ({ url, duration: initialDuration }: { url: string; duration?: number }) => {
   const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(initialDuration || 0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     const audio = new Audio(url);
     audioRef.current = audio;
+    
+    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const handleLoadedMetadata = () => {
+      const d = audio.duration;
+      if (d && isFinite(d) && !isNaN(d)) {
+        setDuration(d);
+      }
+    };
     const handleEnded = () => setPlaying(false);
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('ended', handleEnded);
+
     return () => {
       audio.pause();
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
     };
   }, [url]);
@@ -304,15 +340,32 @@ const AudioPreviewPlayer = ({ url }: { url: string }) => {
     }
   };
 
+  const formatTime = (secs: number) => {
+    if (isNaN(secs) || !isFinite(secs)) return '0:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
   return (
-    <div className="size-full flex flex-col items-center justify-center text-primary relative bg-primary/5 hover:bg-primary/10 transition-colors p-2">
+    <div className="size-full flex flex-col items-center justify-center text-primary relative bg-primary/5 hover:bg-primary/10 transition-colors p-2 rounded-xl">
       <button 
         onClick={togglePlay}
-        className="size-8 rounded-full bg-primary text-white flex items-center justify-center shadow-md active:scale-95 transition-transform"
+        className="size-8 rounded-full bg-primary text-white flex items-center justify-center shadow-md active:scale-95 transition-transform shrink-0"
       >
-        <Icon name={playing ? "pause" : "play_arrow"} className="text-sm" />
+        <Icon name={playing ? "pause" : "play_arrow"} className="text-xs" />
       </button>
-      <span className="text-[8px] font-black uppercase mt-1.5 tracking-wider">Play Voice</span>
+      <div className="w-full mt-1.5 px-1">
+        <div className="h-0.5 w-full bg-slate-200 rounded-full overflow-hidden">
+          <div className="h-full bg-primary" style={{ width: `${progress}%` }} />
+        </div>
+        <div className="flex justify-between text-[7px] font-mono mt-0.5 opacity-80 leading-none">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -367,6 +420,7 @@ export const ChatDetail = () => {
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const recordingTimer = useRef<any>(null);
+  const recordingStartTime = useRef<number>(0);
   const isHoldingRef = useRef(false);
   const pressStartTimeRef = useRef(0);
   const isToggleModeRef = useRef(false);
@@ -580,10 +634,12 @@ export const ChatDetail = () => {
         const finalMime = selectedMimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunks.current, { type: finalMime });
         const audioUrl = URL.createObjectURL(audioBlob);
-        setCapturedMedia(prev => [...prev, { type: 'audio', url: audioUrl, blob: audioBlob }]);
+        const durationSecs = Math.max(1, Math.round((Date.now() - recordingStartTime.current) / 1000));
+        setCapturedMedia(prev => [...prev, { type: 'audio', url: audioUrl, blob: audioBlob, duration: durationSecs }]);
         stream.getTracks().forEach(track => track.stop());
       };
 
+      recordingStartTime.current = Date.now();
       mediaRecorder.current.start(250); // Periodic chunks every 250ms for maximum reliability
       setIsRecording(true);
       setRecordingDuration(0);
@@ -770,7 +826,13 @@ export const ChatDetail = () => {
           }
         }
 
-        const fileSizeStr = `${(uploadBlob.size / 1024 / 1024).toFixed(2)} MB`;
+        let fileSizeStr = `${(uploadBlob.size / 1024 / 1024).toFixed(2)} MB`;
+        if (media.type === 'audio' && (media as any).duration) {
+          const m = Math.floor((media as any).duration / 60);
+          const s = Math.floor((media as any).duration % 60);
+          const durStr = `${m}:${s < 10 ? '0' : ''}${s}`;
+          fileSizeStr = `${durStr} | ${(uploadBlob.size / 1024).toFixed(0)} KB`;
+        }
         const isOffline = !navigator.onLine || !useAppStore.getState().socket?.connected;
         
         const generatedMessageId = `m-webrtc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -1631,7 +1693,7 @@ export const ChatDetail = () => {
                   {media.type === 'image' ? (
                     <img src={media.url} className="size-full object-cover" referrerPolicy="no-referrer" />
                   ) : media.type === 'audio' ? (
-                    <AudioPreviewPlayer url={media.url} />
+                    <AudioPreviewPlayer url={media.url} duration={(media as any).duration} />
                   ) : (
                     <div className="size-full flex flex-col items-center justify-center text-primary">
                       <Icon name="description" className="text-2xl" />

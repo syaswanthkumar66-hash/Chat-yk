@@ -464,7 +464,7 @@ export const useAppStore = create<AppState>((set) => ({
       notificationSettings: {
         pushEnabled: true,
         previewEnabled: true,
-        soundEnabled: false,
+        soundEnabled: true,
         vibrateEnabled: true
       }
     };
@@ -580,9 +580,31 @@ export const useAppStore = create<AppState>((set) => ({
   },
   logout: () => {
     const state = useAppStore.getState();
+    const userId = state.user?.id;
+
     if (state.socket) {
       state.socket.disconnect();
     }
+
+    // Clean up push subscription on server
+    if (userId && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(async (reg) => {
+        try {
+          const sub = await reg.pushManager.getSubscription();
+          if (sub) {
+            await fetch(`${BACKEND_URL}/api/remove-subscription`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId, endpoint: sub.endpoint })
+            });
+            console.log("Successfully removed push subscription on logout");
+          }
+        } catch (subErr) {
+          console.warn("Failed to clean up subscription on logout:", subErr);
+        }
+      }).catch(err => console.warn("ServiceWorker ready error on logout:", err));
+    }
+
     // Sign out of Firebase if initialized
     import('./firebase').then(({ auth, setScopedUserInstance }) => {
       if (auth.currentUser) {
@@ -1099,6 +1121,35 @@ export const useAppStore = create<AppState>((set) => ({
         }
         return { chats: updatedChats };
       });
+
+      // Emit real-time message status delivered/read receipts
+      if (socket && socket.connected) {
+        socket.emit('message_delivered', {
+          messageId: newMessage.id,
+          senderId: data.senderId,
+          chatId: data.groupId || data.senderId
+        });
+
+        const currentState = useAppStore.getState();
+        if (currentState.activeChatId === data.groupId || currentState.activeChatId === data.senderId || currentState.activeRecipientId === data.senderId) {
+          socket.emit('message_read', {
+            messageId: newMessage.id,
+            senderId: data.senderId,
+            chatId: data.groupId || data.senderId
+          });
+        }
+      }
+    });
+
+    socket.on('message_status_update', (data: { chatId: string, messageId: string, status: 'delivered' | 'read' }) => {
+      set((state) => ({
+        chats: state.chats.map(c => 
+          (c.id === data.chatId || c.participants.some(p => p.id === data.chatId)) ? {
+            ...c,
+            messages: (c.messages || []).map(m => m.id === data.messageId ? { ...m, status: data.status } : m)
+          } : c
+        )
+      }));
     });
 
     socket.on('sfu_signal', (data: { roomId: string, from: string, signal: any }) => {
@@ -1156,11 +1207,41 @@ export const useAppStore = create<AppState>((set) => ({
       if (chat?.isGroup) {
         state.socket.emit('join_group', id);
       }
+      
+      // Emit read receipts for all unread messages from other users in this chat
+      chat?.messages?.forEach(m => {
+        if (m.senderId !== state.user?.id && m.status !== 'read') {
+          state.socket?.emit('message_read', {
+            messageId: m.id,
+            senderId: m.senderId,
+            chatId: chat.id
+          });
+        }
+      });
     }
-    return { activeChatId: id, activeRecipientId: null, selectedMessageIds: [] };
+    const updatedChats = state.chats.map(c => c.id === id ? { ...c, unreadCount: 0 } : c);
+    return { chats: updatedChats, activeChatId: id, activeRecipientId: null, selectedMessageIds: [] };
   }),
   activeRecipientId: null,
-  setActiveRecipientId: (id) => set({ activeRecipientId: id, activeChatId: null, selectedMessageIds: [] }),
+  setActiveRecipientId: (id) => set((state) => {
+    const chat = state.chats.find(c => !c.isGroup && c.participants.some(p => p.id === id));
+    if (chat && state.socket && state.socket.connected) {
+      // Emit read receipts for all unread messages from this user
+      chat.messages?.forEach(m => {
+        if (m.senderId !== state.user?.id && m.status !== 'read') {
+          state.socket?.emit('message_read', {
+            messageId: m.id,
+            senderId: m.senderId,
+            chatId: chat.id
+          });
+        }
+      });
+    }
+    const updatedChats = state.chats.map(c => 
+      (!c.isGroup && c.participants.some(p => p.id === id)) ? { ...c, unreadCount: 0 } : c
+    );
+    return { chats: updatedChats, activeRecipientId: id, activeChatId: null, selectedMessageIds: [] };
+  }),
   activeDeviceId: null,
   setActiveDeviceId: (id) => set({ activeDeviceId: id }),
   viewingUserId: null,

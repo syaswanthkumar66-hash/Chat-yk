@@ -27,7 +27,7 @@ async function testConnection() {
 testConnection();
 
 // Custom hook to request and manage system notifications
-function useNotifications() {
+function useNotifications(processedNotificationsRef: React.RefObject<Set<string>>) {
   const socket = useAppStore((state) => state.socket);
   const user = useAppStore((state) => state.user);
   const activeChatId = useAppStore((state) => state.activeChatId);
@@ -88,6 +88,136 @@ function useNotifications() {
   // Permission is requested by <NotificationPrompt /> which shows a proper
   // contextual UI prompt. A silent requestPermission() call here would conflict
   // and cause browsers to suppress the NotificationPrompt dialog.
+
+  // Listen to socket 'receive_message' to trigger local notifications & sounds reactively
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handleReceiveMessage = async (data: any) => {
+      // 1. Guard: If sender is current user, don't notify
+      if (data.senderId === user.id) return;
+
+      const state = useAppStore.getState();
+
+      // 2. Guard: If sender/user is blocked, don't notify
+      if (state.blockedUserIds.includes(data.senderId)) return;
+
+      // 3. Prevent duplicates if already processed via Firestore notifications
+      const notifId = `notif-msg-${data.id || data.messageId}`;
+      const groupNotifId = `notif-msg-${data.id || data.messageId}-${user.id}`;
+      
+      if (processedNotificationsRef.current.has(notifId) || processedNotificationsRef.current.has(groupNotifId)) {
+        console.log(`Socket receive_message ${data.id || data.messageId} skipped (already processed by Firestore notifications)`);
+        return;
+      }
+      
+      // Add both to processed set to prevent Firestore onSnapshot from double triggering
+      processedNotificationsRef.current.add(notifId);
+      processedNotificationsRef.current.add(groupNotifId);
+
+      // 4. Determine if the chat is active and focused
+      const chatId = data.groupId || data.senderId;
+      const isChatActive = state.activeChatId === chatId;
+      const isSocialView = state.mode === 'social';
+      const isFocused = typeof document !== 'undefined' ? document.hasFocus() : true;
+
+      if (isSocialView && isChatActive && isFocused) {
+        // Chat is open, active, and focused, so no need for alerts/sounds
+        return;
+      }
+
+      // 5. Process/decrypt text if encrypted
+      let displayBody = data.text;
+      if (data.iv && data.text) {
+        try {
+          const { cryptoService } = await import('./services/cryptoService');
+          const remotePubKeyBase64 = await new Promise<string>((resolve) => {
+            if (socket && socket.connected) {
+              const timeout = setTimeout(() => resolve(''), 1000);
+              socket.emit("get_public_key", { userId: data.senderId }, (res: string) => {
+                clearTimeout(timeout);
+                resolve(res || '');
+              });
+            } else {
+              resolve('');
+            }
+          });
+          if (remotePubKeyBase64) {
+            const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64, user.id);
+            const encryptedObj = JSON.parse(data.text);
+            displayBody = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
+          }
+        } catch (e) {
+          console.warn("Decryption failed in notification handler:", e);
+          displayBody = "🔒 [Encrypted Message]";
+        }
+      } else if (data.text && typeof data.text === 'string' && data.text.startsWith('{') && data.text.includes('"ciphertext"')) {
+        displayBody = "🔒 [Encrypted Message]";
+      }
+
+      if (data.type && data.type !== 'text') {
+        displayBody = `📎 Shared a ${data.type}`;
+      }
+
+      // If user settings suppress previews, hide it
+      const currentUser = useAppStore.getState().user;
+      const userSettings = currentUser?.notificationSettings;
+      const previewEnabled = userSettings?.previewEnabled !== false;
+      const bodyText = previewEnabled ? displayBody : "New message received";
+
+      // Find sender name and avatar
+      const senderUser = state.users.find(u => u.id === data.senderId);
+      const senderName = data.senderName || senderUser?.displayName || senderUser?.username || "New Message";
+      const senderAvatar = senderUser?.avatar || `https://picsum.photos/seed/${data.senderId}/200`;
+
+      // 6. Trigger sound if enabled
+      if (userSettings?.soundEnabled !== false) {
+        try {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
+          audio.volume = 0.5;
+          audio.play().catch(() => {});
+        } catch (e) {
+          console.warn('Notification audio failed:', e);
+        }
+      }
+
+      // 7. Trigger vibration if enabled
+      if (userSettings?.vibrateEnabled !== false && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate([200, 100, 200]);
+        } catch (e) {
+          console.warn('Notification vibration failed:', e);
+        }
+      }
+
+      // 8. Trigger in-app toast
+      addInAppToast({
+        title: data.groupName || senderName,
+        body: bodyText,
+        avatar: senderAvatar,
+        chatId: chatId
+      });
+
+      // 9. Trigger system OS notification
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(data.groupName || senderName, {
+            body: bodyText,
+            icon: senderAvatar,
+            tag: chatId,
+            renotify: true
+          } as any);
+        } catch (e) {
+          console.warn('System OS Notification failed:', e);
+        }
+      }
+    };
+
+    socket.on('receive_message', handleReceiveMessage);
+    return () => {
+      socket.off('receive_message', handleReceiveMessage);
+    };
+  }, [socket, user, addInAppToast, processedNotificationsRef]);
 
   // Listen to socket 'user_status' to trigger alerts when a friend comes online
   useEffect(() => {
@@ -235,7 +365,7 @@ export default function App() {
   } = useAppStore();
 
   // Activate the real-time notification integration hook
-  useNotifications();
+  useNotifications(processedNotificationsRef);
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
 
@@ -606,7 +736,8 @@ export default function App() {
             continue;
           }
 
-          const userSettings = user.notificationSettings;
+          const currentUser = useAppStore.getState().user;
+          const userSettings = currentUser?.notificationSettings;
           const pushEnabled = userSettings?.pushEnabled !== false;
           if (!pushEnabled) continue;
 

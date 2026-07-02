@@ -369,7 +369,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 const settings = user?.notificationSettings || {
                   pushEnabled: true,
                   previewEnabled: true,
-                  soundEnabled: false,
+                  soundEnabled: true,
                   vibrateEnabled: true
                 };
                 const isEnabled = settings[item.key as keyof typeof settings];
