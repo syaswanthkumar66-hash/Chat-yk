@@ -1428,7 +1428,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           console.error("Failed to load Vite dev middleware:", viteErr);
         }
       } else {
-        const distPath = path.join(process.cwd(), 'dist');
+        let distPath = path.join(process.cwd(), 'dist');
+        if (!fs.existsSync(distPath) || !fs.existsSync(path.join(distPath, 'index.html'))) {
+          const fallbackPath = path.join(process.cwd(), '../dist');
+          if (fs.existsSync(fallbackPath) && fs.existsSync(path.join(fallbackPath, 'index.html'))) {
+            distPath = fallbackPath;
+          }
+        }
+
         if (fs.existsSync(distPath) && fs.existsSync(path.join(distPath, 'index.html'))) {
           app.use(express.static(distPath));
           app.get('*', (req, res) => {
