@@ -367,6 +367,9 @@ export const ChatDetail = () => {
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const recordingTimer = useRef<any>(null);
+  const isHoldingRef = useRef(false);
+  const pressStartTimeRef = useRef(0);
+  const isToggleModeRef = useRef(false);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
@@ -535,7 +538,14 @@ export const ChatDetail = () => {
 
   const startRecording = async () => {
     try {
+      setShowMicError(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // If user released the hold and we are not in toggle mode, discard immediately
+      if (!isHoldingRef.current && !isToggleModeRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       
       let options: any = {};
       const mimeTypes = [
@@ -577,12 +587,16 @@ export const ChatDetail = () => {
       mediaRecorder.current.start(250); // Periodic chunks every 250ms for maximum reliability
       setIsRecording(true);
       setRecordingDuration(0);
+      if (recordingTimer.current) clearInterval(recordingTimer.current);
       recordingTimer.current = setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
       if (navigator.vibrate) navigator.vibrate(50);
     } catch (err: any) {
       console.error("Error accessing microphone:", err);
+      setIsRecording(false);
+      isHoldingRef.current = false;
+      isToggleModeRef.current = false;
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setShowMicError("Microphone access denied. Please enable microphone permissions in your browser settings to record voice messages.");
       } else {
@@ -592,11 +606,62 @@ export const ChatDetail = () => {
   };
 
   const stopRecording = () => {
-    if (mediaRecorder.current && isRecording) {
-      mediaRecorder.current.stop();
-      setIsRecording(false);
-      if (recordingTimer.current) clearInterval(recordingTimer.current);
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      try {
+        mediaRecorder.current.stop();
+      } catch (err) {
+        console.error("Error stopping MediaRecorder:", err);
+      }
     }
+    setIsRecording(false);
+    isHoldingRef.current = false;
+    isToggleModeRef.current = false;
+    if (recordingTimer.current) {
+      clearInterval(recordingTimer.current);
+      recordingTimer.current = null;
+    }
+  };
+
+  const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    
+    // If we are currently recording in toggle mode, clicking stops it
+    if (isRecording && isToggleModeRef.current) {
+      stopRecording();
+      return;
+    }
+
+    isHoldingRef.current = true;
+    isToggleModeRef.current = false;
+    pressStartTimeRef.current = Date.now();
+    startRecording();
+  };
+
+  const handleMicPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    
+    const pressDuration = Date.now() - pressStartTimeRef.current;
+    
+    if (pressDuration < 350) {
+      // Quick tap -> Enter toggle-to-record mode (so they don't have to hold if they prefer)
+      isToggleModeRef.current = true;
+      isHoldingRef.current = false;
+      console.log("Quick tap detected - entered toggle recording mode");
+    } else {
+      // Long press -> stop recording on release
+      isHoldingRef.current = false;
+      stopRecording();
+    }
+  };
+
+  const handleMicPointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    isHoldingRef.current = false;
+    isToggleModeRef.current = false;
+    stopRecording();
   };
 
   const handleCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1712,12 +1777,15 @@ export const ChatDetail = () => {
               </button>
             ) : (
               <button 
-                onPointerDown={startRecording}
-                onPointerUp={stopRecording}
-                onPointerLeave={stopRecording}
+                onPointerDown={handleMicPointerDown}
+                onPointerUp={handleMicPointerUp}
+                onPointerCancel={handleMicPointerCancel}
+                onContextMenu={(e) => e.preventDefault()}
+                onDragStart={(e) => e.preventDefault()}
+                style={{ touchAction: 'none' }}
                 className={`size-10 sm:size-12 rounded-xl sm:rounded-2xl flex-shrink-0 flex items-center justify-center transition-all ${isRecording ? 'text-white bg-red-500 scale-110 shadow-lg shadow-red-500/30' : 'text-white bg-primary shadow-xl shadow-primary/30 hover:brightness-110'}`}
               >
-                <Icon name="mic" />
+                <Icon name={isRecording ? "stop" : "mic"} />
               </button>
             )
           )}
