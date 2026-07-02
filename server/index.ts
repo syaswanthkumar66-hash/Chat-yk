@@ -289,6 +289,7 @@ const vapidInitPromise = initVapid().catch((e) => {
 });
 
 const memorySubscriptions = new Map<string, any[]>();
+const recentPushNotifications = new Map<string, number>();
 
 async function sendPushNotification(recipientId: string, payload: { title: string, body: string, icon?: string, data?: any }) {
   // Gracefully wait for VAPID initialization to finish before trying to dispatch any notifications
@@ -345,6 +346,25 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
 
     const sendPromises = subscriptions.map(async (subscription) => {
       if (!subscription || !subscription.endpoint) return;
+
+      // Deduplicate push notifications sent to the same device/endpoint within a short window (e.g. 3s)
+      const cacheKey = `${subscription.endpoint}:${payload.title}:${payload.body}`;
+      const lastSent = recentPushNotifications.get(cacheKey);
+      if (lastSent && Date.now() - lastSent < 3000) {
+        console.log(`Push notification deduplicated/prevented collision for endpoint ${subscription.endpoint.slice(-20)}`);
+        return;
+      }
+      recentPushNotifications.set(cacheKey, Date.now());
+
+      // Periodically clean up cache
+      if (recentPushNotifications.size > 2000) {
+        for (const [k, v] of recentPushNotifications.entries()) {
+          if (Date.now() - v > 30000) {
+            recentPushNotifications.delete(k);
+          }
+        }
+      }
+
       try {
         await webpush.sendNotification(subscription, JSON.stringify(payload));
         console.log(`Successfully sent Web Push Notification to user ${recipientId} endpoint ${subscription.endpoint.slice(-20)}`);
@@ -1312,35 +1332,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       userMemSubs.push(subscription);
       memorySubscriptions.set(userId, userMemSubs);
 
-      // Remove this endpoint from any other users' memory subscriptions to prevent duplicate delivery/collisions
-      for (const [memUserId, memSubs] of memorySubscriptions.entries()) {
-        if (memUserId !== userId && Array.isArray(memSubs)) {
-          const updated = memSubs.filter((s: any) => s.endpoint !== subscription.endpoint);
-          if (updated.length !== memSubs.length) {
-            memorySubscriptions.set(memUserId, updated);
-            console.log(`Removed duplicate subscription endpoint from user memory: ${memUserId}`);
-          }
-        }
-      }
+      // Note: We no longer aggressively remove this endpoint from other users' subscriptions in memory/Firestore.
+      // This allows multi-account (double/triple account) logins on the same device/browser sharing the same subscription ID
+      // to cleanly co-exist and receive push notifications correctly. Deduplication & collision prevention is handled during broadcast in sendPushNotification.
 
       // Save to Firestore if available
       if (db) {
         try {
-          // Scan and clean other users' Firestore subscriptions containing this endpoint
-          const allSubsSnap = await db.collection('pushSubscriptions').get();
-          for (const doc of allSubsSnap.docs) {
-            if (doc.id === userId) continue;
-            const subData = doc.data();
-            if (subData && Array.isArray(subData.subscriptions)) {
-              const matched = subData.subscriptions.some((s: any) => s.endpoint === subscription.endpoint);
-              if (matched) {
-                const updated = subData.subscriptions.filter((s: any) => s.endpoint !== subscription.endpoint);
-                await doc.ref.set({ subscriptions: updated });
-                console.log(`Removed duplicate subscription endpoint from other user: ${doc.id}`);
-              }
-            }
-          }
-
           const docRef = db.collection('pushSubscriptions').doc(userId);
           const docSnap = await docRef.get();
           let subscriptions: any[] = [];

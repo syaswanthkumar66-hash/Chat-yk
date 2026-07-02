@@ -26,6 +26,36 @@ function formatLastSeen(lastSeen?: string | null): string {
   }
 }
 
+const fetchWithProgress = async (url: string, onProgress: (percent: number) => void): Promise<Blob> => {
+  const response = await fetch(url);
+  if (!response.body) {
+    return response.blob();
+  }
+  const contentLength = response.headers.get('content-length');
+  const total = contentLength ? parseInt(contentLength, 10) : 0;
+  
+  if (total === 0) {
+    return response.blob();
+  }
+
+  const reader = response.body.getReader();
+  let loaded = 0;
+  const chunks: Uint8Array[] = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      loaded += value.length;
+      const percent = Math.round((loaded / total) * 100);
+      onProgress(percent);
+    }
+  }
+
+  return new Blob(chunks);
+};
+
 const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; onPreview?: (data: { type: 'image' | 'file'; url: string; name: string; size?: string }) => void }) => {
   const [url, setUrl] = useState(msg.fileUrl || msg.url);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -36,6 +66,8 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   const [transferProgress, setTransferProgress] = useState<number | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
   const [currentChunkSize, setCurrentChunkSize] = useState<number | null>(null);
+
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
 
   useEffect(() => {
     const handleProgress = (e: Event) => {
@@ -88,13 +120,16 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
           try {
             const { voiceNoteCache } = await import('../services/voiceNoteCache');
             const cacheKey = msg.id || targetUrl;
-            const res = await fetch(targetUrl);
-            const blob = await res.blob();
+            const blob = await fetchWithProgress(targetUrl, (percent) => {
+              if (active) setDownloadProgress(percent);
+            });
+            if (active) setDownloadProgress(null);
             await voiceNoteCache.set(cacheKey, blob);
             if (active) setUrl(URL.createObjectURL(blob));
             return;
           } catch (err) {
             console.error("Failed to fetch and cache unencrypted audio:", err);
+            if (active) setDownloadProgress(null);
           }
         }
         if (active) setUrl(targetUrl);
@@ -104,8 +139,11 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
       try {
         const { cryptoService } = await import('../services/cryptoService');
         const { compressionService } = await import('../services/compressionService');
-        const res = await fetch(targetUrl);
-        const encryptedBlob = await res.blob();
+        
+        const encryptedBlob = await fetchWithProgress(targetUrl, (percent) => {
+          if (active) setDownloadProgress(percent);
+        });
+        if (active) setDownloadProgress(null);
         
         let sharedSecret: CryptoKey;
         // Fetch remote pub key to derive shared secret for E2EE decryption
@@ -143,6 +181,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
         if (active) setUrl(URL.createObjectURL(decompressed));
       } catch (e) {
         console.error("Decryption/Decompression failed", e);
+        if (active) setDownloadProgress(null);
       }
     };
     fetchDecrypted();
@@ -209,14 +248,37 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  const isUploading = msg.status === 'uploading';
+  const showProgress = isUploading || downloadProgress !== null;
+  const progressPercent = isUploading ? (msg.uploadProgress || 0) : (downloadProgress || 0);
+  const progressText = isUploading 
+    ? (progressPercent === 100 ? "Ending | 100%" : `Uploading ${progressPercent}%`) 
+    : (progressPercent === 100 ? "Finalizing..." : `Downloading ${progressPercent}%`);
+
+  const renderProgressOverlay = () => {
+    if (!showProgress) return null;
+    return (
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center text-white z-20 rounded-xl p-3">
+        <div className="size-10 rounded-full border-2 border-white/20 border-t-white animate-spin flex items-center justify-center mb-2">
+          <span className="text-[9px] font-black">{progressPercent}%</span>
+        </div>
+        <span className="text-[10px] font-bold uppercase tracking-wider animate-pulse text-center">{progressText}</span>
+        <div className="w-24 h-1 bg-white/20 rounded-full mt-2 overflow-hidden">
+          <div className="h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
+        </div>
+      </div>
+    );
+  };
+
   if (msg.type === 'image') {
     return (
       <div 
-        className="space-y-2 cursor-pointer group/image" 
-        onClick={() => onPreview?.({ type: 'image', url, name: msg.text || 'Image', size: msg.fileSize })}
+        className="space-y-2 cursor-pointer group/image relative min-w-[150px] min-h-[100px]" 
+        onClick={() => !showProgress && onPreview?.({ type: 'image', url, name: msg.text || 'Image', size: msg.fileSize })}
       >
         <div className="relative rounded-xl overflow-hidden shadow-sm border border-slate-100 hover:border-primary/20 transition-all">
           <img src={url} className="max-w-full rounded-xl hover:scale-[1.01] transition-transform duration-300" referrerPolicy="no-referrer" />
+          {renderProgressOverlay()}
           <div className="absolute inset-0 bg-black/0 hover:bg-black/10 flex items-center justify-center transition-colors">
             <Icon name="zoom_in" className="text-white opacity-0 group-hover/image:opacity-100 transition-opacity text-2xl drop-shadow-md" />
           </div>
@@ -229,24 +291,43 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   if (msg.type === 'file') {
     return (
       <div 
-        className="flex items-center gap-3 min-w-[220px] cursor-pointer hover:bg-black/5 rounded-xl p-1 transition-all"
+        className="flex flex-col gap-2 min-w-[220px] cursor-pointer hover:bg-black/5 rounded-xl p-1.5 transition-all relative"
         onClick={(e) => {
+          if (showProgress) return;
           if ((e.target as HTMLElement).closest('a')) return;
           onPreview?.({ type: 'file', url, name: msg.text || 'File', size: msg.fileSize });
         }}
       >
-        <div className={cn("size-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner", isOwn ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
-          <Icon name="description" />
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <p className={cn("text-xs font-bold truncate", isOwn ? "text-white" : "text-slate-800")}>{msg.text || (msg.fileUrl ? (msg.fileUrl.startsWith('data:') ? 'Offline File' : msg.fileUrl.split('/').pop()) : 'File')}</p>
-          <div className={cn("text-[9px] font-bold uppercase tracking-widest mt-0.5 opacity-70", isOwn ? "text-white" : "text-slate-400")}>
-            {msg.fileSize || 'FILE'}
+        <div className="flex items-center gap-3">
+          <div className={cn("size-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner relative overflow-hidden", isOwn ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
+            <Icon name="description" />
           </div>
+          <div className="flex-1 overflow-hidden">
+            <p className={cn("text-xs font-bold truncate", isOwn ? "text-white" : "text-slate-800")}>
+              {msg.text || (msg.fileUrl ? (msg.fileUrl.startsWith('data:') ? 'Offline File' : msg.fileUrl.split('/').pop()) : 'File')}
+            </p>
+            <div className={cn("text-[9px] font-bold uppercase tracking-widest mt-0.5 opacity-70", isOwn ? "text-white" : "text-slate-400")}>
+              {msg.fileSize || 'FILE'}
+            </div>
+          </div>
+          {!showProgress && (
+            <a href={url} download={msg.text || 'file'} className={cn("size-9 rounded-full flex items-center justify-center shrink-0 hover:bg-black/10 transition-colors", isOwn ? "text-white" : "text-primary")}>
+              <Icon name="download" className="text-base" />
+            </a>
+          )}
         </div>
-        <a href={url} download={msg.text || 'file'} className={cn("size-9 rounded-full flex items-center justify-center shrink-0 hover:bg-black/10 transition-colors", isOwn ? "text-white" : "text-primary")}>
-          <Icon name="download" className="text-base" />
-        </a>
+        
+        {showProgress && (
+          <div className="w-full mt-1 px-1">
+            <div className={cn("h-1 rounded-full overflow-hidden", isOwn ? "bg-white/20" : "bg-slate-200")}>
+              <div className="h-full bg-blue-500 transition-all duration-150" style={{ width: `${progressPercent}%` }} />
+            </div>
+            <div className={cn("text-[9px] font-mono flex justify-between mt-1", isOwn ? "text-white/75" : "text-slate-400")}>
+              <span className="animate-pulse">{progressText}</span>
+              <span>{progressPercent}%</span>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -257,11 +338,11 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
       <div className="flex flex-col gap-1 min-w-[220px] py-1">
         <div className="flex items-center gap-3">
           <button 
-            disabled={isTransferring}
+            disabled={isTransferring || showProgress}
             onClick={togglePlay}
-            className={cn("size-10 rounded-full flex items-center justify-center transition-transform active:scale-95 shrink-0 shadow-sm", isOwn ? "bg-white/25 text-white hover:bg-white/35" : "bg-primary/10 text-primary hover:bg-primary/20", isTransferring && "opacity-50 cursor-not-allowed")}
+            className={cn("size-10 rounded-full flex items-center justify-center transition-transform active:scale-95 shrink-0 shadow-sm", isOwn ? "bg-white/25 text-white hover:bg-white/35" : "bg-primary/10 text-primary hover:bg-primary/20", (isTransferring || showProgress) && "opacity-50 cursor-not-allowed")}
           >
-            <Icon name={isTransferring ? "swap_horiz" : (isPlaying ? "pause" : "play_arrow")} className={cn("text-xl", isTransferring && "animate-pulse")} />
+            <Icon name={isTransferring || showProgress ? "sync" : (isPlaying ? "pause" : "play_arrow")} className={cn("text-xl", (isTransferring || showProgress) && "animate-spin")} />
           </button>
           <div className="flex-1 min-w-0">
             {isTransferring && transferProgress !== null ? (
@@ -274,7 +355,17 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
                     <span className="size-1.5 rounded-full bg-blue-500 animate-ping inline-block" />
                     P2P {isOwn ? "Uploading" : "Downloading"}
                   </span>
-                  <span>{transferProgress}% ({currentChunkSize ? `${(currentChunkSize / 1024).toFixed(0)}KB` : 'adaptive'})</span>
+                  <span>{transferProgress}%</span>
+                </div>
+              </div>
+            ) : showProgress ? (
+              <div className="space-y-1">
+                <div className={cn("h-1.5 rounded-full overflow-hidden", isOwn ? "bg-white/20" : "bg-slate-200")}>
+                  <div className="h-full bg-blue-500 transition-all duration-150" style={{ width: `${progressPercent}%` }} />
+                </div>
+                <div className={cn("text-[9px] font-mono flex justify-between", isOwn ? "text-white/75" : "text-slate-400")}>
+                  <span className="animate-pulse">{progressText}</span>
+                  <span>{progressPercent}%</span>
                 </div>
               </div>
             ) : (
@@ -837,6 +928,26 @@ export const ChatDetail = () => {
         
         const generatedMessageId = `m-webrtc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
+        // Pre-add message to local UI state in uploading/pending mode so progress is visible
+        const localMsg: any = {
+          id: generatedMessageId,
+          senderId: user?.id || 'u1',
+          senderName: user?.displayName || 'You',
+          text: media.name || (media.type === 'audio' ? 'Voice Message' : 'File'),
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: media.type,
+          fileUrl: media.url || (media.blob ? URL.createObjectURL(media.blob) : undefined), // locally set to Blob URL so preview works instantly!
+          fileSize: fileSizeStr,
+          isOwn: true,
+          status: isOffline ? 'pending' : 'uploading',
+          uploadProgress: 0,
+          isE2E: !!sharedSecret,
+          iv: e2eFileIv,
+          encryptedFileKey: sharedSecret ? [] : undefined
+        };
+
+        useAppStore.getState().addPendingMessage(activeChatId, activeRecipientId, localMsg);
+
         // WebRTC direct chunk-by-chunk P2P audio transmission
         if (media.type === 'audio' && targetId && !isGroup) {
           try {
@@ -867,33 +978,63 @@ export const ChatDetail = () => {
 
         let uploadSuccess = false;
         try {
-          const formData = new FormData();
-          formData.append('file', uploadBlob, media.type === 'audio' ? 'voice_note.webm' : (media.type === 'file' ? media.name || 'file.bin' : 'image.jpg'));
-          if (user?.id) formData.append('userId', user.id);
+          const filename = media.type === 'audio' ? 'voice_note.webm' : (media.type === 'file' ? media.name || 'file.bin' : 'image.jpg');
+          
+          const uploadPromise = () => new Promise<{ fileUrl: string; fileSize: string }>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const formData = new FormData();
+            formData.append('file', uploadBlob, filename);
+            if (user?.id) formData.append('userId', user.id);
 
-          const response = await fetch(`${BACKEND_URL}/api/upload`, {
-            method: 'POST',
-            body: formData,
+            xhr.upload.addEventListener('progress', (e) => {
+              if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                // Update progress in global state
+                useAppStore.getState().updateMessageProgress(generatedMessageId, percent, 'uploading');
+              }
+            });
+
+            xhr.addEventListener('load', () => {
+              if (xhr.status === 429) {
+                reject(new Error('QUOTA_EXCEEDED'));
+              } else if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                  const data = JSON.parse(xhr.responseText);
+                  resolve(data);
+                } catch (err) {
+                  reject(new Error('Invalid JSON response'));
+                }
+              } else {
+                reject(new Error(`Server error ${xhr.status}`));
+              }
+            });
+
+            xhr.addEventListener('error', () => {
+              reject(new Error('Network error'));
+            });
+
+            xhr.open('POST', `${BACKEND_URL}/api/upload`);
+            xhr.send(formData);
           });
 
-          if (response.status === 429) {
+          const data = await uploadPromise();
+          
+          const e2eData = sharedSecret ? {
+            encryptedText: encTextStr,
+            iv: e2eFileIv!
+          } : undefined;
+
+          // Update progress to 100% (finalizing)
+          useAppStore.getState().updateMessageProgress(generatedMessageId, 100, 'uploading');
+
+          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData, undefined, generatedMessageId);
+          uploadSuccess = true;
+        } catch (uploadErr: any) {
+          if (uploadErr.message === 'QUOTA_EXCEEDED') {
             setToast("Daily 100MB quota exceeded!");
+            useAppStore.getState().updateMessageProgress(generatedMessageId, 0, 'failed');
             break;
           }
-
-          if (response.ok) {
-            const data = await response.json();
-            const e2eData = sharedSecret ? {
-              encryptedText: encTextStr,
-              iv: e2eFileIv! // using file iv just as placeholder, actual is inside encTextStr JSON
-            } : undefined;
-
-            sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData, undefined, generatedMessageId);
-            uploadSuccess = true;
-          } else {
-            console.error("Failed to upload media to server");
-          }
-        } catch (uploadErr) {
           console.warn("Upload request failed, falling back to offline base64 storage:", uploadErr);
         }
 

@@ -196,6 +196,8 @@ interface AppState {
   addUser: (user: Partial<UserProfile> & Omit<UserProfile, 'id'>) => void;
   sendMessage: (chatId: string | null, recipientId: string | null, text: string, type?: Message['type'], fileUrl?: string, fileSize?: string, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean, customId?: string) => void;
   updateMessageFileUrl: (messageId: string, fileUrl: string, fileSize?: string) => void;
+  addPendingMessage: (chatId: string | null, recipientId: string | null, message: Message) => void;
+  updateMessageProgress: (messageId: string, progress: number, status?: Message['status']) => void;
   deletedMsgIds: string[];
   globallyDeletedIds: string[];
   deleteMessageLocally: (messageId: string) => void;
@@ -1990,9 +1992,14 @@ export const useAppStore = create<AppState>((set) => ({
     if (targetChatId) {
       updatedChats = updatedChats.map(c => {
         if (c.id === targetChatId) {
+          const messages = c.messages || [];
+          const exists = messages.some(m => m.id === newMessage.id);
+          const updatedMessages = exists
+            ? messages.map(m => m.id === newMessage.id ? { ...m, ...newMessage } : m)
+            : [...messages, newMessage];
           return {
             ...c,
-            messages: [...(c.messages || []), newMessage],
+            messages: updatedMessages,
             lastMessage: newMessage
           };
         }
@@ -2007,6 +2014,50 @@ export const useAppStore = create<AppState>((set) => ({
       chats: state.chats.map(c => ({
         ...c,
         messages: c.messages?.map(m => m.id === messageId ? { ...m, fileUrl, fileSize: fileSize || m.fileSize } : m) || []
+      }))
+    };
+  }),
+  addPendingMessage: (chatId, recipientId, message) => set((state) => {
+    let updatedChats = [...state.chats];
+    const targetChatId = chatId || (recipientId ? state.chats.find(c => !c.isGroup && c.participants.some(p => p.id === recipientId))?.id : null);
+
+    if (targetChatId) {
+      updatedChats = updatedChats.map(c => c.id === targetChatId ? {
+        ...c,
+        messages: [...(c.messages || []), message],
+        lastMessage: message
+      } : c);
+    } else if (recipientId) {
+      // Create a temporary chat if it doesn't exist yet
+      const recipient = state.users.find(u => u.id === recipientId) || {
+        id: recipientId,
+        name: 'Unknown User',
+        username: recipientId,
+        avatar: `https://picsum.photos/seed/${recipientId}/200`
+      };
+      const newChat: Chat = {
+        id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        participants: [
+          { id: recipient.id, name: (recipient as any).name || (recipient as any).displayName, username: recipient.username, avatar: recipient.avatar, status: 'offline' },
+          { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
+        ],
+        unreadCount: 0,
+        messages: [message],
+        lastMessage: message
+      };
+      updatedChats.push(newChat);
+    }
+    return { chats: updatedChats };
+  }),
+  updateMessageProgress: (messageId, progress, status) => set((state) => {
+    return {
+      chats: state.chats.map(c => ({
+        ...c,
+        messages: c.messages?.map(m => m.id === messageId ? {
+          ...m,
+          uploadProgress: progress,
+          status: status || m.status
+        } : m) || []
       }))
     };
   }),
