@@ -245,8 +245,9 @@ export default function App() {
       setIsOffline(false);
       console.log("Device is online. Triggering pending Firestore user sync...");
       let pending = pendingSyncRef.current;
-      if (!pending) {
-        const stored = localStorage.getItem('pending_profile_sync');
+      const currentUid = auth.currentUser?.uid;
+      if (!pending && currentUid) {
+        const stored = localStorage.getItem(`pending_profile_sync_${currentUid}`);
         if (stored) {
           try {
             pending = JSON.parse(stored);
@@ -256,12 +257,12 @@ export default function App() {
         }
       }
       
-      if (pending && auth.currentUser && auth.currentUser.uid === pending.uid) {
+      if (pending && currentUid && currentUid === pending.uid) {
         try {
           await setDoc(doc(db, 'users', pending.uid), pending.data);
           console.log("Retry Sync: Profile successfully synchronized to Firestore on online transition.");
           pendingSyncRef.current = null;
-          localStorage.removeItem('pending_profile_sync');
+          localStorage.removeItem(`pending_profile_sync_${currentUid}`);
         } catch (setDocErr) {
           console.warn("Retry Sync: Firestore setDoc failed on online transition, will retry next time:", setDocErr);
         }
@@ -362,12 +363,12 @@ export default function App() {
               } catch (setDocErr) {
                 console.warn("Firestore setDoc failed during initial registration, queuing for offline retry:", setDocErr);
                 pendingSyncRef.current = { uid: firebaseUser.uid, data: userDataToRestore };
-                localStorage.setItem('pending_profile_sync', JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
+                localStorage.setItem(`pending_profile_sync_${firebaseUser.uid}`, JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
               }
             } else {
               console.log("Firestore currently unreachable. Keeping local session and queuing profile for offline retry.");
               pendingSyncRef.current = { uid: firebaseUser.uid, data: userDataToRestore };
-              localStorage.setItem('pending_profile_sync', JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
+              localStorage.setItem(`pending_profile_sync_${firebaseUser.uid}`, JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
             }
           }
         } catch (err) {

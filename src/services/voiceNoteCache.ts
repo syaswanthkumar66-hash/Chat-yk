@@ -1,3 +1,16 @@
+const getUserId = (): string => {
+  if (typeof window !== 'undefined') {
+    const userStr = localStorage.getItem('proto_user');
+    if (userStr) {
+      try {
+        const u = JSON.parse(userStr);
+        return u.id || '';
+      } catch (e) {}
+    }
+  }
+  return '';
+};
+
 class VoiceNoteCache {
   private dbName = 'voice-note-cache-db';
   private storeName = 'voice-notes';
@@ -32,12 +45,14 @@ class VoiceNoteCache {
 
   // --- Existing cache methods for fully reassembled voice notes ---
   async get(id: string): Promise<Blob | null> {
+    const userId = getUserId();
+    const storageId = userId ? `${userId}_${id}` : id;
     try {
       const db = await this.getDB();
       return new Promise((resolve) => {
         const transaction = db.transaction(this.storeName, 'readonly');
         const store = transaction.objectStore(this.storeName);
-        const request = store.get(id);
+        const request = store.get(storageId);
         request.onsuccess = () => {
           resolve(request.result || null);
         };
@@ -52,12 +67,14 @@ class VoiceNoteCache {
   }
 
   async set(id: string, blob: Blob): Promise<void> {
+    const userId = getUserId();
+    const storageId = userId ? `${userId}_${id}` : id;
     try {
       const db = await this.getDB();
       return new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(this.storeName, 'readwrite');
         const store = transaction.objectStore(this.storeName);
-        const request = store.put(blob, id);
+        const request = store.put(blob, storageId);
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
       });
@@ -68,15 +85,17 @@ class VoiceNoteCache {
 
   // --- New methods for chunk-based persistent storage ---
   async saveChunk(transferId: string, chunkIndex: number, offset: number, data: string): Promise<void> {
+    const userId = getUserId();
+    const isolatedTransferId = userId ? `${userId}_${transferId}` : transferId;
     try {
       const db = await this.getDB();
       return new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(this.chunkStoreName, 'readwrite');
         const store = transaction.objectStore(this.chunkStoreName);
         // Use a composite padded key to enable range queries: "transferId_chunkIndex"
-        const key = `${transferId}_${chunkIndex.toString().padStart(6, '0')}`;
+        const key = `${isolatedTransferId}_${chunkIndex.toString().padStart(6, '0')}`;
         const record = {
-          transferId,
+          transferId: isolatedTransferId,
           chunkIndex,
           offset,
           data
@@ -91,6 +110,8 @@ class VoiceNoteCache {
   }
 
   async getChunks(transferId: string): Promise<{ chunkIndex: number; offset: number; data: string }[]> {
+    const userId = getUserId();
+    const isolatedTransferId = userId ? `${userId}_${transferId}` : transferId;
     try {
       const db = await this.getDB();
       return new Promise((resolve) => {
@@ -98,7 +119,7 @@ class VoiceNoteCache {
         const store = transaction.objectStore(this.chunkStoreName);
         
         // Use standard key range search to find all chunks for this transfer ID
-        const keyRange = IDBKeyRange.bound(`${transferId}_`, `${transferId}_\uffff`);
+        const keyRange = IDBKeyRange.bound(`${isolatedTransferId}_`, `${isolatedTransferId}_\uffff`);
         const request = store.openCursor(keyRange);
         const results: { chunkIndex: number; offset: number; data: string }[] = [];
 
@@ -125,12 +146,14 @@ class VoiceNoteCache {
   }
 
   async clearChunks(transferId: string): Promise<void> {
+    const userId = getUserId();
+    const isolatedTransferId = userId ? `${userId}_${transferId}` : transferId;
     try {
       const db = await this.getDB();
       return new Promise<void>((resolve) => {
         const transaction = db.transaction(this.chunkStoreName, 'readwrite');
         const store = transaction.objectStore(this.chunkStoreName);
-        const keyRange = IDBKeyRange.bound(`${transferId}_`, `${transferId}_\uffff`);
+        const keyRange = IDBKeyRange.bound(`${isolatedTransferId}_`, `${isolatedTransferId}_\uffff`);
         const request = store.openCursor(keyRange);
 
         request.onsuccess = (event: any) => {

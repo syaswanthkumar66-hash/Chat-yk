@@ -245,16 +245,61 @@ const getLocalStorageJSON = <T>(key: string, defaultValue: T): T => {
 const cachedUser = getLocalStorageJSON<any>('proto_user', null);
 const cachedIsLoggedIn = getLocalStorageItem('proto_isLoggedIn', 'false') === 'true';
 const cachedAuthMethod = getLocalStorageItem('proto_authMethod', '') || null;
-const cachedBlockedUserIds = getLocalStorageJSON<string[]>('proto_blockedUserIds', []);
-const cachedRemovedFriendIds = getLocalStorageJSON<string[]>('proto_removedFriendIds', []);
+
+// Perform one-time migration of legacy keys to user-specific keys if cachedUser is available
+if (typeof window !== 'undefined' && cachedUser?.id) {
+  const legacyChats = localStorage.getItem('proto_chats');
+  if (legacyChats && !localStorage.getItem(`proto_chats_${cachedUser.id}`)) {
+    localStorage.setItem(`proto_chats_${cachedUser.id}`, legacyChats);
+  }
+  const legacyUsers = localStorage.getItem('proto_users');
+  if (legacyUsers && !localStorage.getItem(`proto_users_${cachedUser.id}`)) {
+    localStorage.setItem(`proto_users_${cachedUser.id}`, legacyUsers);
+  }
+  const legacyBlocked = localStorage.getItem('proto_blockedUserIds');
+  if (legacyBlocked && !localStorage.getItem(`proto_blockedUserIds_${cachedUser.id}`)) {
+    localStorage.setItem(`proto_blockedUserIds_${cachedUser.id}`, legacyBlocked);
+  }
+  const legacyRemoved = localStorage.getItem('proto_removedFriendIds');
+  if (legacyRemoved && !localStorage.getItem(`proto_removedFriendIds_${cachedUser.id}`)) {
+    localStorage.setItem(`proto_removedFriendIds_${cachedUser.id}`, legacyRemoved);
+  }
+  const legacyFR = localStorage.getItem('proto_friendRequests');
+  if (legacyFR && !localStorage.getItem(`proto_friendRequests_${cachedUser.id}`)) {
+    localStorage.setItem(`proto_friendRequests_${cachedUser.id}`, legacyFR);
+  }
+  const legacySFR = localStorage.getItem('proto_sentFriendRequests');
+  if (legacySFR && !localStorage.getItem(`proto_sentFriendRequests_${cachedUser.id}`)) {
+    localStorage.setItem(`proto_sentFriendRequests_${cachedUser.id}`, legacySFR);
+  }
+
+  // After copying to user-specific keys, clean up legacy global keys to prevent crossover for future logins
+  localStorage.removeItem('proto_chats');
+  localStorage.removeItem('proto_users');
+  localStorage.removeItem('proto_blockedUserIds');
+  localStorage.removeItem('proto_removedFriendIds');
+  localStorage.removeItem('proto_friendRequests');
+  localStorage.removeItem('proto_sentFriendRequests');
+}
+
+const cachedBlockedUserIds = cachedUser 
+  ? getLocalStorageJSON<string[]>(`proto_blockedUserIds_${cachedUser.id}`, [])
+  : [];
+const cachedRemovedFriendIds = cachedUser 
+  ? getLocalStorageJSON<string[]>(`proto_removedFriendIds_${cachedUser.id}`, [])
+  : [];
 const cachedUsers = cachedUser 
-  ? getLocalStorageJSON<any[]>(`proto_users_${cachedUser.id}`, getLocalStorageJSON<any[]>('proto_users', []))
-  : getLocalStorageJSON<any[]>('proto_users', []);
+  ? getLocalStorageJSON<any[]>(`proto_users_${cachedUser.id}`, [])
+  : [];
 const cachedChats = cachedUser 
-  ? getLocalStorageJSON<any[]>(`proto_chats_${cachedUser.id}`, getLocalStorageJSON<any[]>('proto_chats', []))
-  : getLocalStorageJSON<any[]>('proto_chats', []);
-const cachedFriendRequests = getLocalStorageJSON<any[]>('proto_friendRequests', []);
-const cachedSentFriendRequests = getLocalStorageJSON<string[]>('proto_sentFriendRequests', []);
+  ? getLocalStorageJSON<any[]>(`proto_chats_${cachedUser.id}`, [])
+  : [];
+const cachedFriendRequests = cachedUser
+  ? getLocalStorageJSON<any[]>(`proto_friendRequests_${cachedUser.id}`, [])
+  : [];
+const cachedSentFriendRequests = cachedUser
+  ? getLocalStorageJSON<string[]>(`proto_sentFriendRequests_${cachedUser.id}`, [])
+  : [];
 
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
@@ -433,13 +478,6 @@ export const useAppStore = create<AppState>((set) => ({
         } catch (e) {
           console.error("Error parsing stored chats for user", user.id, e);
         }
-      } else {
-        const legacy = localStorage.getItem('proto_chats');
-        if (legacy) {
-          try {
-            userChats = JSON.parse(legacy);
-          } catch (e) {}
-        }
       }
     }
 
@@ -453,13 +491,50 @@ export const useAppStore = create<AppState>((set) => ({
         } catch (e) {
           console.error("Error parsing stored users for user", user.id, e);
         }
-      } else {
-        const legacy = localStorage.getItem('proto_users');
-        if (legacy) {
-          try {
-            userUsers = JSON.parse(legacy);
-          } catch (e) {}
-        }
+      }
+    }
+
+    // Load per-user friend requests from localStorage
+    let userFriendRequests: any[] = [];
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`proto_friendRequests_${user.id}`);
+      if (stored) {
+        try {
+          userFriendRequests = JSON.parse(stored);
+        } catch (e) {}
+      }
+    }
+
+    // Load per-user sent friend requests from localStorage
+    let userSentFriendRequests: string[] = [];
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`proto_sentFriendRequests_${user.id}`);
+      if (stored) {
+        try {
+          userSentFriendRequests = JSON.parse(stored);
+        } catch (e) {}
+      }
+    }
+
+    // Load per-user blocked user IDs from localStorage
+    let userBlockedUserIds: string[] = [];
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`proto_blockedUserIds_${user.id}`);
+      if (stored) {
+        try {
+          userBlockedUserIds = JSON.parse(stored);
+        } catch (e) {}
+      }
+    }
+
+    // Load per-user removed friend IDs from localStorage
+    let userRemovedFriendIds: string[] = [];
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`proto_removedFriendIds_${user.id}`);
+      if (stored) {
+        try {
+          userRemovedFriendIds = JSON.parse(stored);
+        } catch (e) {}
       }
     }
 
@@ -468,7 +543,10 @@ export const useAppStore = create<AppState>((set) => ({
       user,
       authMethod,
       chats: userChats,
-      friendRequests: [],
+      friendRequests: userFriendRequests,
+      sentFriendRequests: userSentFriendRequests,
+      blockedUserIds: userBlockedUserIds,
+      removedFriendIds: userRemovedFriendIds,
       groupJoinRequests: [],
       onlineUserIds: [],
       users: userUsers
@@ -519,6 +597,8 @@ export const useAppStore = create<AppState>((set) => ({
       selectedMessageIds: [], 
       friendRequests: [], 
       sentFriendRequests: [], 
+      blockedUserIds: [],
+      removedFriendIds: [],
       groupJoinRequests: [], 
       offlineMessageQueue: [],
       socket: null 
@@ -1212,7 +1292,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const nextRemoved = [...state.removedFriendIds, userId];
       if (typeof window !== 'undefined') {
-        localStorage.setItem('proto_removedFriendIds', JSON.stringify(nextRemoved));
+        const key = state.user?.id ? `proto_removedFriendIds_${state.user.id}` : 'proto_removedFriendIds';
+        localStorage.setItem(key, JSON.stringify(nextRemoved));
       }
       return {
         removedFriendIds: nextRemoved,
@@ -1259,7 +1340,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const nextRemoved = state.removedFriendIds.filter(id => id !== userId);
       if (typeof window !== 'undefined') {
-        localStorage.setItem('proto_removedFriendIds', JSON.stringify(nextRemoved));
+        const key = state.user?.id ? `proto_removedFriendIds_${state.user.id}` : 'proto_removedFriendIds';
+        localStorage.setItem(key, JSON.stringify(nextRemoved));
       }
       return {
         removedFriendIds: nextRemoved
@@ -1283,7 +1365,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const nextBlocked = [...state.blockedUserIds, userId];
       if (typeof window !== 'undefined') {
-        localStorage.setItem('proto_blockedUserIds', JSON.stringify(nextBlocked));
+        const key = state.user?.id ? `proto_blockedUserIds_${state.user.id}` : 'proto_blockedUserIds';
+        localStorage.setItem(key, JSON.stringify(nextBlocked));
       }
       return {
         blockedUserIds: nextBlocked,
@@ -1315,7 +1398,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const nextBlocked = state.blockedUserIds.filter(id => id !== userId);
       if (typeof window !== 'undefined') {
-        localStorage.setItem('proto_blockedUserIds', JSON.stringify(nextBlocked));
+        const key = state.user?.id ? `proto_blockedUserIds_${state.user.id}` : 'proto_blockedUserIds';
+        localStorage.setItem(key, JSON.stringify(nextBlocked));
       }
       return {
         blockedUserIds: nextBlocked
@@ -1795,14 +1879,20 @@ export const useAppStore = create<AppState>((set) => ({
 if (typeof window !== 'undefined') {
   useAppStore.subscribe((state) => {
     try {
-      localStorage.setItem('proto_users', JSON.stringify(state.users));
-      localStorage.setItem('proto_chats', JSON.stringify(state.chats));
       if (state.user?.id) {
         localStorage.setItem(`proto_chats_${state.user.id}`, JSON.stringify(state.chats));
         localStorage.setItem(`proto_users_${state.user.id}`, JSON.stringify(state.users));
+        localStorage.setItem(`proto_friendRequests_${state.user.id}`, JSON.stringify(state.friendRequests));
+        localStorage.setItem(`proto_sentFriendRequests_${state.user.id}`, JSON.stringify(state.sentFriendRequests));
+        localStorage.setItem(`proto_blockedUserIds_${state.user.id}`, JSON.stringify(state.blockedUserIds));
+        localStorage.setItem(`proto_removedFriendIds_${state.user.id}`, JSON.stringify(state.removedFriendIds));
+      } else {
+        // Fallback for non-logged-in session state if any, though normally empty on logout
+        localStorage.setItem('proto_users', JSON.stringify(state.users));
+        localStorage.setItem('proto_chats', JSON.stringify(state.chats));
+        localStorage.setItem('proto_friendRequests', JSON.stringify(state.friendRequests));
+        localStorage.setItem('proto_sentFriendRequests', JSON.stringify(state.sentFriendRequests));
       }
-      localStorage.setItem('proto_friendRequests', JSON.stringify(state.friendRequests));
-      localStorage.setItem('proto_sentFriendRequests', JSON.stringify(state.sentFriendRequests));
     } catch (e) {
       console.error("Error subscribing to persist state:", e);
     }

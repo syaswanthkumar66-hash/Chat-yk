@@ -1,3 +1,16 @@
+const getUserId = (): string => {
+  if (typeof window !== 'undefined') {
+    const userStr = localStorage.getItem('proto_user');
+    if (userStr) {
+      try {
+        const u = JSON.parse(userStr);
+        return u.id || '';
+      } catch (e) {}
+    }
+  }
+  return '';
+};
+
 class AudioStorageService {
   private dbName = 'audio-storage-db';
   private storeName = 'audio-chunks';
@@ -29,15 +42,17 @@ class AudioStorageService {
    * Save an audio chunk to the IndexedDB.
    */
   async saveChunk(transferId: string, chunkIndex: number, offset: number, data: string): Promise<void> {
+    const userId = getUserId();
+    const isolatedTransferId = userId ? `${userId}_${transferId}` : transferId;
     try {
       const db = await this.getDB();
       return new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(this.storeName, 'readwrite');
         const store = transaction.objectStore(this.storeName);
         // Use composite key padding to prevent sort issues and support range bounds:
-        const key = `${transferId}_${chunkIndex.toString().padStart(6, '0')}`;
+        const key = `${isolatedTransferId}_${chunkIndex.toString().padStart(6, '0')}`;
         const record = {
-          transferId,
+          transferId: isolatedTransferId,
           chunkIndex,
           offset,
           data,
@@ -56,12 +71,14 @@ class AudioStorageService {
    * Get all chunks for a specific transferId, sorted by chunkIndex.
    */
   async getChunks(transferId: string): Promise<{ chunkIndex: number; offset: number; data: string }[]> {
+    const userId = getUserId();
+    const isolatedTransferId = userId ? `${userId}_${transferId}` : transferId;
     try {
       const db = await this.getDB();
       return new Promise((resolve) => {
         const transaction = db.transaction(this.storeName, 'readonly');
         const store = transaction.objectStore(this.storeName);
-        const keyRange = IDBKeyRange.bound(`${transferId}_`, `${transferId}_\uffff`);
+        const keyRange = IDBKeyRange.bound(`${isolatedTransferId}_`, `${isolatedTransferId}_\uffff`);
         const request = store.openCursor(keyRange);
         const results: { chunkIndex: number; offset: number; data: string }[] = [];
 
@@ -123,12 +140,14 @@ class AudioStorageService {
    * Delete stored chunks for a transferId.
    */
   async clearChunks(transferId: string): Promise<void> {
+    const userId = getUserId();
+    const isolatedTransferId = userId ? `${userId}_${transferId}` : transferId;
     try {
       const db = await this.getDB();
       return new Promise<void>((resolve) => {
         const transaction = db.transaction(this.storeName, 'readwrite');
         const store = transaction.objectStore(this.storeName);
-        const keyRange = IDBKeyRange.bound(`${transferId}_`, `${transferId}_\uffff`);
+        const keyRange = IDBKeyRange.bound(`${isolatedTransferId}_`, `${isolatedTransferId}_\uffff`);
         const request = store.openCursor(keyRange);
 
         request.onsuccess = (event: any) => {
