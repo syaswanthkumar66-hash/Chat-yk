@@ -770,6 +770,39 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 </div>
                 <span className="text-xs text-neutral-muted font-bold">{removedFriendIds.length} users</span>
               </button>
+
+              {/* E2EE Cloud Sync & Encryption Status Card */}
+              <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="size-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
+                    <Icon name="verified_user" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">Account Data Encryption</span>
+                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight italic mt-0.5">Gmail-Derived Key Active</h4>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Your private conversations are fully end-to-end encrypted. To prevent losing access to your E2EE chats when switching browsers or devices, your E2E keys are backed up securely. They are encrypted client-side using a cryptographic key derived from your authenticated Google/Gmail account (<span className="font-mono font-bold text-slate-800">{user?.email || 'authenticated-gmail@google.com'}</span>) and synced to the cloud. Only your authenticated Google session can derive the key to decrypt and restore your chat database.
+                </p>
+
+                <div className="grid grid-cols-2 gap-2 pt-2 text-[10px]">
+                  <div className="p-3 bg-white/80 rounded-xl border border-emerald-50/50">
+                    <span className="text-slate-400 font-bold block uppercase tracking-wider">Encryption Algorithm</span>
+                    <span className="text-slate-700 font-black font-mono block mt-0.5">AES-256-GCM / ECDH</span>
+                  </div>
+                  <div className="p-3 bg-white/80 rounded-xl border border-emerald-50/50">
+                    <span className="text-slate-400 font-bold block uppercase tracking-wider">Key Derivation</span>
+                    <span className="text-slate-700 font-black font-mono block mt-0.5">PBKDF2 (SHA-256)</span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-emerald-500/10 text-emerald-800 rounded-xl flex items-center gap-2 text-xs font-semibold">
+                  <Icon name="lock" className="text-emerald-600 shrink-0" />
+                  <span>Only your authenticated Google login can decrypt and access your E2EE key database.</span>
+                </div>
+              </div>
             </div>
           </div>
         );

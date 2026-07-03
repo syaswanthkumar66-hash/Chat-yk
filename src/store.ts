@@ -7,6 +7,7 @@ export type AppMode = 'social' | 'fileshare' | 'hub' | 'admin';
 
 interface UserProfile {
   id: string;
+  email?: string;
   username: string;
   displayName: string;
   avatar: string;

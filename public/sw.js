@@ -1,9 +1,11 @@
-// Service Worker for Web Push Notifications
+// Service Worker for Web Push Notifications and Offline Support
 
 const CACHE_NAME = 'app-cache-v2';
+const OFFLINE_URL = '/offline.html';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
+  '/offline.html',
   '/favicon.ico',
   '/pwa-192x192.png',
   '/pwa-512x512.png'
@@ -36,6 +38,38 @@ self.addEventListener('activate', (event) => {
         })
       );
     }).then(() => self.clients.claim())
+  );
+});
+
+// Fetch event listener: cache-first with network fallback and offline page support
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+
+  // Skip API requests and Chrome extensions
+  if (event.request.url.includes('/api/') || !event.request.url.startsWith(self.location.origin)) {
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+
+      return fetch(event.request)
+        .then((response) => {
+          // Cache successful responses for next time
+          if (response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => {
+          // User is offline and asset isn't cached
+          if (event.request.mode === 'navigate') {
+            return caches.match(OFFLINE_URL);
+          }
+        });
+    })
   );
 });
 

@@ -361,7 +361,10 @@ export default function App() {
     inAppToasts,
     removeInAppToast,
     setActiveChatId,
-    setActiveRecipientId
+    setActiveRecipientId,
+    activeChatId,
+    activeRecipientId,
+    authMethod
   } = useAppStore();
 
   // Activate the real-time notification integration hook
@@ -421,6 +424,31 @@ export default function App() {
     };
   }, []);
 
+  // Synchronize current page/mode and active chat/recipient state to Firestore
+  useEffect(() => {
+    if (!user || authMethod === 'local') return;
+
+    // Store in localStorage for offline / quick recovery
+    localStorage.setItem(`proto_current_mode_${user.id}`, mode);
+    localStorage.setItem(`proto_active_chat_${user.id}`, activeChatId || '');
+    localStorage.setItem(`proto_active_recipient_${user.id}`, activeRecipientId || '');
+
+    if (navigator.onLine) {
+      try {
+        const docRef = doc(db, 'users', user.id);
+        updateDoc(docRef, {
+          currentMode: mode,
+          activeChatId: activeChatId,
+          activeRecipientId: activeRecipientId
+        }).catch((err) => {
+          console.warn("Could not sync active page/mode state to Firestore:", err);
+        });
+      } catch (err) {
+        console.error("Firestore update in page sync effect failed:", err);
+      }
+    }
+  }, [user, mode, activeChatId, activeRecipientId, authMethod]);
+
   // Handle Firebase auth state changes cleanly
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -449,6 +477,7 @@ export default function App() {
             const userData = userDoc.data();
             login({
               id: firebaseUser.uid,
+              email: userData.email || firebaseUser.email || undefined,
               username: userData.username,
               displayName: userData.displayName,
               avatar: userData.avatar,
@@ -458,6 +487,26 @@ export default function App() {
               profileVisibility: userData.profileVisibility,
               notificationSettings: userData.notificationSettings
             });
+
+            // Restore saved page/mode from Firestore or localStorage fallback!
+            if (userData.currentMode) {
+              useAppStore.setState({
+                mode: userData.currentMode,
+                activeChatId: userData.activeChatId || null,
+                activeRecipientId: userData.activeRecipientId || null
+              });
+            } else {
+              const savedMode = localStorage.getItem(`proto_current_mode_${firebaseUser.uid}`);
+              if (savedMode) {
+                const savedChat = localStorage.getItem(`proto_active_chat_${firebaseUser.uid}`);
+                const savedRecipient = localStorage.getItem(`proto_active_recipient_${firebaseUser.uid}`);
+                useAppStore.setState({
+                  mode: savedMode as any,
+                  activeChatId: savedChat || null,
+                  activeRecipientId: savedRecipient || null
+                });
+              }
+            }
 
             // If notification permission is already granted, silently register/sync push subscriptions in the background
             if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -472,6 +521,7 @@ export default function App() {
             // Determine the best profile data to use (cached or default)
             const resolvedProfile = (cachedUserObj && cachedUserObj.id === firebaseUser.uid) ? cachedUserObj : {
               id: firebaseUser.uid,
+              email: firebaseUser.email || undefined,
               username: firebaseUser.email?.split('@')[0] || 'user_' + firebaseUser.uid.substring(0, 5),
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'New User',
               avatar: firebaseUser.photoURL || '',
@@ -482,6 +532,18 @@ export default function App() {
 
             console.log("Creating or restoring user profile local session...");
             login(resolvedProfile);
+
+            // Restore saved page/mode local fallback for new sessions!
+            const savedMode = localStorage.getItem(`proto_current_mode_${firebaseUser.uid}`);
+            if (savedMode) {
+              const savedChat = localStorage.getItem(`proto_active_chat_${firebaseUser.uid}`);
+              const savedRecipient = localStorage.getItem(`proto_active_recipient_${firebaseUser.uid}`);
+              useAppStore.setState({
+                mode: savedMode as any,
+                activeChatId: savedChat || null,
+                activeRecipientId: savedRecipient || null
+              });
+            }
 
             // Explicit check for Firestore availability before initiating 'setDoc' user creation.
             const isFirestoreAvailable = navigator.onLine && !getDocError;

@@ -1708,7 +1708,7 @@ export const ChatDetail = () => {
               {/* System Message */}
               <div className="flex justify-center">
                 <p className="text-[10px] text-neutral-muted bg-primary/5 px-4 py-1 rounded-full font-bold uppercase tracking-widest">
-                  {chat?.isGroup ? 'You joined the group' : 'End-to-end encrypted'}
+                  <span>{chat?.isGroup ? 'You joined the group' : 'End-to-end encrypted'}</span>
                 </p>
               </div>
 
@@ -1728,7 +1728,9 @@ export const ChatDetail = () => {
                     )}
                   >
                     {!isOwn && chat?.isGroup && (
-                      <span className="text-[10px] font-black text-primary uppercase tracking-widest px-1">{msg.senderName}</span>
+                      <span className="text-[10px] font-black text-primary uppercase tracking-widest px-1">
+                        <span>{msg.senderName}</span>
+                      </span>
                     )}
                     <div className="flex items-end gap-2">
                       {!isOwn && chat?.isGroup && (
@@ -1742,28 +1744,28 @@ export const ChatDetail = () => {
                         className={cn(
                           "p-4 rounded-[1.5rem] shadow-sm relative touch-none transition-all",
                           isOwn 
-                            ? "bg-primary text-white rounded-tr-none shadow-primary/20" 
+                             ? "bg-primary text-white rounded-tr-none shadow-primary/20" 
                             : "bg-white text-slate-700 rounded-tl-none border border-slate-100",
                           selectedMessageIds.includes(msg.id) && (isOwn ? "bg-primary-dark ring-4 ring-primary/20" : "bg-primary/10 ring-2 ring-primary/20")
                         )}
                       >
                         {isGloballyDeleted ? (
                           <span className={cn("italic", isOwn ? "text-white/60" : "text-slate-400")}>
-                            {isOwn ? "You deleted this message" : "This message was deleted"}
+                            <span>{isOwn ? "You deleted this message" : "This message was deleted"}</span>
                           </span>
                         ) : msg.type === 'image' || msg.type === 'audio' || msg.type === 'file' ? (
                           <DecryptedMedia msg={msg} isOwn={isOwn} onPreview={(data) => setPreviewMedia(data)} />
                         ) : (
-                          <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                          <p className="text-sm whitespace-pre-wrap"><span>{msg.text}</span></p>
                         )}
 
                         {reactions[msg.id] && reactions[msg.id].length > 0 && !isGloballyDeleted && (
                           <div className={cn("absolute -bottom-2 flex gap-0.5", isOwn ? "-left-2" : "-right-2")}>
                             {Array.from(new Set(reactions[msg.id])).map(emoji => (
                               <div key={emoji} className="bg-white shadow-xl border border-slate-100 rounded-full px-2 py-1 flex items-center gap-1.5">
-                                <span className="text-xs">{emoji}</span>
+                                <span className="text-xs"><span>{emoji}</span></span>
                                 <span className="text-[9px] font-black text-slate-900">
-                                  {reactions[msg.id].filter(e => e === emoji).length}
+                                  <span>{reactions[msg.id].filter(e => e === emoji).length}</span>
                                 </span>
                               </div>
                             ))}
@@ -1777,7 +1779,9 @@ export const ChatDetail = () => {
                           <Icon name="lock" className="text-[10px] text-primary/60" />
                         </div>
                       )}
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{msg.timestamp}</span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">
+                        <span>{msg.timestamp}</span>
+                      </span>
                       {isOwn && !isGloballyDeleted && (() => {
                         const status = msg.status || 'read';
                         const iconName = 

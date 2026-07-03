@@ -571,9 +571,9 @@ export const SocialLayout = () => {
                         return (
                           <span className="truncate">
                             {chat.isGroup && chat.lastMessage?.senderName && (
-                              <span className="font-bold text-primary/80">{chat.lastMessage.senderName}: </span>
+                              <span className="font-bold text-primary/80"><span>{chat.lastMessage.senderName}: </span></span>
                             )}
-                            {chat.lastMessage?.text}
+                            <span>{chat.lastMessage?.text}</span>
                           </span>
                         );
                       })()}

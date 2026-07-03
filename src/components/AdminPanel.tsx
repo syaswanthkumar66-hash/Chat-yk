@@ -385,6 +385,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
       username: '',
       avatar: `https://picsum.photos/seed/${Math.random()}/200`,
       allowedTabs: [],
+      teamRole: '',
       accessibleTeamMembers: []
     });
   };
@@ -2934,6 +2935,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                                     isAdmin: u.isAdmin || false,
                                     avatar: u.avatar || '',
                                     allowedTabs: u.allowedTabs || [],
+                                    teamRole: u.teamRole || '',
                                     accessibleTeamMembers: u.accessibleTeamMembers || []
                                   });
                                   setUserSearchQuery('');
