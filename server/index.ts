@@ -166,6 +166,7 @@ let vapidKeys = {
   publicKey: "",
   privateKey: ""
 };
+let vapidSubject = "mailto:syaswanthkumar66@gmail.com";
 
 async function initVapid() {
   const localKeysPath = path.join(process.cwd(), 'vapid-keys.json');
@@ -272,8 +273,9 @@ async function initVapid() {
         subject = `mailto:syaswanthkumar66@gmail.com`;
       }
     }
+    vapidSubject = subject;
     webpush.setVapidDetails(
-      subject,
+      vapidSubject,
       vapidKeys.publicKey,
       vapidKeys.privateKey
     );
@@ -295,16 +297,17 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
   // Gracefully wait for VAPID initialization to finish before trying to dispatch any notifications
   try {
     await vapidInitPromise;
-  } catch (err) {
+  } catch (err: any) {
     console.error(`Cannot send push notification to ${recipientId}: VAPID initialization failed`, err);
-    return;
+    return { success: false, error: `VAPID initialization failed: ${err.message || err}`, devicesCount: 0, sentCount: 0 };
   }
 
   // Guard: if VAPID keys aren't loaded yet, skip silently with a clear log
   if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
     console.warn(`sendPushNotification skipped for ${recipientId}: VAPID keys not yet initialized`);
-    return;
+    return { success: false, error: "VAPID keys not yet initialized on server", devicesCount: 0, sentCount: 0 };
   }
+
   let subscriptions: any[] = [];
   if (db) {
     try {
@@ -343,6 +346,8 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
   if (subscriptions.length > 0) {
     console.log(`Sending Web Push Notification to user ${recipientId} across ${subscriptions.length} devices...`);
     const expiredEndpoints = new Set<string>();
+    let sentCount = 0;
+    let errorCount = 0;
 
     const sendPromises = subscriptions.map(async (subscription) => {
       if (!subscription || !subscription.endpoint) return;
@@ -366,10 +371,20 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
       }
 
       try {
-        await webpush.sendNotification(subscription, JSON.stringify(payload));
+        const options = {
+          vapidDetails: {
+            subject: vapidSubject,
+            publicKey: vapidKeys.publicKey,
+            privateKey: vapidKeys.privateKey
+          },
+          TTL: 86400 // Time-to-live in seconds (1 day)
+        };
+        await webpush.sendNotification(subscription, JSON.stringify(payload), options);
         console.log(`Successfully sent Web Push Notification to user ${recipientId} endpoint ${subscription.endpoint.slice(-20)}`);
+        sentCount++;
       } catch (err: any) {
         console.error(`Error sending push notification to user ${recipientId} endpoint ${subscription.endpoint.slice(-20)}:`, err);
+        errorCount++;
         if (err.statusCode === 410 || err.statusCode === 404) {
           console.log(`Subscription for user ${recipientId} has expired or is invalid: ${subscription.endpoint.slice(-20)}`);
           expiredEndpoints.add(subscription.endpoint);
@@ -427,8 +442,17 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
         }
       }
     }
+
+    return { success: true, devicesCount: subscriptions.length, sentCount, errorCount };
   } else {
     console.log(`No active Web Push subscription found for user ${recipientId}`);
+    return { 
+      success: false, 
+      error: "No active Web Push subscription found for this user", 
+      warning: "The user has not authorized or registered notifications on this device/browser yet, or registration failed. If testing inside an iframe, please open the app in a new tab instead.",
+      devicesCount: 0, 
+      sentCount: 0 
+    };
   }
 }
 
@@ -1428,14 +1452,27 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const notificationBody = body || "This is a real Web Push notification sent securely from the Express backend server using VAPID!";
 
       console.log(`Sending manual VAPID test push notification to user ${userId}...`);
-      await sendPushNotification(userId, {
+      const result: any = await sendPushNotification(userId, {
         title: notificationTitle,
         body: notificationBody,
         icon: '/pwa-192x192.png',
         data: { url: '/' }
       });
 
-      res.json({ success: true, message: "Test push notification dispatched via VAPID" });
+      if (result && !result.success) {
+        return res.status(400).json({ 
+          success: false, 
+          error: result.error || "Failed to deliver push notification", 
+          warning: result.warning,
+          details: result 
+        });
+      }
+
+      res.json({ 
+        success: true, 
+        message: "Test push notification dispatched via VAPID", 
+        details: result 
+      });
     } catch (err: any) {
       console.error("Error sending test push notification:", err);
       res.status(500).json({ error: err.message || "Failed to send test push notification" });

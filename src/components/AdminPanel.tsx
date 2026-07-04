@@ -199,7 +199,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
       
       // Call backend native VAPID test push endpoint for both
       try {
-        await fetch('/api/send-test-push', {
+        const resAdmin = await fetch('/api/send-test-push', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -209,7 +209,16 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
           })
         });
         
-        await fetch('/api/send-test-push', {
+        if (!resAdmin.ok) {
+          const errData = await resAdmin.json().catch(() => ({}));
+          logMsg(`[WARNING] Admin VAPID push failed: ${errData.error || resAdmin.statusText}. ${errData.warning || ''}`);
+        } else {
+          const successData = await resAdmin.json().catch(() => ({}));
+          const devices = successData.details?.devicesCount || 0;
+          logMsg(`[PUSH] Dispatched to Admin's registered devices: ${devices}`);
+        }
+        
+        const resTarget = await fetch('/api/send-test-push', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -218,6 +227,15 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
             body: `Admin ${user?.displayName || 'Administrator'} has verified your push delivery route.`
           })
         });
+
+        if (!resTarget.ok) {
+          const errData = await resTarget.json().catch(() => ({}));
+          logMsg(`[WARNING] User ${targetUser.displayName} VAPID push failed: ${errData.error || resTarget.statusText}. ${errData.warning || ''}`);
+        } else {
+          const successData = await resTarget.json().catch(() => ({}));
+          const devices = successData.details?.devicesCount || 0;
+          logMsg(`[PUSH] Dispatched to ${targetUser.displayName}'s registered devices: ${devices}`);
+        }
       } catch (e: any) {
         logMsg(`[WARNING] Native VAPID push route warning: ${e.message}`);
       }
