@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Button, cn } from './UI';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 
 interface MediaGalleryProps {
   onClose: () => void;
@@ -11,7 +11,7 @@ interface MediaGalleryProps {
 type TabType = 'photos' | 'videos' | 'docs' | 'links';
 
 export const MediaGallery = ({ onClose, groupId }: MediaGalleryProps) => {
-  const { chats, user, users } = useAppStore();
+  const { chats, user, users } = useStore(s => ({ chats: s.chats, user: s.user, users: s.users }), shallowEqual);
   const [activeTab, setActiveTab] = useState<TabType>('photos');
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

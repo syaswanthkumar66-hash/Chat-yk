@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { useAppStore } from '../store';
+import { useStore, useAppStore, shallowEqual } from '../store';
 import { Icon, Avatar, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { registerPushNotifications } from '../services/notificationService';
@@ -34,7 +34,26 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     connectSpot,
     disconnectSpot,
     switchAccount
-  } = useAppStore();
+  } = useStore(s => ({
+    user: s.user,
+    updateUser: s.updateUser,
+    blockedUserIds: s.blockedUserIds,
+    unblockUser: s.unblockUser,
+    removedFriendIds: s.removedFriendIds,
+    restoreFriend: s.restoreFriend,
+    tickets: s.tickets,
+    addTicket: s.addTicket,
+    feedback: s.feedback,
+    addFeedback: s.addFeedback,
+    logout: s.logout,
+    users: s.users,
+    wssStatus: s.wssStatus,
+    wssMessage: s.wssMessage,
+    connectionLogs: s.connectionLogs,
+    connectSpot: s.connectSpot,
+    disconnectSpot: s.disconnectSpot,
+    switchAccount: s.switchAccount
+  }), shallowEqual);
   const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection'>('main');
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
@@ -98,13 +117,13 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
   } | null>(null);
 
   const [diagnosticLogs, setDiagnosticLogs] = useState<string[]>([]);
-  const [activeSimulation, setActiveSimulation] = useState<'working' | 'blocked' | 'iframe' | 'timeout' | null>(null);
+  const [activeSimulation, setActiveSimulation] = useState<'working' | 'blocked' | 'iframe' | 'timeout' | 'smart' | null>(null);
 
   const addLog = (msg: string) => {
     setDiagnosticLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
   };
 
-  const runSimulation = async (type: 'working' | 'blocked' | 'iframe' | 'timeout') => {
+  const runSimulation = async (type: 'working' | 'blocked' | 'iframe' | 'timeout' | 'smart') => {
     setActiveSimulation(type);
     setDiagnosticLogs([]);
     
@@ -244,6 +263,140 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
         addLog("❌ Retry 2 failed: Connection refused.");
         addLog("❌ Error: Web Push notification delivery failed after maximum retry attempts.");
         addLog("💡 DIAGNOSTIC REPORT: Ensure that your Express server is running and accessible (bind to 0.0.0.0:3000).");
+      } 
+      
+      else if (type === 'smart') {
+        addLog("🚀 Starting Smart Diagnostics Engine...");
+        await new Promise(r => setTimeout(r, 600));
+
+        let issuesFound = 0;
+        const recommendations: string[] = [];
+
+        // 1. Client network check
+        addLog("ℹ️ Checking client network connection state...");
+        const isOnline = navigator.onLine;
+        addLog(`   Result: ${isOnline ? "ONLINE ✓" : "OFFLINE ✗"}`);
+        if (!isOnline) {
+          issuesFound++;
+          recommendations.push("- Your browser is currently offline. Please check your internet connection.");
+        }
+        await new Promise(r => setTimeout(r, 400));
+
+        // 2. Iframe Context check
+        addLog("ℹ️ Checking for Iframe Sandbox limitations...");
+        const inIframe = window.self !== window.top;
+        addLog(`   Result: ${inIframe ? "Inside Iframe Sandbox ⚠️" : "Standalone Tab/Window ✓"}`);
+        if (inIframe) {
+          issuesFound++;
+          recommendations.push("- Open the application in a Standalone New Tab. Browsers block Service Workers and Push Notification APIs inside cross-origin sandboxed iframes.");
+        }
+        await new Promise(r => setTimeout(r, 400));
+
+        // 3. Web Push Browser support
+        addLog("ℹ️ Checking Browser Web Push API Support...");
+        const swSupported = 'serviceWorker' in navigator;
+        const pmSupported = 'PushManager' in window;
+        addLog(`   Result: Service Worker: ${swSupported ? "SUPPORTED ✓" : "NOT SUPPORTED ✗"}, Push Manager: ${pmSupported ? "SUPPORTED ✓" : "NOT SUPPORTED ✗"}`);
+        if (!swSupported || !pmSupported) {
+          issuesFound++;
+          recommendations.push("- Web Push notifications are not supported on this browser/platform. Please use a modern browser like Chrome, Edge, Firefox, or Safari.");
+        }
+        await new Promise(r => setTimeout(r, 400));
+
+        // 4. Notification Permissions
+        addLog("ℹ️ Checking Notification Permissions...");
+        const permission = 'Notification' in window ? Notification.permission : 'default';
+        addLog(`   Result: Permission state: "${permission}"`);
+        if (permission === 'denied') {
+          issuesFound++;
+          recommendations.push("- Notification permissions are explicitly Blocked. Click the 'lock' icon in the browser address bar, reset notification permissions to 'Allow', and reload.");
+        } else if (permission === 'default') {
+          addLog("   Notice: Permission is set to default (unprompted).");
+        }
+        await new Promise(r => setTimeout(r, 400));
+
+        // 5. Active Service Worker check
+        addLog("ℹ️ Verifying Service Worker status...");
+        let swActive = false;
+        let activeRegistration: ServiceWorkerRegistration | null = null;
+        if (swSupported) {
+          try {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            addLog(`   Found ${regs.length} active service worker registration(s).`);
+            for (const r of regs) {
+              addLog(`   - Scope: ${r.scope}`);
+              if (r.active) {
+                addLog(`     Status: ACTIVE (state: ${r.active.state}) ✓`);
+                swActive = true;
+                activeRegistration = r;
+              } else {
+                addLog(`     Status: INACTIVE ⚠️`);
+              }
+            }
+          } catch (swErr: any) {
+            addLog(`   ❌ Error fetching service workers: ${swErr.message || swErr}`);
+          }
+        }
+        if (!swActive) {
+          issuesFound++;
+          recommendations.push("- No active Service Worker found. Make sure the Service Worker starts up cleanly (see console devtools) and PWA build succeeded.");
+        }
+        await new Promise(r => setTimeout(r, 400));
+
+        // 6. VAPID Keys validation on backend
+        addLog("ℹ️ Validating Backend VAPID Key State...");
+        try {
+          const res = await fetch('/api/vapid-validate');
+          if (res.ok) {
+            const keysData = await res.json();
+            addLog(`   Server VAPID Keys: ${keysData.isValidOverall ? "CONFIGURED & VALID ✓" : "INVALID/MISSING ✗"}`);
+            if (keysData.publicKey.error) addLog(`     Public Key error: ${keysData.publicKey.error}`);
+            if (keysData.privateKey.error) addLog(`     Private Key error: ${keysData.privateKey.error}`);
+            
+            if (!keysData.isValidOverall) {
+              issuesFound++;
+              recommendations.push("- Server VAPID keys are uninitialized or invalid. Let the application auto-generate valid VAPID keys, or configure correct VAPID keys in .env.");
+            }
+          } else {
+            addLog(`   ❌ Server returned HTTP ${res.status} for VAPID validate endpoint.`);
+            issuesFound++;
+            recommendations.push("- Backend server returned an error during VAPID keys query. Ensure backend server is healthy.");
+          }
+        } catch (keysErr: any) {
+          addLog(`   ❌ Could not reach backend: ${keysErr.message || keysErr}`);
+          issuesFound++;
+          recommendations.push("- Could not establish connectivity with the backend server. Please verify your Express development server is running on Port 3000.");
+        }
+        await new Promise(r => setTimeout(r, 400));
+
+        // 7. Push Subscription check
+        addLog("ℹ️ Inspecting Browser Push Subscription...");
+        if (activeRegistration && activeRegistration.pushManager) {
+          try {
+            const sub = await activeRegistration.pushManager.getSubscription();
+            if (sub) {
+              addLog(`   Result: ACTIVE SUBSCRIPTION FOUND ✓`);
+              addLog(`   Endpoint: ${sub.endpoint.slice(0, 45)}...`);
+            } else {
+              addLog(`   Result: NO ACTIVE SUBSCRIPTION FOUND ⚠️`);
+              issuesFound++;
+              recommendations.push("- Browser push subscription is missing. Click 'Enable Notifications' in Settings to register and sync with the backend.");
+            }
+          } catch (subErr: any) {
+            addLog(`   ❌ Error querying subscription: ${subErr.message || subErr}`);
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 800));
+        addLog("--------------------------------------------------");
+        addLog(`🎉 Smart Diagnostics Complete! Found ${issuesFound} potential issue(s).`);
+        addLog("--------------------------------------------------");
+        if (issuesFound === 0) {
+          addLog("🎉 SUCCESS: Everything looks fully configured and ready! Notifications should deliver cleanly. Try triggering a 'Working Test' above.");
+        } else {
+          addLog("⚠️ RECOMMENDED SOLUTIONS:");
+          recommendations.forEach(rec => addLog(`   ${rec}`));
+        }
       }
     } catch (globalErr: any) {
       addLog(`❌ Simulation Error: ${globalErr.message || globalErr}`);
@@ -632,6 +785,25 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                     </div>
                     <span className="text-[9px] text-slate-300 font-medium block mt-1 leading-normal">
                       Simulates backend connection timeout & retry mechanism.
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => runSimulation('smart')}
+                    disabled={!!activeSimulation}
+                    className="p-3 bg-slate-850 border border-indigo-500/30 hover:border-indigo-500 hover:bg-slate-800 text-left rounded-2xl transition-all disabled:opacity-50 col-span-2 flex items-center justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="size-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-wider">Smart Auto-Diagnostics</span>
+                      </div>
+                      <span className="text-[9px] text-slate-300 font-medium block mt-1 leading-normal">
+                        Performs live checks on permissions, sandbox context, service workers, and VAPID key configurations.
+                      </span>
+                    </div>
+                    <span className="text-[10px] bg-indigo-950/40 border border-indigo-500/30 px-3 py-1.5 rounded-xl text-indigo-300 font-bold tracking-wide uppercase whitespace-nowrap shrink-0 hover:bg-indigo-900 transition-all">
+                      Run Diagnostic Assistant
                     </span>
                   </button>
                 </div>

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 import { QRCodeCanvas } from 'qrcode.react';
 import { MediaGallery } from './MediaGallery';
 
@@ -19,7 +19,19 @@ const PRELOADED_AVATARS = [
 ];
 
 export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
-  const { user, setUser, updateUser, setActiveGroupInfoId, setViewingUserId, chats, blockedUserIds, removedFriendIds, friendRequests, sentFriendRequests, users } = useAppStore();
+  const { user, setUser, updateUser, setActiveGroupInfoId, setViewingUserId, chats, blockedUserIds, removedFriendIds, friendRequests, sentFriendRequests, users } = useStore(s => ({
+    user: s.user,
+    setUser: s.setUser,
+    updateUser: s.updateUser,
+    setActiveGroupInfoId: s.setActiveGroupInfoId,
+    setViewingUserId: s.setViewingUserId,
+    chats: s.chats,
+    blockedUserIds: s.blockedUserIds,
+    removedFriendIds: s.removedFriendIds,
+    friendRequests: s.friendRequests,
+    sentFriendRequests: s.sentFriendRequests,
+    users: s.users
+  }), shallowEqual);
   const [isEditing, setIsEditing] = useState(false);
   const [showGroupsList, setShowGroupsList] = useState(false);
   const [showFriendsList, setShowFriendsList] = useState(false);

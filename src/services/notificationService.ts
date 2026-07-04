@@ -1,5 +1,17 @@
 // Web Push Notification Registration Service using VAPID keys
 import { BACKEND_URL } from '../config';
+import { auth } from '../firebase';
+
+/**
+ * Bulletproof helper to fetch a valid authentication token for both Google (Firebase) and Local authentication methods.
+ */
+async function getAuthToken(userId: string): Promise<string> {
+  const authMethod = typeof window !== 'undefined' ? localStorage.getItem('proto_authMethod') : null;
+  if (authMethod === 'local') {
+    return `local-${userId}`;
+  }
+  return auth.currentUser ? await auth.currentUser.getIdToken() : '';
+}
 
 function arrayBuffersEqual(buf1: ArrayBuffer | null, buf2: Uint8Array): boolean {
   if (!buf1) return false;
@@ -147,10 +159,12 @@ export async function registerPushNotifications(userId: string, force?: boolean)
         console.log("Existing valid VAPID subscription found. Syncing silently with backend...");
         // Store the subscription object by sending it to the backend
         const targetUrl = BACKEND_URL || window.location.origin;
+        const idToken = await getAuthToken(userId);
         const res = await fetch(`${targetUrl}/api/save-subscription`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
           },
           body: JSON.stringify({
             userId,
@@ -244,10 +258,12 @@ export async function registerPushNotifications(userId: string, force?: boolean)
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         console.log(`Saving push subscription to backend (attempt ${attempt}/3)...`);
+        const idToken = await getAuthToken(userId);
         saveResponse = await fetch(`${targetUrl}/api/save-subscription`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
           },
           body: JSON.stringify({
             userId,
@@ -313,10 +329,12 @@ export async function triggerPushNotificationWithRetry(
   
   const attemptDelivery = async () => {
     console.log(`[Push Delivery] Dispatched request for user ${userId} to backend...`);
+    const idToken = await getAuthToken(userId);
     const res = await fetch(`${targetUrl}/api/send-test-push`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`
       },
       body: JSON.stringify({
         userId,

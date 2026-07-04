@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useAppStore } from '../store';
+import { useState, useEffect, useMemo } from 'react';
+import { useStore, shallowEqual } from '../store';
 import { Icon, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, doc, updateDoc, deleteDoc, getDoc } from '../firebase';
@@ -11,7 +11,15 @@ interface NotificationPanelProps {
 }
 
 export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
-  const { user, notifications, markNotificationAsRead, markAllNotificationsAsRead, clearNotifications, setActiveChatId, setMode } = useAppStore();
+  const { user, notifications, markNotificationAsRead, markAllNotificationsAsRead, clearNotifications, setActiveChatId, setMode } = useStore(s => ({
+    user: s.user,
+    notifications: s.notifications,
+    markNotificationAsRead: s.markNotificationAsRead,
+    markAllNotificationsAsRead: s.markAllNotificationsAsRead,
+    clearNotifications: s.clearNotifications,
+    setActiveChatId: s.setActiveChatId,
+    setMode: s.setMode
+  }), shallowEqual);
 
   const [permission, setPermission] = useState<string>('default');
   const [hasSubscription, setHasSubscription] = useState<boolean>(false);
@@ -225,8 +233,8 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
     }
   };
 
-  const unreadNotifications = notifications.filter(n => n.status !== 'read');
-  const hasUnread = unreadNotifications.length > 0;
+  const unreadNotifications = useMemo(() => notifications.filter(n => n.status !== 'read'), [notifications]);
+  const hasUnread = useMemo(() => unreadNotifications.length > 0, [unreadNotifications]);
 
   const handleNotificationClick = async (notif: AppNotification) => {
     // 1. Mark as read

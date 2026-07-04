@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Avatar, Button, cn } from './UI';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 import { webrtcService } from '../services/webrtcService';
 
 interface Participant {
@@ -52,7 +52,13 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
 
-  const { removedFriendIds, socket, user, chats, users } = useAppStore();
+  const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
+    removedFriendIds: s.removedFriendIds,
+    socket: s.socket,
+    user: s.user,
+    chats: s.chats,
+    users: s.users
+  }), shallowEqual);
   
   useEffect(() => {
     if (socket && (groupId || userId)) {

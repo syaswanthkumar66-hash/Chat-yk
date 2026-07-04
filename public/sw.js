@@ -131,33 +131,58 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   console.log('Notification clicked:', event);
   event.notification.close();
-  const targetUrl = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  const rawUrl = event.notification.data?.url || '/';
+  const targetUrl = new URL(rawUrl, self.location.origin).href;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // If a window is already open at the target URL, focus it
+      // 1. If we have an open tab of our app, focus it, post a message and navigate
       for (let i = 0; i < windowClients.length; i++) {
         const client = windowClients[i];
-        if (client.url === targetUrl && 'focus' in client) {
-          return client.focus();
-        }
-      }
-      
-      // If the app is open anywhere, focus it and navigate to targetUrl
-      if (windowClients.length > 0) {
-        const client = windowClients[0];
         if ('focus' in client) {
           client.focus();
-        }
-        if ('navigate' in client) {
-          return client.navigate(targetUrl);
+          if ('postMessage' in client) {
+            client.postMessage({
+              type: 'NOTIFICATION_CLICK',
+              url: rawUrl,
+              data: event.notification.data
+            });
+          }
+          if ('navigate' in client && client.url !== targetUrl) {
+            client.navigate(targetUrl);
+          }
+          return;
         }
       }
 
-      // Otherwise open a new window
+      // 2. Otherwise open a new window
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);
       }
     })
+  );
+});
+
+// Handle push subscription changes from the browser
+self.addEventListener('pushsubscriptionchange', (event) => {
+  console.log('Push subscription expired or changed, triggering renewal...');
+  event.waitUntil(
+    self.registration.pushManager.subscribe(event.oldSubscription ? event.oldSubscription.options : { userVisibleOnly: true })
+      .then((newSubscription) => {
+        // Broadcast the change to all open clients so they can re-register and sync
+        return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+          windowClients.forEach((client) => {
+            if ('postMessage' in client) {
+              client.postMessage({
+                type: 'PUSH_SUBSCRIPTION_CHANGE',
+                endpoint: newSubscription.endpoint
+              });
+            }
+          });
+        });
+      })
+      .catch((err) => {
+        console.error('Failed to automatically re-subscribe push subscription:', err);
+      })
   );
 });

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useAppStore } from '../store';
+import { useState, useEffect, useMemo } from 'react';
+import { useStore, useAppStore, shallowEqual } from '../store';
 import { Icon, Avatar, Card, GlassCard, Button } from './UI';
 import { ChatDetail } from './ChatDetail';
 import { QRScanner } from './QRScanner';
@@ -77,7 +77,40 @@ export const SocialLayout = () => {
     disconnectSpot,
     initSocket,
     typingUsers
-  } = useAppStore();
+  } = useStore(s => ({
+    setMode: s.setMode,
+    activeChatId: s.activeChatId,
+    setActiveChatId: s.setActiveChatId,
+    activeRecipientId: s.activeRecipientId,
+    setActiveRecipientId: s.setActiveRecipientId,
+    viewingUserId: s.viewingUserId,
+    setViewingUserId: s.setViewingUserId,
+    friendRequests: s.friendRequests,
+    sentFriendRequests: s.sentFriendRequests,
+    setFriendRequests: s.setFriendRequests,
+    acceptFriendRequest: s.acceptFriendRequest,
+    rejectFriendRequest: s.rejectFriendRequest,
+    sendFriendRequest: s.sendFriendRequest,
+    cancelFriendRequest: s.cancelFriendRequest,
+    activeGroupCall: s.activeGroupCall,
+    setActiveGroupCall: s.setActiveGroupCall,
+    activeGroupInfoId: s.activeGroupInfoId,
+    setActiveGroupInfoId: s.setActiveGroupInfoId,
+    chats: s.chats,
+    notifications: s.notifications,
+    blockedUserIds: s.blockedUserIds,
+    removedFriendIds: s.removedFriendIds,
+    createGroup: s.createGroup,
+    user: s.user,
+    users: s.users,
+    wssStatus: s.wssStatus,
+    isWssConnected: s.isWssConnected,
+    wssMessage: s.wssMessage,
+    connectSpot: s.connectSpot,
+    disconnectSpot: s.disconnectSpot,
+    initSocket: s.initSocket,
+    typingUsers: s.typingUsers
+  }), shallowEqual);
 
   useEffect(() => {
     if (user?.id) {

@@ -9,7 +9,7 @@ dotenv.config();
 import { createServer } from "http";
 import { Server } from "socket.io";
 import multer from "multer";
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { initializeApp, cert, getApps, applicationDefault } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 
@@ -49,6 +49,15 @@ if (appletConfig) {
         }
       }
       
+      if (!options.credential) {
+        try {
+          options.credential = applicationDefault();
+          console.log("Successfully set applicationDefault credential for Firebase Admin App options");
+        } catch (adcErr) {
+          console.warn("Could not load applicationDefault credential. Continuing with default environment discovery:", adcErr);
+        }
+      }
+      
       firebaseApp = initializeApp(options);
     } else {
       firebaseApp = getApps()[0];
@@ -77,7 +86,14 @@ if (appletConfig) {
         firebaseApp = initializeApp({ credential: cert(configObj) });
         console.log("Firebase Admin initialized using FIREBASE_CONFIG cert");
       } else {
-        firebaseApp = initializeApp({ projectId: configObj.project_id });
+        const options: any = { projectId: configObj.project_id };
+        try {
+          options.credential = applicationDefault();
+          console.log("Firebase Admin initialized with applicationDefault and project_id");
+        } catch (adcErr) {
+          console.warn("Could not load applicationDefault credential for FIREBASE_CONFIG init:", adcErr);
+        }
+        firebaseApp = initializeApp(options);
         console.log("Firebase Admin initialized using FIREBASE_CONFIG project_id (no cert)");
       }
     } else {
@@ -548,16 +564,8 @@ app.use((req, res, next) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, callback) => {
-      // Dynamic origin fallback to support credentials handshakes correctly in all deployment stages
-      if (!origin) {
-        callback(null, "*");
-      } else {
-        callback(null, origin);
-      }
-    },
-    methods: ["GET", "POST"],
-    credentials: true
+    origin: "*",
+    methods: ["GET", "POST"]
   }
 });
 
@@ -1468,6 +1476,40 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         return res.status(400).json({ error: "Missing userId or valid subscription in request body" });
       }
 
+      // 1. Require Authorization header
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: "Missing or invalid Authorization header" });
+      }
+      const token = authHeader.split('Bearer ')[1];
+
+      // 2. Verify token: support both 'local' and 'google' auth methods
+      if (token.startsWith('local-')) {
+        const decodedUid = token.split('local-')[1];
+        if (decodedUid !== userId) {
+          console.error(`Local token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId})`);
+          return res.status(403).json({ error: "Unauthorized: Local token UID mismatch" });
+        }
+        console.log(`Successfully verified local auth token for user: ${userId}`);
+      } else if (process.env.FIREBASE_CONFIG) {
+        try {
+          const decodedToken = await getAuth().verifyIdToken(token);
+          const decodedUid = decodedToken.uid;
+
+          // 3. Reject if decoded.uid !== userId
+          if (decodedUid !== userId) {
+            console.error(`Token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId})`);
+            return res.status(403).json({ error: "Unauthorized: Token UID mismatch" });
+          }
+          console.log(`Successfully verified Firebase token for user: ${userId}`);
+        } catch (authErr: any) {
+          console.error("Firebase ID token verification failed for subscription:", authErr);
+          return res.status(401).json({ error: "Invalid or expired authorization token: " + authErr.message });
+        }
+      } else {
+        console.warn("FIREBASE_CONFIG is not set. Saving subscription without dynamic verification in local development mode.");
+      }
+
       // Update memory cache
       let userMemSubs = memorySubscriptions.get(userId) || [];
       if (!Array.isArray(userMemSubs)) {
@@ -1567,6 +1609,40 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const { userId, title, body } = req.body;
       if (!userId) {
         return res.status(400).json({ error: "Missing userId" });
+      }
+
+      // Require Authorization header
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: "Missing or invalid Authorization header" });
+      }
+      const token = authHeader.split('Bearer ')[1];
+
+      // Verify token: support both 'local' and 'google' auth methods
+      if (token.startsWith('local-')) {
+        const decodedUid = token.split('local-')[1];
+        if (decodedUid !== userId) {
+          console.error(`Local token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId})`);
+          return res.status(403).json({ error: "Unauthorized: Local token UID mismatch" });
+        }
+        console.log(`Successfully verified local auth token for sending test push for user: ${userId}`);
+      } else if (process.env.FIREBASE_CONFIG) {
+        try {
+          const decodedToken = await getAuth().verifyIdToken(token);
+          const decodedUid = decodedToken.uid;
+
+          // Reject if decoded.uid !== userId
+          if (decodedUid !== userId) {
+            console.error(`Token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId})`);
+            return res.status(403).json({ error: "Unauthorized: Token UID mismatch" });
+          }
+          console.log(`Successfully verified Firebase token for sending test push for user: ${userId}`);
+        } catch (authErr: any) {
+          console.error("Firebase ID token verification failed for test push:", authErr);
+          return res.status(401).json({ error: "Invalid or expired authorization token: " + authErr.message });
+        }
+      } else {
+        console.warn("FIREBASE_CONFIG is not set. Sending test push without dynamic verification in local development mode.");
       }
 
       const notificationTitle = title || "🔔 Server Push Alert (VAPID)";

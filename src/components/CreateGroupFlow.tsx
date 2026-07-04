@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon, Avatar, Button, Card, cn } from './UI';
-import { useAppStore } from '../store';
+import { useStore, useAppStore, shallowEqual } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface CreateGroupFlowProps {
@@ -15,7 +15,7 @@ export const CreateGroupFlow = ({ onClose, onCreate }: CreateGroupFlowProps) => 
   const [groupName, setGroupName] = useState('');
   const [groupAvatar, setGroupAvatar] = useState('https://picsum.photos/seed/group/200');
 
-  const { users, user } = useAppStore();
+  const { users, user } = useStore(s => ({ users: s.users, user: s.user }), shallowEqual);
 
   const filteredFriends = users.filter(usr => 
     usr.id !== user?.id &&

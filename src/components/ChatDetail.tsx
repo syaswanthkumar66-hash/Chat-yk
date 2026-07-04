@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
-import { useAppStore } from '../store';
+import { useStore, useAppStore, shallowEqual } from '../store';
 import { BACKEND_URL } from '../config';
 import { webrtcService } from '../services/webrtcService';
 import { Icon, Avatar, Button, Card, cn } from './UI';
@@ -484,7 +484,29 @@ export const ChatDetail = () => {
     globallyDeletedIds,
     deleteMessageLocally,
     deleteMessageGlobally
-  } = useAppStore();
+  } = useStore(s => ({
+    user: s.user,
+    activeChatId: s.activeChatId,
+    setActiveChatId: s.setActiveChatId,
+    activeRecipientId: s.activeRecipientId,
+    setActiveRecipientId: s.setActiveRecipientId,
+    selectedMessageIds: s.selectedMessageIds,
+    toggleMessageSelection: s.toggleMessageSelection,
+    setSelectedMessageIds: s.setSelectedMessageIds,
+    activeGroupCall: s.activeGroupCall,
+    setActiveGroupCall: s.setActiveGroupCall,
+    activeGroupInfoId: s.activeGroupInfoId,
+    setActiveGroupInfoId: s.setActiveGroupInfoId,
+    chats: s.chats,
+    typingUsers: s.typingUsers,
+    sendMessage: s.sendMessage,
+    users: s.users,
+    onlineUserIds: s.onlineUserIds,
+    deletedMsgIds: s.deletedMsgIds,
+    globallyDeletedIds: s.globallyDeletedIds,
+    deleteMessageLocally: s.deleteMessageLocally,
+    deleteMessageGlobally: s.deleteMessageGlobally
+  }), shallowEqual);
   const [showMenu, setShowMenu] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -631,9 +653,9 @@ export const ChatDetail = () => {
 
   const [messageText, setMessageText] = useState('');
 
-  const chat = chats.find(c => c.id === activeChatId);
-  const recipient = users.find(u => u.id === activeRecipientId);
-  const messages = chat?.messages || [];
+  const chat = useMemo(() => chats.find(c => c.id === activeChatId), [chats, activeChatId]);
+  const recipient = useMemo(() => users.find(u => u.id === activeRecipientId), [users, activeRecipientId]);
+  const messages = useMemo(() => chat?.messages || [], [chat?.messages]);
 
   useEffect(() => {
     if (!user || (!activeRecipientId && !chat)) return;

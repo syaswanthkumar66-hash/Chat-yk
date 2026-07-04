@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon, Avatar, cn } from './UI';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 import { motion } from 'framer-motion';
 
 interface NewChatFlowProps {
@@ -10,7 +10,13 @@ interface NewChatFlowProps {
 }
 
 export const NewChatFlow = ({ onClose, onSelect, onAddFriend }: NewChatFlowProps) => {
-  const { blockedUserIds, removedFriendIds, setViewingUserId, users, user: currentUser } = useAppStore();
+  const { blockedUserIds, removedFriendIds, setViewingUserId, users, user: currentUser } = useStore(s => ({
+    blockedUserIds: s.blockedUserIds,
+    removedFriendIds: s.removedFriendIds,
+    setViewingUserId: s.setViewingUserId,
+    users: s.users,
+    user: s.user
+  }), shallowEqual);
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredFriends = users

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -25,7 +25,25 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
     leaveChat,
     chats,
     users
-  } = useAppStore();
+  } = useStore(s => ({
+    user: s.user,
+    activeChatId: s.activeChatId,
+    activeGroupInfoId: s.activeGroupInfoId,
+    setViewingUserId: s.setViewingUserId,
+    groupJoinRequests: s.groupJoinRequests,
+    setGroupJoinRequests: s.setGroupJoinRequests,
+    setActiveGroupCall: s.setActiveGroupCall,
+    updateChatAvatar: s.updateChatAvatar,
+    updateChatSettings: s.updateChatSettings,
+    updateChatInfo: s.updateChatInfo,
+    addChatMember: s.addChatMember,
+    removeChatMember: s.removeChatMember,
+    toggleChatAdmin: s.toggleChatAdmin,
+    deleteChat: s.deleteChat,
+    leaveChat: s.leaveChat,
+    chats: s.chats,
+    users: s.users
+  }), shallowEqual);
   const [memberSearch, setMemberSearch] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState<string | null>(null);

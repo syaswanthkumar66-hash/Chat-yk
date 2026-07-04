@@ -1,9 +1,13 @@
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 import { Icon, Card, Button } from './UI';
 import { motion } from 'framer-motion';
 
 export const DeviceDetail = () => {
-  const { activeDeviceId, setActiveDeviceId, devices } = useAppStore();
+  const { activeDeviceId, setActiveDeviceId, devices } = useStore(s => ({
+    activeDeviceId: s.activeDeviceId,
+    setActiveDeviceId: s.setActiveDeviceId,
+    devices: s.devices
+  }), shallowEqual);
   const device = devices.find(d => d.id === activeDeviceId);
 
   if (!device) return null;

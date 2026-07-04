@@ -31,27 +31,46 @@ try {
 
 // Initialize Firestore with persistent cache, falling back safely to memory local cache or existing instance if already initialized
 let dbInstance;
-try {
-  const hasIndexedDB = typeof window !== 'undefined' && !!window.indexedDB;
-  if (!hasIndexedDB) {
-    throw new Error("indexedDB not available in this window context");
+let forceMemoryCache = false;
+
+if (typeof window !== 'undefined') {
+  const inIframe = window.self !== window.top;
+  if (inIframe) {
+    console.warn("[Firebase] Inside iframe sandbox. Forcing memoryLocalCache for connection stability.");
+    forceMemoryCache = true;
+  } else if (!window.indexedDB) {
+    console.warn("[Firebase] IndexedDB not available. Forcing memoryLocalCache.");
+    forceMemoryCache = true;
+  } else {
+    try {
+      // Proactively test if indexedDB can be opened to catch SecurityErrors immediately
+      window.indexedDB.open("dummy-iframe-test-db-idb", 1);
+    } catch (idbErr) {
+      console.warn("[Firebase] IndexedDB present but blocked by browser sandbox/security. Forcing memoryLocalCache:", idbErr);
+      forceMemoryCache = true;
+    }
   }
-  dbInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    }),
-    experimentalForceLongPolling: true
-  }, firebaseConfig.firestoreDatabaseId);
-} catch (e) {
-  console.warn("Firestore persistent local cache failed to initialize (likely due to iframe sandbox constraints). Falling back to memoryLocalCache:", e);
-  try {
+}
+
+try {
+  if (forceMemoryCache) {
     dbInstance = initializeFirestore(app, {
       localCache: memoryLocalCache(),
       experimentalForceLongPolling: true
     }, firebaseConfig.firestoreDatabaseId);
-  } catch (fallbackErr) {
-    dbInstance = getFirestore(app);
+    console.log("[Firebase] Successfully initialized Firestore with memoryLocalCache.");
+  } else {
+    dbInstance = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      }),
+      experimentalForceLongPolling: true
+    }, firebaseConfig.firestoreDatabaseId);
+    console.log("[Firebase] Successfully initialized Firestore with persistentLocalCache.");
   }
+} catch (e) {
+  console.warn("[Firebase] initializeFirestore failed, falling back to getFirestore:", e);
+  dbInstance = getFirestore(app);
 }
 
 // Export db and auth bindings pointing to the primary authenticated Firebase instance
@@ -106,16 +125,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   };
 
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-
   const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   const code = (error && typeof error === 'object' && 'code' in error) ? String(error.code).toLowerCase() : '';
   const isPermission = msg.includes('permission') || msg.includes('denied') || code.includes('permission-denied');
 
   if (isPermission) {
+    console.error('Firestore Error (Permission Denied): ', JSON.stringify(errInfo));
     throw new Error(JSON.stringify(errInfo));
   } else {
-    console.warn('Suppressing non-permission Firestore error to maintain offline functionality:', error);
+    console.warn('Firestore Warning (Transient/Offline): ', JSON.stringify(errInfo));
   }
 }
 

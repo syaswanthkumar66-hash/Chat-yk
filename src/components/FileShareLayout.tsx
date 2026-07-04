@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 import { Icon, Card } from './UI';
 import { DeviceDetail } from './DeviceDetail';
 import { StorageAnalytics } from './StorageAnalytics';
@@ -27,7 +27,20 @@ export const FileShareLayout = () => {
     wssMessage,
     connectSpot,
     disconnectSpot
-  } = useAppStore();
+  } = useStore(s => ({
+    setMode: s.setMode,
+    activeDeviceId: s.activeDeviceId,
+    setActiveDeviceId: s.setActiveDeviceId,
+    devices: s.devices,
+    transfers: s.transfers,
+    acceptTransfer: s.acceptTransfer,
+    declineTransfer: s.declineTransfer,
+    wssStatus: s.wssStatus,
+    isWssConnected: s.isWssConnected,
+    wssMessage: s.wssMessage,
+    connectSpot: s.connectSpot,
+    disconnectSpot: s.disconnectSpot
+  }), shallowEqual);
 
   if (activeDeviceId) {
     return <DeviceDetail />;

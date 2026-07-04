@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Avatar, Card, Button } from './UI';
-import { useAppStore } from '../store';
+import { useStore, useAppStore, shallowEqual } from '../store';
 import { db, collection, query as firestoreQuery, where, getDocs } from '../firebase';
 
 interface SearchResult {
@@ -20,7 +20,15 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'friends' | 'messages' | 'files' | 'groups'>('all');
   const inputRef = useRef<HTMLInputElement>(null);
-  const { setActiveChatId, setActiveDeviceId, setViewingUserId, chats, users, devices, blockedUserIds } = useAppStore();
+  const { setActiveChatId, setActiveDeviceId, setViewingUserId, chats, users, devices, blockedUserIds } = useStore(s => ({
+    setActiveChatId: s.setActiveChatId,
+    setActiveDeviceId: s.setActiveDeviceId,
+    setViewingUserId: s.setViewingUserId,
+    chats: s.chats,
+    users: s.users,
+    devices: s.devices,
+    blockedUserIds: s.blockedUserIds
+  }), shallowEqual);
 
   useEffect(() => {
     inputRef.current?.focus();

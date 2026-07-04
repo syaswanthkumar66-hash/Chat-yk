@@ -1,5 +1,5 @@
 import { useState, useRef, ChangeEvent, useEffect, FormEvent } from 'react';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 import { BACKEND_URL } from '../config';
 import { Button, Icon, Avatar } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -26,7 +26,7 @@ const PRELOADED_AVATARS = [
 ];
 
 export const Onboarding = () => {
-  const { login, setMode } = useAppStore();
+  const { login, setMode } = useStore(s => ({ login: s.login, setMode: s.setMode }), shallowEqual);
   const [step, setStep] = useState<'login' | 'profile'>('login');
   const [profile, setProfile] = useState({
     username: '',

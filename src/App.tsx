@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAppStore } from './store';
+import { useAppStore, useStore, shallowEqual } from './store';
 import { Message, Notification as AppNotification } from './types';
 import { Hub } from './components/Hub';
 import { Onboarding } from './components/Onboarding';
@@ -365,10 +365,72 @@ export default function App() {
     activeChatId,
     activeRecipientId,
     authMethod
-  } = useAppStore();
+  } = useStore(s => ({
+    mode: s.mode,
+    isLoggedIn: s.isLoggedIn,
+    joinGroupId: s.joinGroupId,
+    setJoinGroupId: s.setJoinGroupId,
+    setMode: s.setMode,
+    login: s.login,
+    logout: s.logout,
+    broadcasts: s.broadcasts,
+    systemSettings: s.systemSettings,
+    user: s.user,
+    inAppToasts: s.inAppToasts,
+    removeInAppToast: s.removeInAppToast,
+    setActiveChatId: s.setActiveChatId,
+    setActiveRecipientId: s.setActiveRecipientId,
+    activeChatId: s.activeChatId,
+    activeRecipientId: s.activeRecipientId,
+    authMethod: s.authMethod
+  }), shallowEqual);
 
   // Activate the real-time notification integration hook
   useNotifications(processedNotificationsRef);
+
+  // Listen for Service Worker postMessage notifications and handle deep-linking/navigation
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      const handleServiceWorkerMessage = (event: MessageEvent) => {
+        if (!event.data) return;
+        
+        if (event.data.type === 'NOTIFICATION_CLICK') {
+          console.log('[ServiceWorker Message] NOTIFICATION_CLICK received:', event.data);
+          const { url, data } = event.data;
+          
+          // Decode URL or data parameters to navigate correctly
+          const chatId = data?.chatId || (typeof url === 'string' && url.includes('chatId=') ? url.split('chatId=')[1]?.split('&')[0] : null);
+          
+          if (chatId) {
+            setActiveChatId(chatId);
+            setMode('social');
+          } else if (url && url !== '/') {
+            if (url.includes('fileshare') || url.includes('file')) {
+              setMode('fileshare');
+            } else if (url.includes('social')) {
+              setMode('social');
+            } else if (url.includes('admin')) {
+              setMode('admin');
+            } else if (url.includes('hub')) {
+              setMode('hub');
+            }
+          }
+        } else if (event.data.type === 'PUSH_SUBSCRIPTION_CHANGE') {
+          console.log('[ServiceWorker Message] PUSH_SUBSCRIPTION_CHANGE received. Re-registering push subscription...');
+          if (user?.id) {
+            import('./services/notificationService').then(({ registerPushNotifications }) => {
+              registerPushNotifications(user.id, true).catch(console.error);
+            });
+          }
+        }
+      };
+
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+      return () => {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      };
+    }
+  }, [user?.id, setActiveChatId, setMode]);
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
 

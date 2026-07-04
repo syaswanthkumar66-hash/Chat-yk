@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useSyncExternalStore, useRef } from 'react';
 import { Chat, Message, Device, Transfer, Notification } from './types';
 import { io, Socket } from 'socket.io-client';
 import { BACKEND_URL } from './config';
@@ -218,6 +219,11 @@ interface AppState {
   offlineMessageQueue: { id: string, chatId: string | null, recipientId: string | null, text: string, type: string, fileUrl?: string, fileSize?: string, e2eData?: any }[];
   switchAccount: (userId: string) => Promise<void>;
 }
+
+// Throttled presence updates & debounced typing updates variables
+let pendingStatusUpdates: Record<string, boolean> = {};
+let statusThrottleTimeout: any = null;
+let typingDebounceTimeouts: Record<string, any> = {};
 
 export const DEFAULT_PRESETS: UserProfile[] = [];
 
@@ -813,7 +819,7 @@ export const useAppStore = create<AppState>((set) => ({
           return;
         }
         
-        useAppStore.getState().addConnectionLog('Heartbeat: Keep-alive ping to prevent server sleep...');
+        console.log('Heartbeat: Keep-alive ping to prevent server sleep...');
         
         try {
           const controller = new AbortController();
@@ -848,7 +854,7 @@ export const useAppStore = create<AppState>((set) => ({
           clearTimeout(timeoutId);
           
           if (success) {
-            useAppStore.getState().addConnectionLog('Heartbeat: Server is alive and warm.');
+            console.log('Heartbeat: Server is alive and warm.');
           } else {
             throw new Error('Server did not respond to keep-alive ping');
           }
@@ -1006,17 +1012,41 @@ export const useAppStore = create<AppState>((set) => ({
     }
 
     socket.on('user_status', (data: { userId: string, isOnline: boolean }) => {
-      const nowStr = new Date().toISOString();
-      set((state) => {
-        const nextOnline = data.isOnline
-          ? [...new Set([...state.onlineUserIds, data.userId])]
-          : state.onlineUserIds.filter(id => id !== data.userId);
-        return { onlineUserIds: nextOnline };
-      });
-      useAppStore.getState().updateUserByAdmin(data.userId, { 
-        isOnline: data.isOnline,
-        lastSeen: data.isOnline ? undefined : nowStr
-      });
+      // 1s throttled presence update
+      pendingStatusUpdates[data.userId] = data.isOnline;
+      if (!statusThrottleTimeout) {
+        statusThrottleTimeout = setTimeout(() => {
+          set((currentState) => {
+            let nextOnline = [...currentState.onlineUserIds];
+            const updatedUsers = [...currentState.users];
+
+            Object.entries(pendingStatusUpdates).forEach(([uid, isOnline]) => {
+              if (isOnline) {
+                if (!nextOnline.includes(uid)) nextOnline.push(uid);
+              } else {
+                nextOnline = nextOnline.filter(id => id !== uid);
+              }
+
+              const userIdx = updatedUsers.findIndex(u => u.id === uid);
+              if (userIdx !== -1) {
+                updatedUsers[userIdx] = {
+                  ...updatedUsers[userIdx],
+                  isOnline,
+                  lastSeen: isOnline ? undefined : new Date().toISOString()
+                };
+              }
+            });
+
+            pendingStatusUpdates = {};
+            statusThrottleTimeout = null;
+
+            return { 
+              onlineUserIds: nextOnline,
+              users: updatedUsers
+            };
+          });
+        }, 1000);
+      }
     });
 
     socket.on('online_users', (onlineUserIds: string[]) => {
@@ -1174,31 +1204,30 @@ export const useAppStore = create<AppState>((set) => ({
       set({ activeGroupCall: null });
     });
 
+    const debounceTypingState = (senderId: string, isTyping: boolean) => {
+      if (typingDebounceTimeouts[senderId]) {
+        clearTimeout(typingDebounceTimeouts[senderId]);
+      }
+      typingDebounceTimeouts[senderId] = setTimeout(() => {
+        set((currentState) => ({
+          typingUsers: {
+            ...currentState.typingUsers,
+            [senderId]: isTyping
+          }
+        }));
+      }, 300);
+    };
+
     socket.on('typing', (data: { senderId: string, isTyping: boolean }) => {
-      set((state) => ({
-        typingUsers: {
-          ...state.typingUsers,
-          [data.senderId]: data.isTyping
-        }
-      }));
+      debounceTypingState(data.senderId, data.isTyping);
     });
 
     socket.on('typing_start', (data: { senderId: string }) => {
-      set((state) => ({
-        typingUsers: {
-          ...state.typingUsers,
-          [data.senderId]: true
-        }
-      }));
+      debounceTypingState(data.senderId, true);
     });
 
     socket.on('typing_stop', (data: { senderId: string }) => {
-      set((state) => ({
-        typingUsers: {
-          ...state.typingUsers,
-          [data.senderId]: false
-        }
-      }));
+      debounceTypingState(data.senderId, false);
     });
 
     set({ socket });
@@ -2086,3 +2115,46 @@ if (typeof window !== 'undefined') {
     }
   });
 }
+
+export function shallowEqual(objA: any, objB: any): boolean {
+  if (Object.is(objA, objB)) return true;
+  if (typeof objA !== 'object' || objA === null || typeof objB !== 'object' || objB === null) {
+    return false;
+  }
+  const keysA = Object.keys(objA);
+  const keysB = Object.keys(objB);
+  if (keysA.length !== keysB.length) return false;
+  for (let i = 0; i < keysA.length; i++) {
+    const key = keysA[i];
+    if (!Object.prototype.hasOwnProperty.call(objB, key)) return false;
+    const valA = objA[key];
+    const valB = objB[key];
+    if (Array.isArray(valA) && Array.isArray(valB)) {
+      if (valA.length !== valB.length) return false;
+      for (let j = 0; j < valA.length; j++) {
+        if (!Object.is(valA[j], valB[j])) return false;
+      }
+    } else if (!Object.is(valA, valB)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function useStore<T>(selector: (state: AppState) => T, equalityFn?: (a: T, b: T) => boolean): T {
+  const lastSelectedState = useRef<T | undefined>(undefined);
+  
+  const getSnapshot = () => {
+    const nextState = selector(useAppStore.getState());
+    if (lastSelectedState.current !== undefined && equalityFn) {
+      if (equalityFn(lastSelectedState.current, nextState)) {
+        return lastSelectedState.current;
+      }
+    }
+    lastSelectedState.current = nextState;
+    return nextState;
+  };
+
+  return useSyncExternalStore(useAppStore.subscribe, getSnapshot, getSnapshot);
+}
+

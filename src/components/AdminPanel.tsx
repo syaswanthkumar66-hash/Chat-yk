@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAppStore } from '../store';
+import { useStore, useAppStore, shallowEqual } from '../store';
 import { BACKEND_URL } from '../config';
 import { db, onSnapshot, collection } from '../firebase';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -115,7 +115,30 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
     setMode,
     setActiveRecipientId,
     sendMessage
-  } = useAppStore();
+  } = useStore(s => ({
+    user: s.user,
+    users: s.users,
+    banUser: s.banUser,
+    flagUser: s.flagUser,
+    promoteUser: s.promoteUser,
+    updateUserByAdmin: s.updateUserByAdmin,
+    addUser: s.addUser,
+    reportUser: s.reportUser,
+    systemSettings: s.systemSettings,
+    updateSystemSettings: s.updateSystemSettings,
+    tickets: s.tickets,
+    updateTicketStatus: s.updateTicketStatus,
+    deleteTicket: s.deleteTicket,
+    feedback: s.feedback,
+    deleteFeedback: s.deleteFeedback,
+    broadcasts: s.broadcasts,
+    sendBroadcast: s.sendBroadcast,
+    deleteBroadcast: s.deleteBroadcast,
+    sendTicketMessage: s.sendTicketMessage,
+    setMode: s.setMode,
+    setActiveRecipientId: s.setActiveRecipientId,
+    sendMessage: s.sendMessage
+  }), shallowEqual);
 
   const [securitySearchQuery, setSecuritySearchQuery] = useState('');
   const [visibleSecurityLogsCount, setVisibleSecurityLogsCount] = useState(5);

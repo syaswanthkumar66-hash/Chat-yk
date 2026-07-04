@@ -1,10 +1,17 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Icon, Avatar, Button, Card } from './UI';
-import { useAppStore } from '../store';
+import { useStore, shallowEqual } from '../store';
 
 export const JoinGroupView = () => {
-  const { joinGroupId, setJoinGroupId, setActiveChatId, isLoggedIn, chats, addInAppToast } = useAppStore();
+  const { joinGroupId, setJoinGroupId, setActiveChatId, isLoggedIn, chats, addInAppToast } = useStore(s => ({
+    joinGroupId: s.joinGroupId,
+    setJoinGroupId: s.setJoinGroupId,
+    setActiveChatId: s.setActiveChatId,
+    isLoggedIn: s.isLoggedIn,
+    chats: s.chats,
+    addInAppToast: s.addInAppToast
+  }), shallowEqual);
   const chat = chats.find(c => c.id === joinGroupId);
 
   if (!chat) {

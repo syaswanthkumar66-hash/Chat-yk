@@ -1,4 +1,3 @@
-import { useAppStore } from '../store';
 import { Icon, Card, Button } from './UI';
 
 export const StorageAnalytics = () => {

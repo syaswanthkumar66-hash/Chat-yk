@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAppStore } from '../store';
+import { useStore, useAppStore, shallowEqual } from '../store';
 import { MediaGallery } from './MediaGallery';
 
 interface UserProfileViewProps {
@@ -61,9 +61,28 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     sendFriendRequest,
     cancelFriendRequest,
     setActiveGroupCall,
-    users
-  } = useAppStore();
-  const currentUser = useAppStore(state => state.user);
+    users,
+    user: currentUser
+  } = useStore(s => ({
+    setActiveChatId: s.setActiveChatId,
+    setActiveRecipientId: s.setActiveRecipientId,
+    removeFriend: s.removeFriend,
+    blockUser: s.blockUser,
+    unblockUser: s.unblockUser,
+    restoreFriend: s.restoreFriend,
+    reportUser: s.reportUser,
+    blockedUserIds: s.blockedUserIds,
+    removedFriendIds: s.removedFriendIds,
+    friendRequests: s.friendRequests,
+    acceptFriendRequest: s.acceptFriendRequest,
+    rejectFriendRequest: s.rejectFriendRequest,
+    sentFriendRequests: s.sentFriendRequests,
+    sendFriendRequest: s.sendFriendRequest,
+    cancelFriendRequest: s.cancelFriendRequest,
+    setActiveGroupCall: s.setActiveGroupCall,
+    users: s.users,
+    user: s.user
+  }), shallowEqual);
   const [loading, setLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
