@@ -209,7 +209,15 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
       logMsg(`[DATABASE] Creating real-time in-app notification records in Firestore...`);
       
       try {
-        const { db, setDoc, doc } = await import('../firebase');
+        const { db, setDoc, doc, auth } = await import('../firebase');
+        
+        let idToken = '';
+        const authMethod = typeof window !== 'undefined' ? localStorage.getItem('proto_authMethod') : null;
+        if (authMethod === 'local') {
+          idToken = user?.id ? `local-${user.id}` : '';
+        } else {
+          idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
+        }
         
         // 1. Send in-app notification to Admin
         const adminNotifId = `notif-diag-admin-${Date.now()}`;
@@ -236,53 +244,59 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
         });
 
         logMsg(`[DATABASE] In-app notifications stored successfully!`);
+
+        logMsg(`[PUSH] Dispatched native background Web Push signals (VAPID) to user ${targetUser.id} & Admin ${user?.id}...`);
+        
+        // Call backend native VAPID test push endpoint for both
+        try {
+          const resAdmin = await fetch('/api/send-test-push', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify({
+              userId: user?.id,
+              title: '🔧 Admin Diag: VAPID Verified',
+              body: `Web Push Delivery to Administrator is active and healthy.`
+            })
+          });
+          
+          if (!resAdmin.ok) {
+            const errData = await resAdmin.json().catch(() => ({}));
+            logMsg(`[WARNING] Admin VAPID push failed: ${errData.error || resAdmin.statusText}. ${errData.warning || ''}`);
+          } else {
+            const successData = await resAdmin.json().catch(() => ({}));
+            const devices = successData.details?.devicesCount || 0;
+            logMsg(`[PUSH] Dispatched to Admin's registered devices: ${devices}`);
+          }
+          
+          const resTarget = await fetch('/api/send-test-push', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify({
+              userId: targetUser.id,
+              title: '🔧 Secure Peer Verification',
+              body: `Admin ${user?.displayName || 'Administrator'} has verified your push delivery route.`
+            })
+          });
+
+          if (!resTarget.ok) {
+            const errData = await resTarget.json().catch(() => ({}));
+            logMsg(`[WARNING] User ${targetUser.displayName} VAPID push failed: ${errData.error || resTarget.statusText}. ${errData.warning || ''}`);
+          } else {
+            const successData = await resTarget.json().catch(() => ({}));
+            const devices = successData.details?.devicesCount || 0;
+            logMsg(`[PUSH] Dispatched to ${targetUser.displayName}'s registered devices: ${devices}`);
+          }
+        } catch (e: any) {
+          logMsg(`[WARNING] Native VAPID push route warning: ${e.message}`);
+        }
       } catch (err: any) {
         logMsg(`[WARNING] Firestore notification sync failed (using local-only alert): ${err.message}`);
-      }
-
-      logMsg(`[PUSH] Dispatched native background Web Push signals (VAPID) to user ${targetUser.id} & Admin ${user?.id}...`);
-      
-      // Call backend native VAPID test push endpoint for both
-      try {
-        const resAdmin = await fetch('/api/send-test-push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: user?.id,
-            title: '🔧 Admin Diag: VAPID Verified',
-            body: `Web Push Delivery to Administrator is active and healthy.`
-          })
-        });
-        
-        if (!resAdmin.ok) {
-          const errData = await resAdmin.json().catch(() => ({}));
-          logMsg(`[WARNING] Admin VAPID push failed: ${errData.error || resAdmin.statusText}. ${errData.warning || ''}`);
-        } else {
-          const successData = await resAdmin.json().catch(() => ({}));
-          const devices = successData.details?.devicesCount || 0;
-          logMsg(`[PUSH] Dispatched to Admin's registered devices: ${devices}`);
-        }
-        
-        const resTarget = await fetch('/api/send-test-push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: targetUser.id,
-            title: '🔧 Secure Peer Verification',
-            body: `Admin ${user?.displayName || 'Administrator'} has verified your push delivery route.`
-          })
-        });
-
-        if (!resTarget.ok) {
-          const errData = await resTarget.json().catch(() => ({}));
-          logMsg(`[WARNING] User ${targetUser.displayName} VAPID push failed: ${errData.error || resTarget.statusText}. ${errData.warning || ''}`);
-        } else {
-          const successData = await resTarget.json().catch(() => ({}));
-          const devices = successData.details?.devicesCount || 0;
-          logMsg(`[PUSH] Dispatched to ${targetUser.displayName}'s registered devices: ${devices}`);
-        }
-      } catch (e: any) {
-        logMsg(`[WARNING] Native VAPID push route warning: ${e.message}`);
       }
     }, 1800);
 

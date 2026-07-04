@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useStore, shallowEqual } from '../store';
 import { Icon, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db, doc, updateDoc, deleteDoc, getDoc } from '../firebase';
+import { db, doc, updateDoc, deleteDoc, getDoc, auth } from '../firebase';
 import { Notification as AppNotification } from '../types';
 import { registerPushNotifications } from '../services/notificationService';
 
@@ -213,9 +213,20 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
     if (!user?.id) return;
     setTestStatus('Sending test push to your registered devices...');
     try {
+      let idToken = '';
+      const authMethod = typeof window !== 'undefined' ? localStorage.getItem('proto_authMethod') : null;
+      if (authMethod === 'local') {
+        idToken = `local-${user.id}`;
+      } else {
+        idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
+      }
+
       const res = await fetch('/api/send-test-push', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
         body: JSON.stringify({
           userId: user.id,
           title: '🔧 VAPID Push Verified',

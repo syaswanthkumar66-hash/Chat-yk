@@ -1622,21 +1622,51 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       if (token.startsWith('local-')) {
         const decodedUid = token.split('local-')[1];
         if (decodedUid !== userId) {
-          console.error(`Local token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId})`);
-          return res.status(403).json({ error: "Unauthorized: Local token UID mismatch" });
+          let hasAdminAccess = false;
+          if (db) {
+            try {
+              const requesterSnap = await db.collection('users').doc(decodedUid).get();
+              if (requesterSnap.exists && requesterSnap.data()?.isAdmin === true) {
+                hasAdminAccess = true;
+              }
+            } catch (dbErr) {
+              console.error("Error querying db for local requester admin status:", dbErr);
+            }
+          }
+          if (!hasAdminAccess) {
+            console.error(`Local token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId}) and is not an admin`);
+            return res.status(403).json({ error: "Unauthorized: Local token UID mismatch" });
+          }
+          console.log(`Successfully verified administrative local auth token for user: ${userId}`);
+        } else {
+          console.log(`Successfully verified local auth token for sending test push for user: ${userId}`);
         }
-        console.log(`Successfully verified local auth token for sending test push for user: ${userId}`);
       } else if (process.env.FIREBASE_CONFIG) {
         try {
           const decodedToken = await getAuth().verifyIdToken(token);
           const decodedUid = decodedToken.uid;
 
-          // Reject if decoded.uid !== userId
+          // Reject if decoded.uid !== userId unless requester is an admin
           if (decodedUid !== userId) {
-            console.error(`Token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId})`);
-            return res.status(403).json({ error: "Unauthorized: Token UID mismatch" });
+            let hasAdminAccess = false;
+            if (db) {
+              try {
+                const requesterSnap = await db.collection('users').doc(decodedUid).get();
+                if (requesterSnap.exists && requesterSnap.data()?.isAdmin === true) {
+                  hasAdminAccess = true;
+                }
+              } catch (dbErr) {
+                console.error("Error querying db for Firebase requester admin status:", dbErr);
+              }
+            }
+            if (!hasAdminAccess) {
+              console.error(`Token mismatch: decoded UID (${decodedUid}) does not match request userId (${userId}) and is not an admin`);
+              return res.status(403).json({ error: "Unauthorized: Token UID mismatch" });
+            }
+            console.log(`Successfully verified administrative Firebase token for user: ${userId}`);
+          } else {
+            console.log(`Successfully verified Firebase token for sending test push for user: ${userId}`);
           }
-          console.log(`Successfully verified Firebase token for sending test push for user: ${userId}`);
         } catch (authErr: any) {
           console.error("Firebase ID token verification failed for test push:", authErr);
           return res.status(401).json({ error: "Invalid or expired authorization token: " + authErr.message });
