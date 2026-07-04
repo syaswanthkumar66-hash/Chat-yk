@@ -600,6 +600,31 @@ export default function App() {
     };
   }, [login, logout]);
 
+  // Automatically register and keep the user's web push notification subscription up to date in the backend
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id) return;
+    
+    // If notification permission is already granted, silently register/sync push subscriptions in the background
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        console.log(`[Auto-Register Push] Notification permission is granted. Registering/syncing subscription in backend for user: ${user.id}...`);
+        import('./services/notificationService').then(({ registerPushNotifications }) => {
+          registerPushNotifications(user.id).then((result) => {
+            if (result.success) {
+              console.log("[Auto-Register Push] Successfully synchronized web push subscription with backend.");
+            } else {
+              console.warn("[Auto-Register Push] Auto-registration synchronization warning:", result.error);
+            }
+          }).catch(err => {
+            console.error("[Auto-Register Push] Error registering push notifications:", err);
+          });
+        }).catch(err => {
+          console.error("[Auto-Register Push] Failed to load notificationService:", err);
+        });
+      }
+    }
+  }, [isLoggedIn, user?.id]);
+
   // Handle Firestore syncing for both Google and Local logins Reactively
   useEffect(() => {
     if (!isLoggedIn || !user?.id) return;

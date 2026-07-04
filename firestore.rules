@@ -10,6 +10,11 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function isVerified() { return isSignedIn(); }
     function isOwner(userId) { return isVerified() && request.auth.uid == userId; }
+    function isAdmin() {
+      return isVerified() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
 
     function incoming() { return request.resource.data; }
 
@@ -23,7 +28,7 @@ service cloud.firestore {
     }
 
     match /pushSubscriptions/{userId} {
-      allow read, write: if isVerified() && request.auth.uid == userId;
+      allow read, write: if isVerified() && (request.auth.uid == userId || isAdmin());
     }
 
     match /offline_messages/{messageId} {

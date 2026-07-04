@@ -489,7 +489,13 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
       }
     }
 
-    return { success: true, devicesCount: subscriptions.length, sentCount, errorCount };
+    return { 
+      success: sentCount > 0, 
+      devicesCount: subscriptions.length, 
+      sentCount, 
+      errorCount,
+      error: sentCount === 0 ? "Failed to deliver push notifications to any registered endpoints. Browser push service returned an error." : undefined
+    };
   } else {
     console.log(`No active Web Push subscription found for user ${recipientId}`);
     return { 
