@@ -3,6 +3,7 @@ import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
+import { db, onSnapshot, collection } from '../firebase';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 const MOCK_STATS_TODAY = [
@@ -118,6 +119,27 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
 
   const [securitySearchQuery, setSecuritySearchQuery] = useState('');
   const [visibleSecurityLogsCount, setVisibleSecurityLogsCount] = useState(5);
+
+  const [pushSubscriptionsMap, setPushSubscriptionsMap] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    if (!db) return;
+    try {
+      const q = collection(db, 'pushSubscriptions');
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const subMap: Record<string, any> = {};
+        snapshot.forEach((doc) => {
+          subMap[doc.id] = doc.data();
+        });
+        setPushSubscriptionsMap(subMap);
+      }, (err) => {
+        console.error("Error watching pushSubscriptions in AdminPanel:", err);
+      });
+      return unsubscribe;
+    } catch (e) {
+      console.error("Failed to setup pushSubscriptions listener in AdminPanel:", e);
+    }
+  }, []);
 
   // --- DIAGNOSTIC TEST MODE STATE ---
   const [testSelectedUserId, setTestSelectedUserId] = useState<string>('');
@@ -1853,6 +1875,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                     <tr className="bg-primary text-white">
                       <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.3em]">Member Profile</th>
                       <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.3em]">Protocol Status</th>
+                      <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.3em]">Web Push (VAPID)</th>
                       <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.3em]">Network Activity</th>
                       <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.3em] text-right">Command</th>
                     </tr>
@@ -1878,6 +1901,9 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                       })
                       .map((u) => {
                         const status = getUserStatus(u);
+                        const userPushData = pushSubscriptionsMap[u.id];
+                        const userSubs = userPushData?.subscriptions || [];
+                        const isSubscribed = userSubs.length > 0;
                         return (
                           <motion.tr 
                             key={`desktop-user-row-${u.id}`} 
@@ -1912,6 +1938,24 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                                   {status.label}
                                 </span>
                               </div>
+                            </td>
+                            <td className="px-8 py-6">
+                              {isSubscribed ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-black uppercase tracking-widest">
+                                    <Icon name="check_circle" className="text-emerald-500 text-xs" />
+                                    Active ({userSubs.length} device{userSubs.length > 1 ? 's' : ''})
+                                  </div>
+                                  <span className="text-[8px] font-mono text-slate-400 uppercase truncate max-w-[150px]" title={userSubs[userSubs.length - 1].endpoint}>
+                                    Last: {userSubs[userSubs.length - 1].endpoint.split('/').pop()?.slice(-15) || 'Unknown'}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 text-slate-400 text-[10px] font-black uppercase tracking-widest">
+                                  <Icon name="cancel" className="text-slate-300 text-xs" />
+                                  Not Registered
+                                </div>
+                              )}
                             </td>
                             <td className="px-8 py-6">
                               <div className="space-y-1.5">
@@ -1975,6 +2019,9 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                   })
                   .map((u) => {
                     const status = getUserStatus(u);
+                    const userPushData = pushSubscriptionsMap[u.id];
+                    const userSubs = userPushData?.subscriptions || [];
+                    const isSubscribed = userSubs.length > 0;
                     return (
                       <div key={`mobile-user-card-${u.id}`} className="p-4 sm:p-6 space-y-4">
                         <div className="flex items-center justify-between">
@@ -1999,6 +2046,12 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                             <div className="flex items-center gap-2">
                               <Icon name="history" className="text-[9px] sm:text-[10px] text-primary/30" />
                               <span className="text-[7px] sm:text-[8px] font-black text-neutral-muted uppercase tracking-widest">Seen: {getOfflineDuration(u.lastSeen)}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Icon name="notifications" className="text-[9px] sm:text-[10px] text-primary/30" />
+                              <span className="text-[7px] sm:text-[8px] font-black text-neutral-muted uppercase tracking-widest">
+                                Web Push: {isSubscribed ? `Active (${userSubs.length})` : 'Not Registered'}
+                              </span>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -3188,11 +3241,15 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                       className="w-full bg-primary/5 border border-primary/10 rounded-2xl px-4 py-4 text-xs font-black uppercase tracking-widest text-slate-800 outline-none focus:ring-2 focus:ring-primary/20 appearance-none cursor-pointer"
                     >
                       <option value="">-- SELECT PEER --</option>
-                      {users.filter(u => u.id !== user?.id).map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.displayName || u.username} ({u.isOnline ? 'ONLINE' : 'OFFLINE'})
-                        </option>
-                      ))}
+                      {users.filter(u => u.id !== user?.id).map(u => {
+                        const count = pushSubscriptionsMap[u.id]?.subscriptions?.length || 0;
+                        const subStr = count > 0 ? `VAPID: ${count} device${count > 1 ? 's' : ''}` : 'VAPID: None';
+                        return (
+                          <option key={u.id} value={u.id}>
+                            {u.displayName || u.username} ({u.isOnline ? 'ONLINE' : 'OFFLINE'} — {subStr})
+                          </option>
+                        );
+                      })}
                     </select>
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                       <Icon name="arrow_drop_down" />
