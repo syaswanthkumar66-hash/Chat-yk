@@ -11,6 +11,52 @@ function arrayBuffersEqual(buf1: ArrayBuffer | null, buf2: Uint8Array): boolean 
   return true;
 }
 
+/**
+ * Bulletproof helper to extract endpoint and keys (p256dh, auth) from a PushSubscription.
+ * Avoids browser serialization issues where JSON.stringify(subscription) can return an empty object or omit keys.
+ */
+function serializePushSubscription(subscription: PushSubscription): any {
+  const result: any = {
+    endpoint: subscription.endpoint,
+    keys: {
+      p256dh: '',
+      auth: ''
+    }
+  };
+
+  if (typeof subscription.getKey === 'function') {
+    try {
+      const p256dhBuffer = subscription.getKey('p256dh');
+      const authBuffer = subscription.getKey('auth');
+      if (p256dhBuffer) {
+        // Convert buffer to standard base64/base64url format safely
+        result.keys.p256dh = btoa(String.fromCharCode(...new Uint8Array(p256dhBuffer)))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+      if (authBuffer) {
+        result.keys.auth = btoa(String.fromCharCode(...new Uint8Array(authBuffer)))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+    } catch (e) {
+      console.warn("Manual extraction of VAPID subscription keys failed:", e);
+    }
+  }
+
+  // Fallback to standard toJSON() if manual extraction was completely empty
+  if (!result.keys.p256dh || !result.keys.auth) {
+    try {
+      const json = subscription.toJSON();
+      if (json) {
+        result.endpoint = result.endpoint || json.endpoint;
+        result.keys.p256dh = result.keys.p256dh || json.keys?.p256dh || '';
+        result.keys.auth = result.keys.auth || json.keys?.auth || '';
+      }
+    } catch (_) {}
+  }
+
+  return result;
+}
+
 export async function registerPushNotifications(userId: string, force?: boolean): Promise<{ success: boolean; subscription?: PushSubscription; error?: string }> {
   if (typeof window === 'undefined') {
     return { success: false, error: "Window is undefined" };
@@ -108,7 +154,7 @@ export async function registerPushNotifications(userId: string, force?: boolean)
           },
           body: JSON.stringify({
             userId,
-            subscription: JSON.parse(JSON.stringify(subscription))
+            subscription: serializePushSubscription(subscription)
           })
         });
         if (!res.ok) {
@@ -205,7 +251,7 @@ export async function registerPushNotifications(userId: string, force?: boolean)
           },
           body: JSON.stringify({
             userId,
-            subscription: JSON.parse(JSON.stringify(subscription))
+            subscription: serializePushSubscription(subscription)
           })
         });
         if (saveResponse.ok) {

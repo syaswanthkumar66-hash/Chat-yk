@@ -1394,31 +1394,33 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
   app.get("/api/vapid-validate", async (req, res) => {
     try {
-      const pubKey = process.env.VAPID_PUBLIC_KEY || "";
-      const privKey = process.env.VAPID_PRIVATE_KEY || "";
+      const activePubKey = vapidKeys.publicKey || "";
+      const activePrivKey = vapidKeys.privateKey || "";
+      const envPubKey = process.env.VAPID_PUBLIC_KEY || "";
+      const envPrivKey = process.env.VAPID_PRIVATE_KEY || "";
       
       const results = {
         publicKey: {
-          present: !!pubKey,
-          length: pubKey.length,
+          present: !!activePubKey,
+          length: activePubKey.length,
           isValidBase64: false,
           byteLength: 0,
           error: null as string | null
         },
         privateKey: {
-          present: !!privKey,
-          length: privKey.length,
+          present: !!activePrivKey,
+          length: activePrivKey.length,
           isValidBase64: false,
           byteLength: 0,
           error: null as string | null
         },
-        envConfigured: !!(pubKey && privKey),
+        envConfigured: !!(envPubKey && envPrivKey),
         isValidOverall: false
       };
 
       const checkKey = (keyStr: string, expectedBytes: number, name: string, target: typeof results.publicKey) => {
         if (!keyStr) {
-          target.error = `${name} is missing in environment variables.`;
+          target.error = `${name} is missing or uninitialized.`;
           return;
         }
         try {
@@ -1444,8 +1446,8 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         }
       };
 
-      checkKey(pubKey, 65, "VAPID_PUBLIC_KEY", results.publicKey);
-      checkKey(privKey, 32, "VAPID_PRIVATE_KEY", results.privateKey);
+      checkKey(activePubKey, 65, "VAPID_PUBLIC_KEY", results.publicKey);
+      checkKey(activePrivKey, 32, "VAPID_PRIVATE_KEY", results.privateKey);
 
       results.isValidOverall = results.publicKey.present && 
                                results.privateKey.present && 
