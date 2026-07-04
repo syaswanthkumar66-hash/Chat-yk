@@ -108,6 +108,99 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
     }
   };
 
+  const handleUnsubscribe = async () => {
+    if (!user?.id) return;
+    setSubscribing(true);
+    setTestStatus('Unsubscribing...');
+    try {
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.getRegistration('/');
+        if (registration) {
+          const sub = await registration.pushManager.getSubscription();
+          if (sub) {
+            const endpoint = sub.endpoint;
+            await sub.unsubscribe();
+            await fetch('/api/remove-subscription', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: user.id, endpoint })
+            });
+          }
+        }
+      }
+      setHasSubscription(false);
+      setLocalEndpoint('');
+      if (db) {
+        const snap = await getDoc(doc(db, 'pushSubscriptions', user.id));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data && Array.isArray(data.subscriptions)) {
+            setDbDevicesCount(data.subscriptions.length);
+          } else {
+            setDbDevicesCount(0);
+          }
+        } else {
+          setDbDevicesCount(0);
+        }
+      }
+      setTestStatus('Successfully unsubscribed this browser!');
+    } catch (err: any) {
+      setTestStatus(`Error unsubscribing: ${err.message || err}`);
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const handleCopySubscription = async () => {
+    try {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        const registration = await navigator.serviceWorker.getRegistration('/');
+        if (registration) {
+          const sub = await registration.pushManager.getSubscription();
+          if (sub) {
+            const jsonStr = JSON.stringify(sub);
+            await navigator.clipboard.writeText(jsonStr);
+            setTestStatus('Subscription JSON copied to clipboard! Ready for external push/marketing tools.');
+            return;
+          }
+        }
+      }
+      setTestStatus('No active browser subscription found to copy.');
+    } catch (err: any) {
+      setTestStatus(`Failed to copy subscription: ${err.message || err}`);
+    }
+  };
+
+  const handleRequestPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    setSubscribing(true);
+    setTestStatus('Requesting browser permission...');
+    try {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result === 'granted') {
+        setTestStatus('Notification permission granted! Registering subscription...');
+        // Register immediately
+        const regResult = await registerPushNotifications(user!.id, true);
+        if (regResult.success && regResult.subscription) {
+          setHasSubscription(true);
+          setLocalEndpoint(regResult.subscription.endpoint);
+          setTestStatus('Successfully registered subscription!');
+        } else {
+          setTestStatus(`Permission granted but registration failed: ${regResult.error || 'Unknown error'}`);
+        }
+      } else if (result === 'denied') {
+        setTestStatus('Permission denied. Please follow instructions below to reset permission.');
+      } else {
+        setTestStatus('Permission prompt dismissed by user.');
+      }
+    } catch (err: any) {
+      setTestStatus(`Error requesting permission: ${err.message || err}`);
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
   const handleTestPush = async () => {
     if (!user?.id) return;
     setTestStatus('Sending test push to your registered devices...');
@@ -270,24 +363,77 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
             )}
           </div>
 
-          <div className="flex gap-2">
-            <button
-              onClick={handleSubscribe}
-              disabled={subscribing}
-              className="flex-1 py-2 rounded-xl bg-primary text-white hover:bg-primary-dark transition-all text-[9px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
-            >
-              <Icon name="sync" className={cn("text-xs", subscribing && "animate-spin")} />
-              {subscribing ? 'Syncing...' : hasSubscription ? 'Re-Sync Subscription' : 'Register / Subscribe'}
-            </button>
-            
+          {/* Conditional helpers for permission states */}
+          {permission === 'denied' && (
+            <div className="bg-red-50 text-red-800 p-2.5 rounded-xl border border-red-100/60 text-[9px] leading-relaxed font-medium">
+              <div className="flex items-center gap-1 font-black uppercase text-[8px] text-red-700 mb-1">
+                <Icon name="block" className="text-[10px]" />
+                Notification Permission Revoked
+              </div>
+              Push notifications are blocked in this browser. To enable them, click the <b>lock or info icon (🔒)</b> next to the URL in your browser's address bar, set <b>Notifications</b> to <b>Allow</b>, and reload this page.
+            </div>
+          )}
+
+          {permission === 'default' && (
+            <div className="bg-amber-50 text-amber-800 p-2.5 rounded-xl border border-amber-100/60 text-[9px] leading-relaxed font-medium flex flex-col gap-2">
+              <div className="flex items-center gap-1 font-black uppercase text-[8px] text-amber-700">
+                <Icon name="info" className="text-[10px]" />
+                Permission Required
+              </div>
+              Authorize browser-level alerts to enable push notifications on this browser.
+              <button
+                onClick={handleRequestPermission}
+                className="w-full py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-black uppercase tracking-wider text-[8px] active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1"
+              >
+                <Icon name="notifications" className="text-[10px]" />
+                Grant Browser Permission
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <button
+                onClick={handleSubscribe}
+                disabled={subscribing}
+                className="flex-1 py-2 rounded-xl bg-primary text-white hover:bg-primary-dark transition-all text-[9px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+              >
+                <Icon name="sync" className={cn("text-xs", subscribing && "animate-spin")} />
+                {subscribing ? 'Syncing...' : hasSubscription ? 'Re-Sync Subscription' : 'Register / Subscribe'}
+              </button>
+              
+              {hasSubscription && (
+                <button
+                  onClick={handleTestPush}
+                  className="py-2 px-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 hover:text-slate-900 transition-all text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="Send a test Push to this browser"
+                >
+                  <Icon name="send" className="text-xs text-primary" />
+                  Verify Route
+                </button>
+              )}
+            </div>
+
             {hasSubscription && (
               <button
-                onClick={handleTestPush}
-                className="py-2 px-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 hover:text-slate-900 transition-all text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
-                title="Send a test Push to this browser"
+                onClick={handleCopySubscription}
+                className="py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 transition-all text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer w-full"
+                title="Copy full Web Push registration subscription object for marketing/external use"
               >
-                <Icon name="send" className="text-xs text-primary" />
-                Verify Route
+                <Icon name="content_copy" className="text-xs text-primary" />
+                Copy Subscription JSON (Marketing)
+              </button>
+            )}
+
+            {hasSubscription && (
+              <button
+                onClick={handleUnsubscribe}
+                disabled={subscribing}
+                className="py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 border border-red-200/40 transition-all text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer w-full"
+                title="Unsubscribe this browser from Web Push alerts"
+              >
+                <Icon name="notifications_off" className="text-xs" />
+                Unsubscribe / Remove This Device
               </button>
             )}
           </div>

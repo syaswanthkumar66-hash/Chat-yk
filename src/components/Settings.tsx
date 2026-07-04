@@ -90,6 +90,13 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     registrationError: ''
   });
 
+  const [vapidValidation, setVapidValidation] = useState<{
+    publicKey: { present: boolean; length: number; isValidBase64: boolean; byteLength: number; error: string | null };
+    privateKey: { present: boolean; length: number; isValidBase64: boolean; byteLength: number; error: string | null };
+    envConfigured: boolean;
+    isValidOverall: boolean;
+  } | null>(null);
+
   const [diagnosticLogs, setDiagnosticLogs] = useState<string[]>([]);
   const [activeSimulation, setActiveSimulation] = useState<'working' | 'blocked' | 'iframe' | 'timeout' | null>(null);
 
@@ -248,6 +255,20 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
 
   const checkSubscriptionStatus = async () => {
     if (typeof window === 'undefined') return;
+
+    // Fetch VAPID key validation status from Express backend
+    try {
+      const res = await fetch('/api/vapid-validate');
+      if (res.ok) {
+        const valData = await res.json();
+        setVapidValidation(valData);
+      } else {
+        console.warn("Failed to fetch VAPID key validation status");
+      }
+    } catch (err) {
+      console.warn("Error fetching VAPID validation:", err);
+    }
+
     const supported = 'serviceWorker' in navigator && 'PushManager' in window;
     const permission = 'Notification' in window ? Notification.permission : 'default';
     
@@ -456,6 +477,52 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                     {pushStatus.hasSubscription ? "Active & Synced" : "Not Subscribed"}
                   </span>
                 </div>
+
+                {/* VAPID Env Keys Validation Section */}
+                {vapidValidation && (
+                  <div className="mt-3 pt-3 border-t border-slate-200/60 space-y-2">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                      VAPID Key Configuration (.env):
+                    </span>
+                    <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                      <span>VAPID_PUBLIC_KEY:</span>
+                      <span className={cn("font-black uppercase tracking-wider text-[10px]", 
+                        !vapidValidation.publicKey.present ? "text-amber-500" :
+                        vapidValidation.publicKey.error ? "text-rose-500" : "text-emerald-600"
+                      )}>
+                        {!vapidValidation.publicKey.present ? "Not Configured (Using Fallback)" : 
+                         vapidValidation.publicKey.error ? "Invalid ✗" : "Valid ✓ (65 Bytes)"}
+                      </span>
+                    </div>
+                    {vapidValidation.publicKey.error && (
+                      <p className="text-[9px] text-rose-500 bg-rose-50/50 p-1.5 rounded-lg font-medium leading-relaxed">
+                        Error: {vapidValidation.publicKey.error}
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                      <span>VAPID_PRIVATE_KEY:</span>
+                      <span className={cn("font-black uppercase tracking-wider text-[10px]", 
+                        !vapidValidation.privateKey.present ? "text-amber-500" :
+                        vapidValidation.privateKey.error ? "text-rose-500" : "text-emerald-600"
+                      )}>
+                        {!vapidValidation.privateKey.present ? "Not Configured (Using Fallback)" : 
+                         vapidValidation.privateKey.error ? "Invalid ✗" : "Valid ✓ (32 Bytes)"}
+                      </span>
+                    </div>
+                    {vapidValidation.privateKey.error && (
+                      <p className="text-[9px] text-rose-500 bg-rose-50/50 p-1.5 rounded-lg font-medium leading-relaxed">
+                        Error: {vapidValidation.privateKey.error}
+                      </p>
+                    )}
+
+                    {!vapidValidation.envConfigured && (
+                      <p className="text-[9px] text-amber-600 bg-amber-50/60 p-2 rounded-xl leading-normal font-medium">
+                        💡 VAPID keys are currently not set in your <b>.env</b> file. The application is running using dynamically generated keys that are cached locally and synced to your database for stability.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {pushStatus.hasSubscription && (
                   <div className="mt-3 pt-3 border-t border-slate-200/60 space-y-2">

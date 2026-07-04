@@ -1941,7 +1941,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                             </td>
                             <td className="px-8 py-6">
                               {isSubscribed ? (
-                                <div className="flex flex-col gap-1">
+                                <div className="flex flex-col gap-1.5">
                                   <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-black uppercase tracking-widest">
                                     <Icon name="check_circle" className="text-emerald-500 text-xs" />
                                     Active ({userSubs.length} device{userSubs.length > 1 ? 's' : ''})
@@ -1949,6 +1949,23 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                                   <span className="text-[8px] font-mono text-slate-400 uppercase truncate max-w-[150px]" title={userSubs[userSubs.length - 1].endpoint}>
                                     Last: {userSubs[userSubs.length - 1].endpoint.split('/').pop()?.slice(-15) || 'Unknown'}
                                   </span>
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        const subObj = userSubs[userSubs.length - 1];
+                                        await navigator.clipboard.writeText(JSON.stringify(subObj, null, 2));
+                                        alert(`Copied ${u.displayName}'s latest subscription JSON payload!`);
+                                      } catch (err: any) {
+                                        alert(`Failed to copy: ${err.message}`);
+                                      }
+                                    }}
+                                    className="mt-1 flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-primary hover:underline bg-primary/5 hover:bg-primary/10 px-2 py-1 rounded w-fit active:scale-95 transition-all cursor-pointer"
+                                    title="Copy Web Push registration subscription object for marketing/external use"
+                                  >
+                                    <Icon name="content_copy" className="text-[10px]" />
+                                    Copy Subscription
+                                  </button>
                                 </div>
                               ) : (
                                 <div className="flex items-center gap-1.5 text-slate-400 text-[10px] font-black uppercase tracking-widest">
@@ -2052,6 +2069,24 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                               <span className="text-[7px] sm:text-[8px] font-black text-neutral-muted uppercase tracking-widest">
                                 Web Push: {isSubscribed ? `Active (${userSubs.length})` : 'Not Registered'}
                               </span>
+                              {isSubscribed && (
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const subObj = userSubs[userSubs.length - 1];
+                                      await navigator.clipboard.writeText(JSON.stringify(subObj, null, 2));
+                                      alert(`Copied ${u.displayName}'s latest subscription JSON payload!`);
+                                    } catch (err: any) {
+                                      alert(`Failed to copy: ${err.message}`);
+                                    }
+                                  }}
+                                  className="ml-1 text-[7px] font-black text-primary hover:underline bg-primary/5 px-1.5 py-0.5 rounded active:scale-95 transition-all cursor-pointer"
+                                  title="Copy Web Push registration subscription object for marketing/external use"
+                                >
+                                  Copy JSON
+                                </button>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">

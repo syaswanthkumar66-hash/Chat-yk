@@ -274,6 +274,52 @@ async function initVapid() {
       }
     }
     vapidSubject = subject;
+
+    // --- VAPID KEYS VALIDATION SERVICE ---
+    console.log("---------------- VAPID KEY VALIDATION SERVICE ----------------");
+    const envPubKey = process.env.VAPID_PUBLIC_KEY || "";
+    const envPrivKey = process.env.VAPID_PRIVATE_KEY || "";
+    
+    const validateKey = (keyStr: string, expectedBytes: number, name: string) => {
+      if (!keyStr) {
+        return { valid: false, error: `${name} is missing in environment variables` };
+      }
+      try {
+        const urlSafeBase64Regex = /^[A-Za-z0-9_-]+={0,2}$/;
+        const standardBase64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+        const isValidFormat = urlSafeBase64Regex.test(keyStr) || standardBase64Regex.test(keyStr);
+        if (!isValidFormat) {
+          return { valid: false, error: `${name} contains characters that are not valid base64 or base64url` };
+        }
+        
+        const normalized = keyStr.replace(/-/g, '+').replace(/_/g, '/');
+        const buffer = Buffer.from(normalized, 'base64');
+        if (buffer.length !== expectedBytes) {
+          return { valid: false, error: `${name} decoded length mismatch: expected ${expectedBytes} bytes, got ${buffer.length} bytes` };
+        }
+        return { valid: true, byteLength: buffer.length };
+      } catch (e: any) {
+        return { valid: false, error: `Failed to decode ${name}: ${e.message}` };
+      }
+    };
+
+    const pubVal = validateKey(envPubKey, 65, "VAPID_PUBLIC_KEY");
+    const privVal = validateKey(envPrivKey, 32, "VAPID_PRIVATE_KEY");
+
+    if (envPubKey || envPrivKey) {
+      console.log(`[VAPID ENV KEY VALIDATION]`);
+      console.log(` - VAPID_PUBLIC_KEY:  ${pubVal.valid ? "VALID ✓ (" + pubVal.byteLength + " bytes)" : "INVALID ✗ (" + pubVal.error + ")"}`);
+      console.log(` - VAPID_PRIVATE_KEY: ${privVal.valid ? "VALID ✓ (" + privVal.byteLength + " bytes)" : "INVALID ✗ (" + privVal.error + ")"}`);
+      if (pubVal.valid && privVal.valid) {
+        console.log(" - RESULT: Environment VAPID keys are perfectly formatted and authenticated.");
+      } else {
+        console.warn(" - RESULT: Environment VAPID keys are invalid. The application will fall back to other priorities (Firestore or local caches).");
+      }
+    } else {
+      console.log(" - INFO: No VAPID keys set in environment variables. Falling back to Firestore/Cache/Dynamic generation.");
+    }
+    console.log("--------------------------------------------------------------");
+
     webpush.setVapidDetails(
       vapidSubject,
       vapidKeys.publicKey,
@@ -1337,6 +1383,73 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     } catch (err: any) {
       console.error("VAPID public key endpoint failed:", err);
       res.status(500).json({ error: "VAPID key initialization failed: " + err.message });
+    }
+  });
+
+  app.get("/api/vapid-validate", async (req, res) => {
+    try {
+      const pubKey = process.env.VAPID_PUBLIC_KEY || "";
+      const privKey = process.env.VAPID_PRIVATE_KEY || "";
+      
+      const results = {
+        publicKey: {
+          present: !!pubKey,
+          length: pubKey.length,
+          isValidBase64: false,
+          byteLength: 0,
+          error: null as string | null
+        },
+        privateKey: {
+          present: !!privKey,
+          length: privKey.length,
+          isValidBase64: false,
+          byteLength: 0,
+          error: null as string | null
+        },
+        envConfigured: !!(pubKey && privKey),
+        isValidOverall: false
+      };
+
+      const checkKey = (keyStr: string, expectedBytes: number, name: string, target: typeof results.publicKey) => {
+        if (!keyStr) {
+          target.error = `${name} is missing in environment variables.`;
+          return;
+        }
+        try {
+          const urlSafeBase64Regex = /^[A-Za-z0-9_-]+={0,2}$/;
+          const standardBase64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+          const isValidFormat = urlSafeBase64Regex.test(keyStr) || standardBase64Regex.test(keyStr);
+          
+          if (!isValidFormat) {
+            target.error = `${name} contains characters that are not valid base64 or base64url.`;
+            return;
+          }
+
+          const normalized = keyStr.replace(/-/g, '+').replace(/_/g, '/');
+          const buffer = Buffer.from(normalized, 'base64');
+          target.isValidBase64 = true;
+          target.byteLength = buffer.length;
+
+          if (buffer.length !== expectedBytes) {
+            target.error = `${name} length mismatch: expected ${expectedBytes} bytes, got ${buffer.length} bytes when decoded.`;
+          }
+        } catch (err: any) {
+          target.error = `Failed to decode ${name}: ${err.message}`;
+        }
+      };
+
+      checkKey(pubKey, 65, "VAPID_PUBLIC_KEY", results.publicKey);
+      checkKey(privKey, 32, "VAPID_PRIVATE_KEY", results.privateKey);
+
+      results.isValidOverall = results.publicKey.present && 
+                               results.privateKey.present && 
+                               !results.publicKey.error && 
+                               !results.privateKey.error;
+
+      res.json(results);
+    } catch (err: any) {
+      console.error("VAPID validate endpoint failed:", err);
+      res.status(500).json({ error: "Failed to validate VAPID keys: " + err.message });
     }
   });
 
