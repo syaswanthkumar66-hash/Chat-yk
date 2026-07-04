@@ -4,6 +4,7 @@ import { Icon, Avatar, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { registerPushNotifications } from '../services/notificationService';
 import { sessionIntegrityService } from '../services/sessionIntegrityService';
+import { BACKEND_URL } from '../config';
 
 const PRELOADED_AVATARS = [
   'https://picsum.photos/seed/avatar1/200',
@@ -346,7 +347,8 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
         // 6. VAPID Keys validation on backend
         addLog("ℹ️ Validating Backend VAPID Key State...");
         try {
-          const res = await fetch('/api/vapid-validate');
+          const targetUrl = BACKEND_URL || window.location.origin;
+          const res = await fetch(`${targetUrl}/api/vapid-validate`);
           if (res.ok) {
             const keysData = await res.json();
             addLog(`   Server VAPID Keys: ${keysData.isValidOverall ? "CONFIGURED & VALID ✓" : "INVALID/MISSING ✗"}`);
@@ -411,7 +413,8 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
 
     // Fetch VAPID key validation status from Express backend
     try {
-      const res = await fetch('/api/vapid-validate');
+      const targetUrl = BACKEND_URL || window.location.origin;
+      const res = await fetch(`${targetUrl}/api/vapid-validate`);
       if (res.ok) {
         const valData = await res.json();
         setVapidValidation(valData);

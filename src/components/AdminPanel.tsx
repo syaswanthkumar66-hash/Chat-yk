@@ -249,7 +249,8 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
         
         // Call backend native VAPID test push endpoint for both
         try {
-          const resAdmin = await fetch('/api/send-test-push', {
+          const targetUrl = BACKEND_URL || window.location.origin;
+          const resAdmin = await fetch(`${targetUrl}/api/send-test-push`, {
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
@@ -271,7 +272,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
             logMsg(`[PUSH] Dispatched to Admin's registered devices: ${devices}`);
           }
           
-          const resTarget = await fetch('/api/send-test-push', {
+          const resTarget = await fetch(`${targetUrl}/api/send-test-push`, {
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',

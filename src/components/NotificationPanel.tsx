@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { db, doc, updateDoc, deleteDoc, getDoc, auth } from '../firebase';
 import { Notification as AppNotification } from '../types';
 import { registerPushNotifications } from '../services/notificationService';
+import { BACKEND_URL } from '../config';
 
 interface NotificationPanelProps {
   onClose: () => void;
@@ -128,7 +129,8 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
           if (sub) {
             const endpoint = sub.endpoint;
             await sub.unsubscribe();
-            await fetch('/api/remove-subscription', {
+            const targetUrl = BACKEND_URL || window.location.origin;
+            await fetch(`${targetUrl}/api/remove-subscription`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ userId: user.id, endpoint })
@@ -221,7 +223,8 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
         idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
       }
 
-      const res = await fetch('/api/send-test-push', {
+      const targetUrl = BACKEND_URL || window.location.origin;
+      const res = await fetch(`${targetUrl}/api/send-test-push`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
