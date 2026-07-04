@@ -362,12 +362,24 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
           } else {
             addLog(`   ❌ Server returned HTTP ${res.status} for VAPID validate endpoint.`);
             issuesFound++;
-            recommendations.push("- Backend server returned an error during VAPID keys query. Ensure backend server is healthy.");
+            if (res.status === 404) {
+              if (window.location.hostname.endsWith('onrender.com') && !BACKEND_URL) {
+                recommendations.push("- ⚠️ Render Deployment Mismatch: Your app is running as a Static Site (Option 2) but has no backend configured on this domain. Highly recommended to deploy as a 'Unified Full-Stack Web Service' (Option 1 in render.yaml) in your Render dashboard so both frontend and backend APIs run under the same domain. Alternatively, set the environment variable VITE_BACKEND_URL on your static site to your backend service URL.");
+              } else {
+                recommendations.push("- Backend server returned HTTP 404 for VAPID validate endpoint. Ensure your backend server is deployed, healthy, and has all API endpoints registered correctly.");
+              }
+            } else {
+              recommendations.push("- Backend server returned an error during VAPID keys query. Ensure backend server is healthy.");
+            }
           }
         } catch (keysErr: any) {
           addLog(`   ❌ Could not reach backend: ${keysErr.message || keysErr}`);
           issuesFound++;
-          recommendations.push("- Could not establish connectivity with the backend server. Please verify your Express development server is running on Port 3000.");
+          if (window.location.hostname.endsWith('onrender.com') && !BACKEND_URL) {
+            recommendations.push("- ⚠️ Render Mismatch: Could not reach backend. If this is a Render Static Site deployment, ensure you configure the VITE_BACKEND_URL environment variable to point to your backend service URL, or redeploy your app as a 'Unified Full-Stack Web Service' (Option 1 in render.yaml) in Render for zero-config unified hosting.");
+          } else {
+            recommendations.push("- Could not establish connectivity with the backend server. Please verify your Express development server is running on Port 3000.");
+          }
         }
         await new Promise(r => setTimeout(r, 400));
 

@@ -44,6 +44,12 @@ services:
     name: frontend-static-site
     buildCommand: npm install && npm run build:frontend
     publishPath: dist
+    envVars:
+      - key: VITE_BACKEND_URL
+        fromService:
+          type: web
+          name: backend-web-service
+          property: host
     routes:
       # Rewrites all requests to index.html for React client-side routing
       - type: rewrite
