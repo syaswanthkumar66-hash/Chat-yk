@@ -448,6 +448,14 @@ export default function App() {
     }
   }, []);
 
+  // Initialize socket globally to support multi-device real-time sync across all routes and views on load
+  useEffect(() => {
+    if (isLoggedIn && user?.id) {
+      console.log("[Global Socket] Initializing socket on startup for logged-in user:", user.id);
+      useAppStore.getState().initSocket(user.id);
+    }
+  }, [isLoggedIn, user?.id]);
+
   // Automatically sync and reconnect on tab refocus or visibility change
   useEffect(() => {
     if (typeof window === 'undefined') return;

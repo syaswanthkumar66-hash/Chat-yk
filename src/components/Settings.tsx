@@ -1849,21 +1849,6 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                   <Icon name="chevron_right" className="text-slate-400" />
                 </button>
                 <button 
-                  onClick={() => setActiveView('devices-sync')}
-                  className="w-full p-4 rounded-2xl bg-primary/5 flex items-center justify-between hover:bg-primary/10 transition-colors group border border-primary/5"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="size-10 rounded-xl bg-white flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors shadow-sm">
-                      <Icon name="sync" />
-                    </div>
-                    <div className="flex flex-col items-start text-left">
-                      <span className="text-sm font-bold text-slate-700">Multi-Device Sync</span>
-                      <span className="text-[10px] text-neutral-muted">View live devices & synchronize cloud database</span>
-                    </div>
-                  </div>
-                  <Icon name="chevron_right" className="text-slate-400" />
-                </button>
-                <button 
                   onClick={() => setActiveView('connection')}
                   className="w-full p-4 rounded-2xl bg-primary/5 flex items-center justify-between hover:bg-primary/10 transition-colors group border border-primary/5"
                 >
@@ -1879,6 +1864,120 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                   <Icon name="chevron_right" className="text-slate-400" />
                 </button>
               </div>
+            </section>
+
+            {/* Multi-Device Real-Time Sync Section */}
+            <section className="space-y-4 border-t border-primary/5 pt-5 text-left">
+              <div className="flex items-center justify-between px-1">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted">Multi-Device Real-Time Sync</h4>
+                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-black uppercase tracking-wider animate-pulse">
+                  Real-Time Connected
+                </span>
+              </div>
+
+              {/* Cloud Auto-Sync Toggle Card */}
+              <div className="p-4 bg-primary/5 rounded-2xl border border-primary/5 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-col text-left">
+                    <span className="text-xs font-black text-slate-800 uppercase tracking-tight">Cloud Auto-Sync</span>
+                    <p className="text-[9px] text-neutral-muted leading-relaxed mt-1">
+                      Automatically back up & sync messages, settings, and lists to the cloud in real-time. Connected devices pull instantly.
+                    </p>
+                  </div>
+                  <div 
+                    onClick={() => setAutoSyncEnabled(!autoSyncEnabled)}
+                    className={cn(
+                      "w-12 h-6 rounded-full p-1 transition-all cursor-pointer shrink-0",
+                      autoSyncEnabled ? 'bg-primary' : 'bg-slate-300'
+                    )}
+                  >
+                    <motion.div 
+                      animate={{ x: autoSyncEnabled ? 24 : 0 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      className="size-4 bg-white rounded-full shadow-sm" 
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Current Device Details */}
+              <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-1 text-left">
+                <div className="flex justify-between items-center text-xs font-medium text-slate-600">
+                  <span>This Device ID:</span>
+                  <span className="font-mono bg-white px-2 py-0.5 rounded-lg border border-slate-200 text-[9px] text-primary">
+                    {currentDeviceId || 'Registering...'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Online Sessions */}
+              <div className="space-y-2">
+                <span className="text-[9px] font-black uppercase tracking-widest text-neutral-muted block text-left px-1">
+                  Active Sessions ({onlineDevices.length})
+                </span>
+                <div className="space-y-2">
+                  {onlineDevices.length === 0 ? (
+                    <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl text-center text-xs text-neutral-muted italic">
+                      No other sessions active. Registering socket...
+                    </div>
+                  ) : (
+                    onlineDevices.map((dId) => {
+                      const isCurrent = dId === currentDeviceId;
+                      let readableName = `Session ID: ${dId.substring(0, 8)}`;
+                      let deviceTypeIcon = 'laptop_mac';
+                      
+                      if (isCurrent) {
+                        readableName = navigator.userAgent.includes('Mobile') ? 'Mobile Web (This Device)' : 'Desktop Web (This Device)';
+                        deviceTypeIcon = navigator.userAgent.includes('Mobile') ? 'smartphone' : 'laptop_mac';
+                      } else {
+                        readableName = dId.includes('mobi') || dId.charCodeAt(0) % 2 === 0 ? 'Mobile Session (Secondary)' : 'Desktop Session (Secondary)';
+                        deviceTypeIcon = dId.includes('mobi') || dId.charCodeAt(0) % 2 === 0 ? 'smartphone' : 'laptop_mac';
+                      }
+
+                      return (
+                        <div 
+                          key={`device-sync-item-${dId}`} 
+                          className={cn(
+                            "p-3 rounded-2xl border flex items-center justify-between transition-all bg-white",
+                            isCurrent ? "border-primary/20 bg-primary/5/10 ring-1 ring-primary/10" : "border-slate-100"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "size-8 rounded-lg flex items-center justify-center shadow-sm",
+                              isCurrent ? "bg-primary text-white" : "bg-slate-100 text-slate-500"
+                            )}>
+                              <Icon name={deviceTypeIcon} className="text-sm" />
+                            </div>
+                            <div className="flex flex-col items-start leading-none">
+                              <span className="text-xs font-bold text-slate-800">{readableName}</span>
+                              <span className="text-[8px] font-mono text-neutral-muted mt-1">ID: {dId}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="text-[8px] font-black uppercase tracking-widest text-emerald-600">Active</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Force cloud audit button */}
+              <button 
+                onClick={() => {
+                  onClose(); // Close settings to see the overlay cleanly
+                  setTimeout(() => {
+                    (window as any).__openSyncAuditModal?.();
+                  }, 200);
+                }}
+                className="w-full py-3.5 px-4 bg-slate-900 text-white rounded-2xl hover:bg-slate-800 active:scale-98 transition-all font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-md"
+              >
+                <Icon name="radar" className="text-sm text-primary animate-spin" />
+                <span>Launch Deep Sync Auditor</span>
+              </button>
             </section>
 
             {/* Support & Feedback */}
