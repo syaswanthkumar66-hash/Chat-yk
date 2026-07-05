@@ -69,6 +69,26 @@ function serializePushSubscription(subscription: PushSubscription): any {
   return result;
 }
 
+/**
+ * Unregisters any active service workers that are NOT '/sw.js'
+ * to prevent conflicts and ensure stable push notification delivery.
+ */
+export async function cleanupOtherServiceWorkers(): Promise<void> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    for (const reg of registrations) {
+      const scriptURL = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || '';
+      if (scriptURL && !scriptURL.includes('sw.js')) {
+        console.log(`[SW Cleanup] Unregistering conflicting Service Worker: ${scriptURL}`);
+        await reg.unregister();
+      }
+    }
+  } catch (err) {
+    console.warn('[SW Cleanup] Failed to cleanup other service workers:', err);
+  }
+}
+
 export async function registerPushNotifications(userId: string, force?: boolean): Promise<{ success: boolean; subscription?: PushSubscription; error?: string }> {
   if (typeof window === 'undefined') {
     return { success: false, error: "Window is undefined" };
@@ -81,14 +101,14 @@ export async function registerPushNotifications(userId: string, force?: boolean)
   }
 
   try {
-    // 1. Register service worker
-    let registration = await navigator.serviceWorker.getRegistration('/');
-    if (!registration) {
-      console.log("Registering service worker '/sw.js'...");
-      registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-    } else {
-      console.log("Service Worker already registered, reusing existing registration");
-    }
+    // 0. Clean up conflicting service workers first
+    await cleanupOtherServiceWorkers();
+
+    // 1. Register the unified service worker '/sw.js' to make sure it handles push notifications and PWA.
+    // If a different worker was active (e.g. precache-sw.js), this will cleanly replace/update it.
+    console.log("Ensuring Service Worker '/sw.js' is registered and active...");
+    let registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    console.log("Service Worker registration successful:", registration);
     
     // Force service worker to look for updates immediately
     try {

@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests, setScopedUserInstance } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { sessionIntegrityService } from './services/sessionIntegrityService';
-import { showLocalNotification } from './services/notificationService';
+import { showLocalNotification, cleanupOtherServiceWorkers } from './services/notificationService';
 
 async function testConnection() {
   try {
@@ -430,6 +430,9 @@ export default function App() {
   useEffect(() => {
     // Run startup session integrity and cryptographic verification
     sessionIntegrityService.verifyAndCleanupSession().catch(console.error);
+
+    // Clean up conflicting Service Workers (like precache-sw.js from old cache) on startup
+    cleanupOtherServiceWorkers().catch(console.error);
 
     // If a user is already cached and logged in from a previous session, restore their scoped Firebase/Firestore instance
     if (isLoggedIn && user?.id) {
