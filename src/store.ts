@@ -235,6 +235,8 @@ interface AppState {
   setSelfTypingChat: (key: string, isTyping: boolean) => void;
   isSyncing: boolean;
   performCatchUpSync: () => Promise<void>;
+  onlineDevices: string[];
+  currentDeviceId: string | null;
 }
 
 export const generateInitialsAvatar = (id: string, name: string): string => {
@@ -1421,6 +1423,16 @@ export const useAppStore = create<AppState>((set) => ({
         console.log('[self_typing_sync] Received typing update for self from another device:', data);
         useAppStore.getState().setSelfTypingChat(data.recipientId, data.isTyping);
       });
+
+      // 16. devices_update
+      sock.off('devices_update').on('devices_update', (data: { devices: string[], currentDeviceId?: string }) => {
+        console.log('[devices_update] Received active devices list:', data);
+        const stateUpdate: any = { onlineDevices: data.devices };
+        if (data.currentDeviceId) {
+          stateUpdate.currentDeviceId = data.currentDeviceId;
+        }
+        useAppStore.setState(stateUpdate);
+      });
     };
 
     setupSocketListeners(socket, userId);
@@ -1654,6 +1666,8 @@ export const useAppStore = create<AppState>((set) => ({
   selfTypingChats: {},
   setSelfTypingChat: (key, isTyping) => set(state => ({ selfTypingChats: { ...state.selfTypingChats, [key]: isTyping } })),
   isSyncing: false,
+  onlineDevices: [],
+  currentDeviceId: null,
   activeGroupCall: null,
   setActiveGroupCall: (call) => set({ activeGroupCall: call }),
   blockedUserIds: cachedBlockedUserIds,

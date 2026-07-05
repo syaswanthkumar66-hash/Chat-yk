@@ -825,6 +825,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       // Broadcast online status
       io.emit("user_status", { userId, isOnline: true });
       socket.emit("online_users", Array.from(users.keys()));
+
+      // Broadcast devices list to all sockets of this user
+      const activeDeviceIds = Array.from(deviceMap.keys());
+      for (const [dId, sId] of deviceMap.entries()) {
+        io.to(sId).emit("devices_update", { devices: activeDeviceIds, currentDeviceId: dId });
+      }
       
       const deliverAndCleanup = (msgId: string, msgData: any) => {
         socket.emit("receive_message", msgData);
@@ -1397,6 +1403,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             console.log(`User ${senderId} has disconnected all devices. Broadcasted offline.`);
           } else {
             console.log(`User ${senderId} disconnected device ${deviceId}. ${deviceMap.size} devices still active.`);
+            // Broadcast remaining devices list to all remaining active sockets of this user
+            const activeDeviceIds = Array.from(deviceMap.keys());
+            for (const [dId, sId] of deviceMap.entries()) {
+              io.to(sId).emit("devices_update", { devices: activeDeviceIds, currentDeviceId: dId });
+            }
           }
         }
       }

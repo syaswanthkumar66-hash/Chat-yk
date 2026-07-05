@@ -44,6 +44,7 @@ export const SocialLayout = () => {
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showDevicesDropdown, setShowDevicesDropdown] = useState(false);
   const { 
     setMode, 
     activeChatId, 
@@ -78,7 +79,10 @@ export const SocialLayout = () => {
     initSocket,
     typingUsers,
     selfTypingChats,
-    isSyncing
+    isSyncing,
+    onlineDevices,
+    currentDeviceId,
+    performCatchUpSync
   } = useStore(s => ({
     setMode: s.setMode,
     activeChatId: s.activeChatId,
@@ -113,7 +117,10 @@ export const SocialLayout = () => {
     initSocket: s.initSocket,
     typingUsers: s.typingUsers,
     selfTypingChats: s.selfTypingChats,
-    isSyncing: s.isSyncing
+    isSyncing: s.isSyncing,
+    onlineDevices: s.onlineDevices,
+    currentDeviceId: s.currentDeviceId,
+    performCatchUpSync: s.performCatchUpSync
   }), shallowEqual);
 
   useEffect(() => {
@@ -328,15 +335,80 @@ export const SocialLayout = () => {
                       {wssStatus === 'connected' ? 'Online' : wssStatus === 'connecting' ? 'Syncing...' : 'Offline'}
                     </span>
                   </button>
-                  {isSyncing && (
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-100 animate-pulse text-[9px] font-black text-indigo-600 tracking-wider uppercase">
-                      <svg className="animate-spin h-2.5 w-2.5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Syncing State...
+
+                  {wssStatus === 'connected' && (
+                    <div className="relative">
+                      <button 
+                        onClick={() => setShowDevicesDropdown(!showDevicesDropdown)}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 text-emerald-700 font-bold text-[9px] uppercase tracking-wider transition-all active:scale-95"
+                        title="View active devices"
+                      >
+                        <Icon name="devices" className="text-[11px]" />
+                        <span>{onlineDevices.length || 1} Device{(onlineDevices.length || 1) > 1 ? 's' : ''}</span>
+                      </button>
+                      <AnimatePresence>
+                        {showDevicesDropdown && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setShowDevicesDropdown(false)} />
+                            <motion.div 
+                              initial={{ opacity: 0, y: 5 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: 5 }}
+                              className="absolute left-0 mt-1.5 w-56 rounded-2xl bg-white border border-slate-100 shadow-xl p-3 z-50 text-slate-700"
+                            >
+                              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 px-1">Online Devices</h4>
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                {onlineDevices.length > 0 ? (
+                                  onlineDevices.map((devId) => {
+                                    const isCurrent = devId === currentDeviceId;
+                                    return (
+                                      <div key={devId} className={`flex items-center justify-between p-1.5 rounded-xl text-xs ${isCurrent ? 'bg-primary/5 border border-primary/10' : 'hover:bg-slate-50'}`}>
+                                        <div className="flex items-center gap-2">
+                                          <Icon name={devId.includes('mobile') || devId.toLowerCase().includes('phone') ? 'smartphone' : 'laptop'} className={`text-sm ${isCurrent ? 'text-primary' : 'text-slate-400'}`} />
+                                          <div className="flex flex-col min-w-0">
+                                            <span className="font-bold truncate max-w-[120px]">{devId}</span>
+                                            {isCurrent && <span className="text-[8px] font-black text-primary uppercase tracking-wider">This device</span>}
+                                          </div>
+                                        </div>
+                                        <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_4px_rgba(16,185,129,0.5)]" />
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <div className="flex items-center gap-2 p-1.5 rounded-xl text-xs bg-primary/5 border border-primary/10">
+                                    <Icon name="laptop" className="text-sm text-primary" />
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="font-bold truncate max-w-[120px]">{currentDeviceId || 'This Device'}</span>
+                                      <span className="text-[8px] font-black text-primary uppercase tracking-wider">This device</span>
+                                    </div>
+                                    <div className="ml-auto size-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_4px_rgba(16,185,129,0.5)]" />
+                                  </div>
+                                )}
+                              </div>
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )}
+
+                  <button 
+                    onClick={() => {
+                      if (wssStatus === 'connected') {
+                        performCatchUpSync().catch(console.error);
+                      }
+                    }}
+                    disabled={wssStatus !== 'connected' || isSyncing}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[9px] font-black tracking-wider uppercase transition-all duration-200 active:scale-95 ${
+                      wssStatus === 'connected' 
+                        ? 'bg-indigo-50 border-indigo-100 hover:bg-indigo-100 text-indigo-700 cursor-pointer' 
+                        : 'bg-slate-50 border-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                    }`}
+                    title="Fetch latest data from other devices"
+                  >
+                    <Icon name="sync" className={`text-[11px] ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                  </button>
                 </div>
               </div>
             </div>
