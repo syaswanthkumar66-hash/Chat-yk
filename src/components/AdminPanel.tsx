@@ -144,6 +144,81 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
   const [visibleSecurityLogsCount, setVisibleSecurityLogsCount] = useState(5);
 
   const [pushSubscriptionsMap, setPushSubscriptionsMap] = useState<Record<string, any>>({});
+  const [pushAttempts, setPushAttempts] = useState<any[]>([]);
+  const [pushAttemptsLoading, setPushAttemptsLoading] = useState(false);
+  const [pushAttemptsError, setPushAttemptsError] = useState<string | null>(null);
+
+  const fetchPushAttempts = async () => {
+    setPushAttemptsLoading(true);
+    setPushAttemptsError(null);
+    try {
+      const targetUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const response = await fetch(`${targetUrl}/api/admin/push-attempts`);
+      if (response.ok) {
+        const data = await response.json();
+        setPushAttempts(data);
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch push notification attempts:", err);
+      setPushAttemptsError(err.message || String(err));
+    } finally {
+      setPushAttemptsLoading(false);
+    }
+  };
+
+  const [testPushLoading, setTestPushLoading] = useState(false);
+  const handleTestPushSelf = async () => {
+    if (!user?.id) return;
+    setTestPushLoading(true);
+    try {
+      const { auth } = await import('../firebase');
+      let idToken = '';
+      const authMethod = typeof window !== 'undefined' ? localStorage.getItem('proto_authMethod') : null;
+      if (authMethod === 'local') {
+        idToken = `local-${user.id}`;
+      } else {
+        idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
+      }
+      const targetUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      await fetch(`${targetUrl}/api/send-test-push`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          title: "🔧 Telemetry Test: Self-Diagnostic",
+          body: `Admin push subsystem verified at ${new Date().toLocaleTimeString()}`
+        })
+      });
+      await fetchPushAttempts();
+    } catch (err) {
+      console.error("Test push error:", err);
+    } finally {
+      setTestPushLoading(false);
+    }
+  };
+
+  const clearPushAttempts = async () => {
+    try {
+      const targetUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const response = await fetch(`${targetUrl}/api/admin/clear-push-attempts`, { method: 'POST' });
+      if (response.ok) {
+        setPushAttempts([]);
+      }
+    } catch (err) {
+      console.error("Failed to clear push attempts:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'broadcast') {
+      fetchPushAttempts();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (!db) return;
@@ -2594,6 +2669,143 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                   <Button className="w-full bg-primary/5 text-primary hover:bg-primary hover:text-white border-none shadow-none text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] h-14 sm:h-16 rounded-xl sm:rounded-2xl transition-all duration-500">
                     Full Archive
                   </Button>
+                </Card>
+
+                <Card className="p-6 sm:p-10 space-y-6 sm:space-y-8 bg-white shadow-2xl shadow-primary/5 border-none rounded-[2rem] sm:rounded-[3rem] mt-6 sm:mt-10">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <h3 className="font-black text-slate-900 uppercase italic tracking-tight text-lg sm:text-xl">Notification Debugger</h3>
+                      <p className="text-[8px] sm:text-[9px] font-bold text-neutral-muted uppercase tracking-widest">VAPID Telemetry & Browser Receipt logs</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={handleTestPushSelf}
+                        disabled={testPushLoading}
+                        title="Send test push notification to self"
+                        className="size-10 rounded-xl bg-primary/5 hover:bg-primary/10 flex items-center justify-center text-primary transition-all disabled:opacity-50"
+                      >
+                        <Icon name={testPushLoading ? "sync" : "send"} className={cn("text-lg", testPushLoading && "animate-spin")} />
+                      </button>
+                      <button 
+                        onClick={fetchPushAttempts}
+                        disabled={pushAttemptsLoading}
+                        title="Refresh attempts log"
+                        className="size-10 rounded-xl bg-primary/5 hover:bg-primary/10 flex items-center justify-center text-primary transition-all"
+                      >
+                        <Icon name="refresh" className={cn("text-lg", pushAttemptsLoading && "animate-spin")} />
+                      </button>
+                      <button 
+                        onClick={clearPushAttempts}
+                        title="Clear attempts log"
+                        className="size-10 rounded-xl bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 transition-all"
+                      >
+                        <Icon name="delete_sweep" className="text-lg" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 max-h-[450px] overflow-y-auto pr-1 custom-scrollbar">
+                    {pushAttemptsLoading && pushAttempts.length === 0 ? (
+                      <div className="py-10 text-center text-neutral-muted text-[10px] font-black uppercase tracking-widest">
+                        <Icon name="sync" className="animate-spin text-2xl text-primary mb-2 mx-auto" />
+                        Fetching push telemetry...
+                      </div>
+                    ) : pushAttemptsError ? (
+                      <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-[10px] font-bold">
+                        <p className="uppercase tracking-widest font-black mb-1 flex items-center gap-2">
+                          <Icon name="error_outline" /> Telemetry Error
+                        </p>
+                        {pushAttemptsError}
+                      </div>
+                    ) : pushAttempts.length === 0 ? (
+                      <div className="py-10 text-center text-neutral-muted text-[10px] font-black uppercase tracking-widest border-2 border-dashed border-primary/10 rounded-2xl p-6">
+                        <Icon name="notifications_off" className="text-2xl text-primary/30 mb-2 mx-auto" />
+                        No attempts recorded yet.
+                        <p className="text-[8px] mt-1 normal-case text-neutral-muted/80 font-semibold tracking-normal">
+                          Trigger a diagnostic test above or send a global broadcast to capture telemetry.
+                        </p>
+                      </div>
+                    ) : (
+                      pushAttempts.slice(0, 5).map((attempt: any) => {
+                        const targetUserObj = users.find(u => u.id === attempt.recipientId);
+                        const recipientLabel = targetUserObj ? targetUserObj.displayName : (attempt.recipientId || 'Unknown User');
+                        const timeStr = new Date(attempt.timestamp).toLocaleTimeString();
+                        
+                        return (
+                          <div 
+                            key={`push-attempt-${attempt.id}`} 
+                            className="p-4 bg-primary/5 hover:bg-primary/10 rounded-2xl border border-primary/5 transition-all duration-300"
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 bg-white/80 text-slate-800 text-[8px] font-black uppercase tracking-wider rounded-lg border border-primary/10">
+                                    Recipient: {recipientLabel}
+                                  </span>
+                                  <span className="text-[8px] text-neutral-muted font-bold tracking-wider uppercase">
+                                    {timeStr}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-black text-slate-900 tracking-tight mt-1">
+                                  "{attempt.title}"
+                                </span>
+                              </div>
+                              <span className={cn(
+                                "px-2 py-1 text-[8px] font-black uppercase tracking-widest rounded-lg border",
+                                attempt.success 
+                                  ? "bg-emerald-50 text-emerald-600 border-emerald-200" 
+                                  : "bg-red-50 text-red-600 border-red-200"
+                              )}>
+                                {attempt.success ? "DELIVERED" : "FAILED"}
+                              </span>
+                            </div>
+
+                            <p className="text-[8px] text-neutral-muted italic font-medium line-clamp-1 mb-2">
+                              {attempt.body}
+                            </p>
+
+                            <div className="grid grid-cols-3 gap-2 py-1.5 border-t border-dashed border-primary/10 text-[8px] font-black uppercase tracking-wider text-neutral-muted">
+                              <div>
+                                DEVICES: <span className="text-slate-800 italic">{attempt.devicesCount}</span>
+                              </div>
+                              <div>
+                                SENT: <span className="text-emerald-600 italic">{attempt.sentCount}</span>
+                              </div>
+                              <div>
+                                ERRORS: <span className="text-red-600 italic">{attempt.errorCount}</span>
+                              </div>
+                            </div>
+
+                            {attempt.error && (
+                              <div className="mt-2 p-2 bg-red-50/50 border border-red-100 rounded-lg text-[8px] text-red-600 font-bold leading-normal">
+                                <span className="font-black uppercase tracking-wider mr-1">Error:</span>
+                                {attempt.error}
+                              </div>
+                            )}
+
+                            {attempt.devices && attempt.devices.length > 0 && (
+                              <div className="mt-2 space-y-1 pt-1.5 border-t border-primary/5">
+                                <span className="text-[7px] font-black uppercase tracking-widest text-neutral-muted">Device Routing Telemetry:</span>
+                                {attempt.devices.map((dev: any, dIdx: number) => (
+                                  <div key={`dev-route-${dIdx}`} className="flex items-center justify-between text-[7px] font-mono text-neutral-muted py-0.5">
+                                    <span className="truncate max-w-[150px]" title={dev.endpoint}>
+                                      ...{dev.endpoint ? dev.endpoint.slice(-15) : 'unknown'}
+                                    </span>
+                                    <span className={cn(
+                                      "font-bold",
+                                      dev.success ? "text-emerald-600" : "text-red-500"
+                                    )}>
+                                      {dev.success ? "OK" : `ERR ${dev.statusCode || dev.error || 'Unknown'}`}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </Card>
               </div>
             </div>

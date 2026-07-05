@@ -362,6 +362,39 @@ const vapidInitPromise = initVapid().catch((e) => {
 const memorySubscriptions = new Map<string, any[]>();
 const recentPushNotifications = new Map<string, number>();
 
+interface PushAttempt {
+  id: string;
+  timestamp: string;
+  recipientId: string;
+  title: string;
+  body: string;
+  devicesCount: number;
+  sentCount: number;
+  errorCount: number;
+  success: boolean;
+  error?: string;
+  devices?: Array<{
+    endpoint: string;
+    success: boolean;
+    statusCode?: number;
+    error?: string;
+  }>;
+}
+
+const pushAttempts: PushAttempt[] = [];
+
+function recordPushAttempt(attempt: Omit<PushAttempt, 'id' | 'timestamp'>) {
+  const newAttempt: PushAttempt = {
+    ...attempt,
+    id: Math.random().toString(36).substring(2, 11),
+    timestamp: new Date().toISOString()
+  };
+  pushAttempts.unshift(newAttempt);
+  if (pushAttempts.length > 5) {
+    pushAttempts.pop();
+  }
+}
+
 async function sendPushNotification(recipientId: string, payload: { title: string, body: string, icon?: string, data?: any }) {
   // Gracefully wait for VAPID initialization to finish before trying to dispatch any notifications (max 10s)
   try {
@@ -371,13 +404,35 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
     ]);
   } catch (err: any) {
     console.error(`Cannot send push notification to ${recipientId}: VAPID initialization timed out or failed`, err);
-    return { success: false, error: `VAPID initialization timed out or failed: ${err.message || err}`, devicesCount: 0, sentCount: 0 };
+    const result = { success: false, error: `VAPID initialization timed out or failed: ${err.message || err}`, devicesCount: 0, sentCount: 0 };
+    recordPushAttempt({
+      recipientId,
+      title: payload.title,
+      body: payload.body,
+      devicesCount: 0,
+      sentCount: 0,
+      errorCount: 0,
+      success: false,
+      error: result.error
+    });
+    return result;
   }
 
   // Guard: if VAPID keys aren't loaded yet, return clear error
   if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
     console.warn(`sendPushNotification failed for ${recipientId}: VAPID keys not yet initialized or missing`);
-    return { success: false, error: "VAPID keys not yet initialized or missing on server", devicesCount: 0, sentCount: 0 };
+    const result = { success: false, error: "VAPID keys not yet initialized or missing on server", devicesCount: 0, sentCount: 0 };
+    recordPushAttempt({
+      recipientId,
+      title: payload.title,
+      body: payload.body,
+      devicesCount: 0,
+      sentCount: 0,
+      errorCount: 0,
+      success: false,
+      error: result.error
+    });
+    return result;
   }
 
   let subscriptions: any[] = [];
@@ -420,6 +475,7 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
     const expiredEndpoints = new Set<string>();
     let sentCount = 0;
     let errorCount = 0;
+    const devices: Array<{ endpoint: string; success: boolean; statusCode?: number; error?: string }> = [];
 
     const sendPromises = subscriptions.map(async (subscription) => {
       if (!subscription || !subscription.endpoint) return;
@@ -429,6 +485,11 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
       const lastSent = recentPushNotifications.get(cacheKey);
       if (lastSent && Date.now() - lastSent < 3000) {
         console.log(`Push notification deduplicated/prevented collision for endpoint ${subscription.endpoint.slice(-20)}`);
+        devices.push({
+          endpoint: subscription.endpoint,
+          success: false,
+          error: "Deduplicated (Prevented collision)"
+        });
         return;
       }
       recentPushNotifications.set(cacheKey, Date.now());
@@ -454,9 +515,19 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
         await webpush.sendNotification(subscription, JSON.stringify(payload), options);
         console.log(`Successfully sent Web Push Notification to user ${recipientId} endpoint ${subscription.endpoint.slice(-20)}`);
         sentCount++;
+        devices.push({
+          endpoint: subscription.endpoint,
+          success: true
+        });
       } catch (err: any) {
         console.error(`Error sending push notification to user ${recipientId} endpoint ${subscription.endpoint.slice(-20)}:`, err);
         errorCount++;
+        devices.push({
+          endpoint: subscription.endpoint,
+          success: false,
+          statusCode: err.statusCode,
+          error: err.message || String(err)
+        });
         if (err.statusCode === 410 || err.statusCode === 404) {
           console.log(`Subscription for user ${recipientId} has expired or is invalid: ${subscription.endpoint.slice(-20)}`);
           expiredEndpoints.add(subscription.endpoint);
@@ -515,22 +586,45 @@ async function sendPushNotification(recipientId: string, payload: { title: strin
       }
     }
 
-    return { 
+    const result = { 
       success: sentCount > 0, 
       devicesCount: subscriptions.length, 
       sentCount, 
       errorCount,
       error: sentCount === 0 ? "Failed to deliver push notifications to any registered endpoints. Browser push service returned an error." : undefined
     };
+    recordPushAttempt({
+      recipientId,
+      title: payload.title,
+      body: payload.body,
+      devicesCount: subscriptions.length,
+      sentCount,
+      errorCount,
+      success: result.success,
+      error: result.error,
+      devices
+    });
+    return result;
   } else {
     console.log(`No active Web Push subscription found for user ${recipientId}`);
-    return { 
+    const result = { 
       success: false, 
       error: "No active Web Push subscription found for this user", 
       warning: "The user has not authorized or registered notifications on this device/browser yet, or registration failed. If testing inside an iframe, please open the app in a new tab instead.",
       devicesCount: 0, 
       sentCount: 0 
     };
+    recordPushAttempt({
+      recipientId,
+      title: payload.title,
+      body: payload.body,
+      devicesCount: 0,
+      sentCount: 0,
+      errorCount: 0,
+      success: false,
+      error: result.error
+    });
+    return result;
   }
 }
 
@@ -1398,6 +1492,15 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       console.error("Error in /api/auth/google handler:", error);
       res.status(500).json({ error: error.message || "Failed to process auth token" });
     }
+  });
+
+  app.get("/api/admin/push-attempts", (req, res) => {
+    res.json(pushAttempts);
+  });
+
+  app.post("/api/admin/clear-push-attempts", (req, res) => {
+    pushAttempts.length = 0;
+    res.json({ success: true, message: "Cleared push attempts log." });
   });
 
   app.get("/api/vapid-public-key", async (req, res) => {
