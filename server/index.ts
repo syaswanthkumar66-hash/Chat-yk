@@ -219,7 +219,7 @@ async function initVapid() {
           const data = vapidDoc.data();
           if (data && data.publicKey && data.privateKey) {
             // Check if rotation is needed (if rotated is not set or false, or if it has the mock/leaked pattern)
-            if (data.rotated === true && data.privateKey !== 'mock-private-key' && data.publicKey !== 'BEl69Z7SgYv9m_E7T0nFp8hV8hW_H2k1vD2gYxP5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5U=') {
+            if (data.rotated === true && data.privateKey !== 'mock-private-key' && data.privateKey !== 'Fv3LBs2aSq4gCj6oL-a4U2CTutENQZU7c6MjPlWdXKY' && data.publicKey !== 'BEl69Z7SgYv9m_E7T0nFp8hV8hW_H2k1vD2gYxP5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5U=') {
               vapidKeys = {
                 publicKey: data.publicKey,
                 privateKey: data.privateKey
