@@ -190,102 +190,102 @@ let vapidKeys = {
 let vapidSubject = "mailto:syaswanthkumar66@gmail.com";
 
 async function initVapid() {
-  const localKeysPath = path.join(process.cwd(), 'vapid-keys.json');
+  try {
+    const localKeysPath = path.join(process.cwd(), 'vapid-keys.json');
 
-  // Priority 1: Environment Variables (highest authority)
-  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    vapidKeys = {
-      publicKey: process.env.VAPID_PUBLIC_KEY,
-      privateKey: process.env.VAPID_PRIVATE_KEY
-    };
-    console.log("Loaded VAPID keys from environment variables (Priority 1)");
-    // Sync to Firestore if db is available to keep database updated
-    if (db) {
-      try {
-        await db.collection('system_config').doc('vapid').set(vapidKeys);
-        console.log("Synced environment VAPID keys to Firestore system_config");
-      } catch (err) {
-        console.warn("Failed to sync environment VAPID keys to Firestore:", err);
+    // Priority 1: Environment Variables (highest authority)
+    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+      vapidKeys = {
+        publicKey: process.env.VAPID_PUBLIC_KEY,
+        privateKey: process.env.VAPID_PRIVATE_KEY
+      };
+      console.log("Loaded VAPID keys from environment variables (Priority 1)");
+      // Sync to Firestore if db is available to keep database updated
+      if (db) {
+        try {
+          await db.collection('system_config').doc('vapid').set(vapidKeys);
+          console.log("Synced environment VAPID keys to Firestore system_config");
+        } catch (err) {
+          console.warn("Failed to sync environment VAPID keys to Firestore:", err);
+        }
       }
     }
-  }
 
-  // Priority 2: Shared database (so multiple instances/containers share same keys)
-  if (!vapidKeys.publicKey && db) {
-    try {
-      const vapidDoc = await db.collection('system_config').doc('vapid').get();
-      if (vapidDoc.exists) {
-        const data = vapidDoc.data();
+    // Priority 2: Shared database (so multiple instances/containers share same keys)
+    if (!vapidKeys.publicKey && db) {
+      try {
+        const vapidDoc = await db.collection('system_config').doc('vapid').get();
+        if (vapidDoc.exists) {
+          const data = vapidDoc.data();
+          if (data && data.publicKey && data.privateKey) {
+            vapidKeys = {
+              publicKey: data.publicKey,
+              privateKey: data.privateKey
+            };
+            console.log("Loaded VAPID keys from Firestore system_config (Priority 2)");
+            // Persist locally for caching/offline fallback
+            try {
+              fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
+            } catch (_) {}
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load VAPID keys from Firestore:", err);
+      }
+    }
+
+    // Priority 3: Local file cache
+    if (!vapidKeys.publicKey && fs.existsSync(localKeysPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(localKeysPath, 'utf8'));
         if (data && data.publicKey && data.privateKey) {
           vapidKeys = {
             publicKey: data.publicKey,
             privateKey: data.privateKey
           };
-          console.log("Loaded VAPID keys from Firestore system_config (Priority 2)");
-          // Persist locally for caching/offline fallback
-          try {
-            fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
-          } catch (_) {}
+          console.log("Loaded VAPID keys from local vapid-keys.json cache (Priority 3)");
+          // Back up to Firestore if available
+          if (db) {
+            try {
+              await db.collection('system_config').doc('vapid').set(vapidKeys);
+              console.log("Saved cached VAPID keys to Firestore system_config");
+            } catch (_) {}
+          }
         }
+      } catch (e) {
+        console.warn("Failed to read local VAPID keys cache:", e);
       }
-    } catch (err) {
-      console.warn("Could not load VAPID keys from Firestore:", err);
-    }
-  }
-
-  // Priority 3: Local file cache
-  if (!vapidKeys.publicKey && fs.existsSync(localKeysPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(localKeysPath, 'utf8'));
-      if (data && data.publicKey && data.privateKey) {
-        vapidKeys = {
-          publicKey: data.publicKey,
-          privateKey: data.privateKey
-        };
-        console.log("Loaded VAPID keys from local vapid-keys.json cache (Priority 3)");
-        // Back up to Firestore if available
-        if (db) {
-          try {
-            await db.collection('system_config').doc('vapid').set(vapidKeys);
-            console.log("Saved cached VAPID keys to Firestore system_config");
-          } catch (_) {}
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to read local VAPID keys cache:", e);
-    }
-  }
-
-  // Priority 4: Dynamic generation (fallback)
-  if (!vapidKeys.publicKey) {
-    console.log("No VAPID keys found in environment, DB, or cache. Generating new keys...");
-    const generated = webpush.generateVAPIDKeys();
-    vapidKeys = {
-      publicKey: generated.publicKey,
-      privateKey: generated.privateKey
-    };
-    
-    // Persist to local cache
-    try {
-      fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
-      console.log("Saved newly generated stable VAPID keys to local cache");
-    } catch (e) {
-      console.error("Failed to save VAPID keys locally:", e);
     }
 
-    // Persist to Firestore
-    if (db) {
+    // Priority 4: Dynamic generation (fallback)
+    if (!vapidKeys.publicKey) {
+      console.log("No VAPID keys found in environment, DB, or cache. Generating new keys...");
+      const generated = webpush.generateVAPIDKeys();
+      vapidKeys = {
+        publicKey: generated.publicKey,
+        privateKey: generated.privateKey
+      };
+      
+      // Persist to local cache
       try {
-        await db.collection('system_config').doc('vapid').set(vapidKeys);
-        console.log("Saved newly generated VAPID keys to Firestore system_config");
-      } catch (err) {
-        console.error("Failed to save generated VAPID keys to Firestore:", err);
+        fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
+        console.log("Saved newly generated stable VAPID keys to local cache");
+      } catch (e) {
+        console.error("Failed to save VAPID keys locally:", e);
+      }
+
+      // Persist to Firestore
+      if (db) {
+        try {
+          await db.collection('system_config').doc('vapid').set(vapidKeys);
+          console.log("Saved newly generated VAPID keys to Firestore system_config");
+        } catch (err) {
+          console.error("Failed to save generated VAPID keys to Firestore:", err);
+        }
       }
     }
-  }
 
-  // Configure webpush details
-  try {
+    // Configure webpush details
     let subject = process.env.VAPID_SUBJECT || 'mailto:syaswanthkumar66@gmail.com';
     if (subject && !subject.startsWith('mailto:') && !subject.startsWith('https://')) {
       if (subject.includes('@')) {
@@ -347,8 +347,8 @@ async function initVapid() {
       vapidKeys.privateKey
     );
     console.log("Successfully configured WebPush VAPID details with public key:", vapidKeys.publicKey.slice(0, 20) + "...");
-  } catch (err) {
-    console.error("Failed to set VAPID details:", err);
+  } catch (err: any) {
+    console.error("Failed to initialize VAPID details:", err);
   } finally {
     resolveVapidReady();
   }

@@ -350,7 +350,7 @@ export async function triggerPushNotificationWithRetry(
   const attemptDelivery = async () => {
     console.log(`[Push Delivery] Dispatched request for user ${userId} to backend...`);
     const idToken = await getAuthToken(userId);
-    const res = await fetch(`${targetUrl}/api/send-test-push`, {
+    let res = await fetch(`${targetUrl}/api/send-test-push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -363,9 +363,39 @@ export async function triggerPushNotificationWithRetry(
       })
     });
     
+    if (res.status === 404) {
+      console.log("[Push Delivery] Backend returned 404 (No subscription). Attempting self-healing push auto-sync...");
+      try {
+        const syncResult = await registerPushNotifications(userId, true);
+        if (syncResult.success) {
+          console.log("[Push Delivery] Auto-sync complete! Retrying send-test-push...");
+          const newIdToken = await getAuthToken(userId);
+          res = await fetch(`${targetUrl}/api/send-test-push`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${newIdToken}`
+            },
+            body: JSON.stringify({
+              userId,
+              title,
+              body
+            })
+          });
+        }
+      } catch (syncErr) {
+        console.warn("[Push Delivery] Background auto-sync attempt failed:", syncErr);
+      }
+    }
+    
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+      let errMsg = text || res.statusText;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.error) errMsg = parsed.error;
+      } catch (_) {}
+      throw new Error(`HTTP ${res.status}: ${errMsg}`);
     }
     
     return await res.json();
