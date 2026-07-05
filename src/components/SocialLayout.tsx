@@ -12,6 +12,7 @@ import { Settings } from './Settings';
 import { NotificationPanel } from './NotificationPanel';
 import { GroupCall } from './GroupCall';
 import { GroupInfo } from './GroupInfo';
+import { DeviceSyncFlow } from './DeviceSyncFlow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, collection, query, where, getDocs, getDoc, doc } from '../firebase';
 
@@ -45,6 +46,7 @@ export const SocialLayout = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showDevicesDropdown, setShowDevicesDropdown] = useState(false);
+  const [showDeviceSyncFlow, setShowDeviceSyncFlow] = useState(false);
   const { 
     setMode, 
     activeChatId, 
@@ -391,6 +393,15 @@ export const SocialLayout = () => {
                       </AnimatePresence>
                     </div>
                   )}
+
+                  <button 
+                    onClick={() => setShowDeviceSyncFlow(true)}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-pink-50 border border-pink-100 hover:bg-pink-100 text-pink-700 font-bold text-[9px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
+                    title="Pair/Sync via Scan"
+                  >
+                    <Icon name="qr_code_scanner" className="text-[11px]" />
+                    <span>Scan Sync</span>
+                  </button>
 
                   <button 
                     onClick={() => {
@@ -1119,6 +1130,20 @@ export const SocialLayout = () => {
             type={activeGroupCall.type} 
             onClose={() => setActiveGroupCall(null)} 
           />
+        )}
+      </AnimatePresence>
+
+      {/* Device Sync Flow Overlay */}
+      <AnimatePresence>
+        {showDeviceSyncFlow && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[150] bg-slate-950 flex flex-col"
+          >
+            <DeviceSyncFlow onClose={() => setShowDeviceSyncFlow(false)} />
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
