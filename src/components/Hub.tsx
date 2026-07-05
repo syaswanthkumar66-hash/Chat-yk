@@ -1,4 +1,4 @@
-import { useAppStore } from '../store';
+import { useAppStore, generateInitialsAvatar } from '../store';
 import { Icon } from './UI';
 import { motion } from 'framer-motion';
 
@@ -63,7 +63,7 @@ export const Hub = () => {
               {[1, 2, 3, 4].map(i => (
                 <div key={`hub-user-avatar-${i}`} className="size-10 md:size-12 rounded-xl md:rounded-2xl border-2 md:border-4 border-white overflow-hidden shadow-2xl">
                   <img 
-                    src={`https://picsum.photos/seed/user${i}/100`} 
+                    src={generateInitialsAvatar(`user${i}`, `U${i}`)} 
                     className="size-full object-cover"
                     alt="User"
                   />

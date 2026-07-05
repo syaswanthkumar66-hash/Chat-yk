@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
-import { useStore, useAppStore, shallowEqual } from '../store';
+import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { BACKEND_URL } from '../config';
 import { webrtcService } from '../services/webrtcService';
 import { Icon, Avatar, Button, Card, cn } from './UI';
@@ -1756,7 +1756,7 @@ export const ChatDetail = () => {
                     )}
                     <div className="flex items-end gap-2">
                       {!isOwn && chat?.isGroup && (
-                        <Avatar src={msg.avatar || `https://picsum.photos/seed/${msg.senderId}/200`} className="size-8 mb-1" />
+                        <Avatar src={msg.avatar || generateInitialsAvatar(msg.senderId, msg.senderName || 'User')} className="size-8 mb-1" />
                       )}
                       <div 
                         onPointerDown={(e) => handlePointerDown(e, msg.id, msg.text || '', isOwn)}

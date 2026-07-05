@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { useStore, useAppStore, shallowEqual } from '../store';
+import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { Icon, Avatar, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { registerPushNotifications } from '../services/notificationService';
@@ -7,13 +7,19 @@ import { sessionIntegrityService } from '../services/sessionIntegrityService';
 import { BACKEND_URL } from '../config';
 
 const PRELOADED_AVATARS = [
-  'https://picsum.photos/seed/avatar1/200',
-  'https://picsum.photos/seed/avatar2/200',
-  'https://picsum.photos/seed/avatar3/200',
-  'https://picsum.photos/seed/avatar4/200',
-  'https://picsum.photos/seed/avatar5/200',
-  'https://picsum.photos/seed/avatar6/200',
-];
+  'avatar1', 'avatar2', 'avatar3', 'avatar4', 'avatar5', 'avatar6'
+].map((seed, i) => {
+  const hash = i * 20;
+  const colors = [
+    '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1',
+    '#8b5cf6', '#ec4899', '#14b8a6', '#06b6d4', '#84cc16',
+    '#f97316', '#64748b'
+  ];
+  const color = colors[hash % colors.length];
+  const initials = `A${i + 1}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="${color}" /><text x="50%" y="54%" font-family="&apos;Inter&apos;, system-ui, sans-serif" font-size="38" font-weight="600" fill="#ffffff" dominant-baseline="middle" text-anchor="middle">${initials}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+});
 
 export const Settings = ({ onClose }: { onClose: () => void }) => {
   const { 

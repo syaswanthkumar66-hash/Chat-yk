@@ -1,10 +1,21 @@
 import React, { useState } from 'react';
-import { useStore, shallowEqual } from '../store';
+import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { MediaGallery } from './MediaGallery';
 import { QRCodeCanvas } from 'qrcode.react';
+
+const generateMediaPlaceholder = (seed: string): string => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1', '#8b5cf6'];
+  const color = colors[Math.abs(hash) % colors.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="${color}" opacity="0.15" /><circle cx="50" cy="50" r="30" fill="${color}" opacity="0.3" /></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
 
 export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
   const { 
@@ -730,7 +741,7 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
               <div className="flex -space-x-2">
                 {[1, 2, 3].map(i => (
                   <div key={i} className="size-10 rounded-lg bg-slate-200 border-2 border-white overflow-hidden">
-                    <img src={`https://picsum.photos/seed/media${i}/100`} alt="media" className="size-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={generateMediaPlaceholder(`media${i}`)} alt="media" className="size-full object-cover" referrerPolicy="no-referrer" />
                   </div>
                 ))}
               </div>
@@ -1009,7 +1020,7 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
                     level="H"
                     includeMargin={false}
                     imageSettings={{
-                      src: chat.avatar || "https://picsum.photos/seed/group/200",
+                      src: chat.avatar || generateInitialsAvatar(chat.id, chat.name || 'Group Chat'),
                       x: undefined,
                       y: undefined,
                       height: 32,
@@ -1238,21 +1249,24 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
               
               <div className="grid grid-cols-3 gap-4">
                 {[
-                  'https://picsum.photos/seed/group1/200',
-                  'https://picsum.photos/seed/group2/200',
-                  'https://picsum.photos/seed/group3/200',
-                  'https://picsum.photos/seed/group4/200',
-                  'https://picsum.photos/seed/group5/200',
-                  'https://picsum.photos/seed/group6/200',
-                ].map((url, i) => (
-                  <button 
-                    key={i} 
-                    onClick={() => handleAvatarSelect(url)}
-                    className="aspect-square rounded-2xl overflow-hidden border-2 border-transparent hover:border-primary transition-all active:scale-95"
-                  >
-                    <img src={url} className="size-full object-cover" referrerPolicy="no-referrer" />
-                  </button>
-                ))}
+                  'group1',
+                  'group2',
+                  'group3',
+                  'group4',
+                  'group5',
+                  'group6',
+                ].map((seed, i) => {
+                  const url = generateInitialsAvatar(seed, `G${i + 1}`);
+                  return (
+                    <button 
+                      key={i} 
+                      onClick={() => handleAvatarSelect(url)}
+                      className="aspect-square rounded-2xl overflow-hidden border-2 border-transparent hover:border-primary transition-all active:scale-95"
+                    >
+                      <img src={url} className="size-full object-cover" referrerPolicy="no-referrer" />
+                    </button>
+                  );
+                })}
                 <button 
                   onClick={() => fileInputRef.current?.click()}
                   className="aspect-square rounded-2xl border-2 border-dashed border-primary/20 flex flex-col items-center justify-center gap-2 text-primary hover:bg-primary/5 transition-all"

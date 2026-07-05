@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStore, useAppStore, shallowEqual } from '../store';
+import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { BACKEND_URL } from '../config';
 import { db, onSnapshot, collection } from '../firebase';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -173,27 +173,12 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
     if (!user?.id) return;
     setTestPushLoading(true);
     try {
-      const { auth } = await import('../firebase');
-      let idToken = '';
-      const authMethod = typeof window !== 'undefined' ? localStorage.getItem('proto_authMethod') : null;
-      if (authMethod === 'local') {
-        idToken = `local-${user.id}`;
-      } else {
-        idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
-      }
-      const targetUrl = typeof window !== 'undefined' ? window.location.origin : '';
-      await fetch(`${targetUrl}/api/send-test-push`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          title: "🔧 Telemetry Test: Self-Diagnostic",
-          body: `Admin push subsystem verified at ${new Date().toLocaleTimeString()}`
-        })
-      });
+      const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
+      await triggerPushNotificationWithRetry(
+        user.id,
+        "🔧 Telemetry Test: Self-Diagnostic",
+        `Admin push subsystem verified at ${new Date().toLocaleTimeString()}`
+      );
       await fetchPushAttempts();
     } catch (err) {
       console.error("Test push error:", err);
@@ -322,51 +307,34 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
 
         logMsg(`[PUSH] Dispatched native background Web Push signals (VAPID) to user ${targetUser.id} & Admin ${user?.id}...`);
         
-        // Call backend native VAPID test push endpoint for both
+        // Call backend native VAPID test push endpoint for both with auto-sync retry
         try {
-          const targetUrl = BACKEND_URL || window.location.origin;
-          const resAdmin = await fetch(`${targetUrl}/api/send-test-push`, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${idToken}`
-            },
-            body: JSON.stringify({
-              userId: user?.id,
-              title: '🔧 Admin Diag: VAPID Verified',
-              body: `Web Push Delivery to Administrator is active and healthy.`
-            })
-          });
+          const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
           
-          if (!resAdmin.ok) {
-            const errData = await resAdmin.json().catch(() => ({}));
-            logMsg(`[WARNING] Admin VAPID push failed: ${errData.error || resAdmin.statusText}. ${errData.warning || ''}`);
+          logMsg(`[PUSH] Dispatched native background Web Push signals (VAPID) to Admin ${user?.id}...`);
+          const adminResult = await triggerPushNotificationWithRetry(
+            user?.id || '',
+            '🔧 Admin Diag: VAPID Verified',
+            'Web Push Delivery to Administrator is active and healthy.'
+          );
+          
+          if (!adminResult.success) {
+            logMsg(`[WARNING] Admin VAPID push failed: ${adminResult.error}`);
           } else {
-            const successData = await resAdmin.json().catch(() => ({}));
-            const devices = successData.details?.devicesCount || 0;
-            logMsg(`[PUSH] Dispatched to Admin's registered devices: ${devices}`);
+            logMsg(`[PUSH] Dispatched to Admin's registered devices successfully.`);
           }
           
-          const resTarget = await fetch(`${targetUrl}/api/send-test-push`, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${idToken}`
-            },
-            body: JSON.stringify({
-              userId: targetUser.id,
-              title: '🔧 Secure Peer Verification',
-              body: `Admin ${user?.displayName || 'Administrator'} has verified your push delivery route.`
-            })
-          });
+          logMsg(`[PUSH] Dispatched native background Web Push signals (VAPID) to user ${targetUser.id}...`);
+          const targetResult = await triggerPushNotificationWithRetry(
+            targetUser.id,
+            '🔧 Secure Peer Verification',
+            `Admin ${user?.displayName || 'Administrator'} has verified your push delivery route.`
+          );
 
-          if (!resTarget.ok) {
-            const errData = await resTarget.json().catch(() => ({}));
-            logMsg(`[WARNING] User ${targetUser.displayName} VAPID push failed: ${errData.error || resTarget.statusText}. ${errData.warning || ''}`);
+          if (!targetResult.success) {
+            logMsg(`[WARNING] User ${targetUser.displayName} VAPID push failed: ${targetResult.error}`);
           } else {
-            const successData = await resTarget.json().catch(() => ({}));
-            const devices = successData.details?.devicesCount || 0;
-            logMsg(`[PUSH] Dispatched to ${targetUser.displayName}'s registered devices: ${devices}`);
+            logMsg(`[PUSH] Dispatched to ${targetUser.displayName}'s registered devices successfully.`);
           }
         } catch (e: any) {
           logMsg(`[WARNING] Native VAPID push route warning: ${e.message}`);
@@ -795,7 +763,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
       description: '', 
       isAdmin: false,
       username: '',
-      avatar: `https://picsum.photos/seed/${Math.random()}/200`,
+      avatar: generateInitialsAvatar(Math.random().toString(), 'New User'),
       allowedTabs: [],
       teamRole: '',
       accessibleTeamMembers: []
@@ -857,7 +825,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
         description: editForm.description,
         isAdmin: editForm.isAdmin,
         username: editForm.username || `user_${Math.random().toString(36).substr(2, 5)}`,
-        avatar: editForm.avatar || `https://picsum.photos/seed/${Math.random()}/200`,
+        avatar: editForm.avatar || generateInitialsAvatar(Math.random().toString(), editForm.displayName || 'New User'),
         allowedTabs: editForm.isAdmin ? undefined : editForm.allowedTabs,
         teamRole: editForm.isAdmin ? undefined : editForm.teamRole,
         accessibleTeamMembers: editForm.isAdmin ? undefined : editForm.accessibleTeamMembers,

@@ -213,34 +213,18 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
 
   const handleTestPush = async () => {
     if (!user?.id) return;
-    setTestStatus('Sending test push to your registered devices...');
+    setTestStatus('Sending test push to your registered devices with auto-sync recovery...');
     try {
-      let idToken = '';
-      const authMethod = typeof window !== 'undefined' ? localStorage.getItem('proto_authMethod') : null;
-      if (authMethod === 'local') {
-        idToken = `local-${user.id}`;
+      const { triggerPushNotificationWithRetry } = await import('../services/notificationService');
+      const result = await triggerPushNotificationWithRetry(
+        user.id,
+        '🔧 VAPID Push Verified',
+        'Success! Your browser push subscription is fully operational and authenticated!'
+      );
+      if (result.success) {
+        setTestStatus('Test push dispatched successfully! Please check your device.');
       } else {
-        idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
-      }
-
-      const targetUrl = BACKEND_URL || window.location.origin;
-      const res = await fetch(`${targetUrl}/api/send-test-push`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          title: '🔧 VAPID Push Verified',
-          body: 'Success! Your browser push subscription is fully operational and authenticated!'
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setTestStatus(`Test push dispatched successfully across ${data.details?.sentCount || 0} active device(s)!`);
-      } else {
-        setTestStatus(`Verification failed: ${data.error || res.statusText}. ${data.warning || ''}`);
+        setTestStatus(`Verification failed: ${result.error || 'Failed to deliver push'}`);
       }
     } catch (err: any) {
       setTestStatus(`Network error: ${err.message || err}`);

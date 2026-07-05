@@ -22,6 +22,10 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    match /system_config/{configId} {
+      allow read, write: if true;
+    }
+
     match /users/{userId} {
       allow read: if isVerified();
       allow write: if isVerified() && request.auth.uid == userId;

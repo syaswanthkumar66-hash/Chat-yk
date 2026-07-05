@@ -218,15 +218,20 @@ async function initVapid() {
         if (vapidDoc.exists) {
           const data = vapidDoc.data();
           if (data && data.publicKey && data.privateKey) {
-            vapidKeys = {
-              publicKey: data.publicKey,
-              privateKey: data.privateKey
-            };
-            console.log("Loaded VAPID keys from Firestore system_config (Priority 2)");
-            // Persist locally for caching/offline fallback
-            try {
-              fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
-            } catch (_) {}
+            // Check if rotation is needed (if rotated is not set or false, or if it has the mock/leaked pattern)
+            if (data.rotated === true && data.privateKey !== 'mock-private-key' && data.publicKey !== 'BEl69Z7SgYv9m_E7T0nFp8hV8hW_H2k1vD2gYxP5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5U=') {
+              vapidKeys = {
+                publicKey: data.publicKey,
+                privateKey: data.privateKey
+              };
+              console.log("Loaded rotated VAPID keys from Firestore system_config (Priority 2)");
+              // Persist locally for caching/offline fallback
+              try {
+                fs.writeFileSync(localKeysPath, JSON.stringify({ ...vapidKeys, rotated: true }, null, 2), 'utf8');
+              } catch (_) {}
+            } else {
+              console.warn("Existing VAPID keys in Firestore are either leaked, legacy, or unrotated. Forcing rotation...");
+            }
           }
         }
       } catch (err) {
@@ -238,7 +243,7 @@ async function initVapid() {
     if (!vapidKeys.publicKey && fs.existsSync(localKeysPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(localKeysPath, 'utf8'));
-        if (data && data.publicKey && data.privateKey) {
+        if (data && data.publicKey && data.privateKey && data.rotated === true && data.privateKey !== 'mock-private-key') {
           vapidKeys = {
             publicKey: data.publicKey,
             privateKey: data.privateKey
@@ -247,10 +252,15 @@ async function initVapid() {
           // Back up to Firestore if available
           if (db) {
             try {
-              await db.collection('system_config').doc('vapid').set(vapidKeys);
+              await db.collection('system_config').doc('vapid').set({ ...vapidKeys, rotated: true });
               console.log("Saved cached VAPID keys to Firestore system_config");
             } catch (_) {}
           }
+        } else {
+          console.warn("Cached local VAPID keys are legacy/unrotated. Deleting cache file.");
+          try {
+            fs.unlinkSync(localKeysPath);
+          } catch (_) {}
         }
       } catch (e) {
         console.warn("Failed to read local VAPID keys cache:", e);
@@ -259,7 +269,7 @@ async function initVapid() {
 
     // Priority 4: Dynamic generation (fallback)
     if (!vapidKeys.publicKey) {
-      console.log("No VAPID keys found in environment, DB, or cache. Generating new keys...");
+      console.log("No VAPID keys found in environment, DB, or cache. Generating new rotated keys...");
       const generated = webpush.generateVAPIDKeys();
       vapidKeys = {
         publicKey: generated.publicKey,
@@ -268,7 +278,7 @@ async function initVapid() {
       
       // Persist to local cache
       try {
-        fs.writeFileSync(localKeysPath, JSON.stringify(vapidKeys, null, 2), 'utf8');
+        fs.writeFileSync(localKeysPath, JSON.stringify({ ...vapidKeys, rotated: true }, null, 2), 'utf8');
         console.log("Saved newly generated stable VAPID keys to local cache");
       } catch (e) {
         console.error("Failed to save VAPID keys locally:", e);
@@ -277,7 +287,11 @@ async function initVapid() {
       // Persist to Firestore
       if (db) {
         try {
-          await db.collection('system_config').doc('vapid').set(vapidKeys);
+          await db.collection('system_config').doc('vapid').set({
+            ...vapidKeys,
+            rotated: true,
+            rotatedAt: new Date().toISOString()
+          });
           console.log("Saved newly generated VAPID keys to Firestore system_config");
         } catch (err) {
           console.error("Failed to save generated VAPID keys to Firestore:", err);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAppStore, useStore, shallowEqual } from './store';
+import { useAppStore, useStore, shallowEqual, generateInitialsAvatar } from './store';
 import { Message, Notification as AppNotification } from './types';
 import { Hub } from './components/Hub';
 import { Onboarding } from './components/Onboarding';
@@ -169,7 +169,7 @@ function useNotifications(processedNotificationsRef: React.RefObject<Set<string>
       // Find sender name and avatar
       const senderUser = state.users.find(u => u.id === data.senderId);
       const senderName = data.senderName || senderUser?.displayName || senderUser?.username || "New Message";
-      const senderAvatar = senderUser?.avatar || `https://picsum.photos/seed/${data.senderId}/200`;
+      const senderAvatar = senderUser?.avatar || generateInitialsAvatar(data.senderId, senderName);
 
       // 6. Trigger sound if enabled
       if (userSettings?.soundEnabled !== false) {
@@ -254,7 +254,7 @@ function useNotifications(processedNotificationsRef: React.RefObject<Set<string>
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
         showLocalNotification(`${friendName} is back online!`, {
           body: `${friendName} is now active on Chat.`,
-          icon: targetUser.avatar || 'https://picsum.photos/seed/default/200',
+          icon: targetUser.avatar || generateInitialsAvatar(data.userId, friendName),
           tag: `online-${data.userId}`,
           renotify: true
         });
@@ -735,7 +735,7 @@ export default function App() {
                       id: r.fromUserId,
                       username: senderData.username || r.fromUserId,
                       displayName: senderData.displayName || senderData.username || 'Unknown',
-                      avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
+                      avatar: senderData.avatar || generateInitialsAvatar(r.fromUserId, senderData.displayName || senderData.username || 'Unknown'),
                       description: senderData.description || '',
                       isOnline: senderData.isOnline || false,
                       lastSeen: senderData.lastSeen || null,
@@ -751,7 +751,7 @@ export default function App() {
                     id: r.id,
                     userId: r.fromUserId,
                     name: senderData.displayName || senderData.username || 'Unknown',
-                    avatar: senderData.avatar || `https://picsum.photos/seed/${r.fromUserId}/200`,
+                    avatar: senderData.avatar || generateInitialsAvatar(r.fromUserId, senderData.displayName || senderData.username || 'Unknown'),
                     timestamp: r.createdAt 
                       ? (typeof r.createdAt.toMillis === 'function' 
                           ? new Date(r.createdAt.toMillis()).toISOString() 
@@ -790,7 +790,7 @@ export default function App() {
                       id: data.toUserId,
                       username: recipientData.username || data.toUserId,
                       displayName: recipientData.displayName || recipientData.username || 'Unknown',
-                      avatar: recipientData.avatar || `https://picsum.photos/seed/${data.toUserId}/200`,
+                      avatar: recipientData.avatar || generateInitialsAvatar(data.toUserId, recipientData.displayName || recipientData.username || 'Unknown'),
                       description: recipientData.description || '',
                       isOnline: recipientData.isOnline || false,
                       lastSeen: recipientData.lastSeen || null,
@@ -909,7 +909,7 @@ export default function App() {
           currentStore.addInAppToast({
             title: notif.title,
             body: bodyText,
-            avatar: notif.senderAvatar || `https://picsum.photos/seed/${notif.senderId || 'sys'}/200`,
+            avatar: notif.senderAvatar || generateInitialsAvatar(notif.senderId || 'sys', notif.title || 'Notification'),
             chatId: notif.chatId || ''
           });
 

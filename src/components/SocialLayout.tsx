@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useStore, useAppStore, shallowEqual } from '../store';
+import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { Icon, Avatar, Card, GlassCard, Button } from './UI';
 import { ChatDetail } from './ChatDetail';
 import { QRScanner } from './QRScanner';
@@ -181,7 +181,7 @@ export const SocialLayout = () => {
                       id: doc.id,
                       username: userData.username,
                       displayName: userData.displayName || userData.username,
-                      avatar: userData.avatar || `https://picsum.photos/seed/${doc.id}/200`,
+                      avatar: userData.avatar || generateInitialsAvatar(doc.id, userData.displayName || userData.username || 'User'),
                       description: userData.description || '',
                       isAdmin: userData.isAdmin || false,
                       joinDate: userData.joinDate || new Date().toISOString()
@@ -204,7 +204,7 @@ export const SocialLayout = () => {
                       id: userDoc.id,
                       username: userData.username,
                       displayName: userData.displayName || userData.username,
-                      avatar: userData.avatar || `https://picsum.photos/seed/${userDoc.id}/200`,
+                      avatar: userData.avatar || generateInitialsAvatar(userDoc.id, userData.displayName || userData.username || 'User'),
                       description: userData.description || '',
                       isAdmin: userData.isAdmin || false,
                       joinDate: userData.joinDate || new Date().toISOString()
@@ -465,7 +465,7 @@ export const SocialLayout = () => {
                           msg,
                           senderName,
                           chatName,
-                          avatar: avatar || chat.avatar || 'https://picsum.photos/seed/default/200'
+                          avatar: avatar || chat.avatar || generateInitialsAvatar(chat.id, chatName || 'Chat')
                         });
                       }
                     });

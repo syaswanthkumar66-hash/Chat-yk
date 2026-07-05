@@ -97,65 +97,73 @@ async function handleApiFallback(urlStr: string, init?: RequestInit): Promise<Re
 
   // 2. VAPID Public Key
   if (path === '/api/vapid-public-key') {
-    const fallbackPublicKey = 'BEl69Z7SgYv9m_E7T0nFp8hV8hW_H2k1vD2gYxP5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5U=';
     try {
-      const { db, doc, getDoc, setDoc } = await getFirebase();
+      const { db, doc, getDoc } = await getFirebase();
       if (db) {
         const docRef = doc(db, 'system_config', 'vapid');
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          if (data && data.publicKey) {
+          if (data && data.publicKey && data.privateKey && data.privateKey !== 'mock-private-key') {
             console.log(`[Client Fallback API] Loaded shared VAPID public key from Firestore`);
             return jsonResponse({ publicKey: data.publicKey });
           }
         }
-        // Save fallback VAPID keys to Firestore if they don't exist yet,
-        // so any other clients or backend instances can share them.
-        await setDoc(docRef, {
-          publicKey: fallbackPublicKey,
-          privateKey: 'mock-private-key',
-          createdAt: new Date().toISOString()
-        });
-        console.log(`[Client Fallback API] Created stable VAPID public key in Firestore`);
       }
-    } catch (err) {
-      console.warn(`[Client Fallback API] Failed to query VAPID keys from Firestore, using client-side fallback:`, err);
+    } catch (err: any) {
+      console.warn(`[Client Fallback API] Failed to query VAPID keys from Firestore:`, err);
+      return jsonResponse({ error: `Failed to query VAPID keys from Firestore: ${err.message}` }, 503);
     }
-    return jsonResponse({ publicKey: fallbackPublicKey });
+    return jsonResponse({ error: "Backend is unreachable and no valid VAPID keys are configured in Firestore." }, 503);
   }
 
   // 3. VAPID Validation (Diagnostics Panel)
   if (path === '/api/vapid-validate') {
-    const fallbackPublicKey = 'BEl69Z7SgYv9m_E7T0nFp8hV8hW_H2k1vD2gYxP5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5V3zG4eT5U=';
-    let currentKey = fallbackPublicKey;
     try {
       const { db, doc, getDoc } = await getFirebase();
       if (db) {
         const docSnap = await getDoc(doc(db, 'system_config', 'vapid'));
-        if (docSnap.exists() && docSnap.data()?.publicKey) {
-          currentKey = docSnap.data().publicKey;
+        if (docSnap.exists() && docSnap.data()?.publicKey && docSnap.data()?.privateKey && docSnap.data()?.privateKey !== 'mock-private-key') {
+          const data = docSnap.data();
+          return jsonResponse({
+            publicKey: {
+              source: "database",
+              value: data.publicKey,
+              valid: true,
+              error: null
+            },
+            privateKey: {
+              source: "database",
+              valid: true,
+              error: null
+            },
+            subject: {
+              value: "mailto:syaswanthkumar66@gmail.com",
+              valid: true
+            },
+            isFullyConfigured: true
+          });
         }
       }
     } catch (_) {}
     return jsonResponse({
       publicKey: {
         source: "database",
-        value: currentKey,
-        valid: true,
-        error: null
+        value: null,
+        valid: false,
+        error: "No valid VAPID keys configured in Firestore."
       },
       privateKey: {
         source: "database",
-        valid: true,
-        error: null
+        valid: false,
+        error: "No valid VAPID keys configured in Firestore."
       },
       subject: {
         value: "mailto:syaswanthkumar66@gmail.com",
-        valid: true
+        valid: false
       },
-      isFullyConfigured: true
-    });
+      isFullyConfigured: false
+    }, 503);
   }
 
   // 4. Save push subscription
@@ -235,49 +243,10 @@ async function handleApiFallback(urlStr: string, init?: RequestInit): Promise<Re
 
   // 6. Send test push notification
   if (path === '/api/send-test-push') {
-    try {
-      if (init && init.body) {
-        const bodyData = typeof init.body === 'string' ? JSON.parse(init.body) : init.body;
-        const { title, body } = bodyData;
-        
-        console.log(`[Client Fallback API] Simulating push notification delivery client-side`);
-        
-        if ('serviceWorker' in navigator) {
-          const registration = await navigator.serviceWorker.getRegistration('/');
-          if (registration) {
-            registration.showNotification(title || "Connect & Share", {
-              body: body || "This is a test push notification",
-              icon: '/pwa-192x192.png',
-              badge: '/pwa-192x192.png',
-              tag: 'test-push',
-              renotify: true
-            } as any);
-            console.log(`[Client Fallback API] Service Worker notification delivered successfully`);
-          } else if (Notification.permission === 'granted') {
-            try {
-              new Notification(title || "Connect & Share", {
-                body: body || "This is a test push notification",
-                icon: '/pwa-192x192.png'
-              });
-            } catch (errNoConstruct) {
-              console.warn("[Client Fallback API] Standard notification constructor failed, trying default SW registration:", errNoConstruct);
-              navigator.serviceWorker.getRegistration().then((reg) => {
-                if (reg && 'showNotification' in reg) {
-                  reg.showNotification(title || "Connect & Share", {
-                    body: body || "This is a test push notification",
-                    icon: '/pwa-192x192.png'
-                  });
-                }
-              }).catch((e) => console.error("[Client Fallback API] Full notification fallback failed:", e));
-            }
-          }
-        }
-        return jsonResponse({ success: true, mode: 'client-fallback-delivered' });
-      }
-    } catch (err) {
-      console.error(`[Client Fallback API] Failed to trigger notification fallback:`, err);
-    }
-    return jsonResponse({ success: true, mode: 'client-fallback' });
+    return jsonResponse({
+      success: false,
+      error: "Backend unreachable — cannot verify real push delivery from a frontend-only fallback."
+    }, 503);
   }
 
   // 7. WebRTC ICE Config

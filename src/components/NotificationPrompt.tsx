@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Card } from './UI';
-import { useAppStore } from '../store';
+import { useAppStore, generateInitialsAvatar } from '../store';
 import { BACKEND_URL } from '../config';
 import { showLocalNotification } from '../services/notificationService';
 
@@ -51,7 +51,7 @@ export function NotificationPrompt() {
         // Show a standard system notification
         showLocalNotification("Notifications Enabled!", {
           body: "Thank you for allowing notifications! You will now receive alerts for new messages.",
-          icon: "https://picsum.photos/seed/chat/200"
+          icon: generateInitialsAvatar('chat', 'Chat')
         });
 
         // Trigger push notifications registration in the service worker/backend
@@ -93,7 +93,7 @@ export function NotificationPrompt() {
 
     const title = "🔔 System Test Alert";
     const body = "This is a real-time notification test! Notification delivery is operational.";
-    const avatar = "https://picsum.photos/seed/test/200";
+    const avatar = generateInitialsAvatar('test', 'Test Alert');
 
     // Standard desktop and mobile browser system alert
     if ('Notification' in window && Notification.permission === 'granted') {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Avatar, Button, cn } from './UI';
-import { useStore, shallowEqual } from '../store';
+import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { webrtcService } from '../services/webrtcService';
 
 interface Participant {
@@ -124,7 +124,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           return [...prev, {
             id: from,
             name: `User ${from.substring(0, 4)}`,
-            avatar: `https://picsum.photos/seed/${from}/200`,
+            avatar: generateInitialsAvatar(from, `User ${from.substring(0, 4)}`),
             isMuted: false,
             isVideoOff: false,
             isSpeaking: false,
@@ -231,7 +231,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   useEffect(() => {
     // Mock participants joining
     const initialParticipants: Participant[] = [
-      { id: 'me', name: 'You', avatar: user?.avatar || 'https://picsum.photos/seed/me/200', isMuted: false, isVideoOff: type === 'voice', isSpeaking: false, status: 'online' },
+      { id: 'me', name: 'You', avatar: user?.avatar || generateInitialsAvatar(user?.id || 'me', user?.displayName || 'You'), isMuted: false, isVideoOff: type === 'voice', isSpeaking: false, status: 'online' },
     ];
     
     if (targetUser) {
@@ -407,7 +407,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                   />
                 ) : (
                   <img 
-                    src={participants[1]?.avatar || 'https://picsum.photos/seed/user/200'} 
+                    src={participants[1]?.avatar || generateInitialsAvatar(participants[1]?.id || 'user', participants[1]?.name || 'User')} 
                     className="size-full rounded-[2.5rem] object-cover" 
                     referrerPolicy="no-referrer"
                   />

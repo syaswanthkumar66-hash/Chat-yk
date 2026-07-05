@@ -1,8 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStore, useAppStore, shallowEqual } from '../store';
+import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { MediaGallery } from './MediaGallery';
+
+const generateMediaPlaceholder = (seed: string): string => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1', '#8b5cf6'];
+  const color = colors[Math.abs(hash) % colors.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="${color}" opacity="0.15" /><circle cx="50" cy="50" r="30" fill="${color}" opacity="0.3" /></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
 
 interface UserProfileViewProps {
   userId: string;
@@ -196,7 +207,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
           const userData = userDoc.data();
           
           const freshDisplayName = userData.displayName || userData.username;
-          const freshAvatar = userData.avatar || `https://picsum.photos/seed/${userId}/200`;
+          const freshAvatar = userData.avatar || generateInitialsAvatar(userId, freshDisplayName);
           const freshDescription = userData.description || '';
           const freshIsAdmin = userData.isAdmin || false;
           const freshIsOnline = userData.isOnline || false;
@@ -616,7 +627,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
                   {[1, 2, 3].map(i => (
                     <div key={i}>
                       <Avatar 
-                        src={`https://picsum.photos/seed/mutual${i}/100`} 
+                        src={generateInitialsAvatar(`mutual${i}`, `M${i}`)} 
                         className="size-8 border-2 border-white" 
                       />
                     </div>
@@ -637,7 +648,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
               <div className="flex -space-x-2">
                 {[1, 2, 3].map(i => (
                   <div key={i} className="size-10 rounded-lg bg-slate-200 border-2 border-white overflow-hidden">
-                    <img src={`https://picsum.photos/seed/media${i}/100`} alt="media" className="size-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={generateMediaPlaceholder(`media${i}`)} alt="media" className="size-full object-cover" referrerPolicy="no-referrer" />
                   </div>
                 ))}
               </div>

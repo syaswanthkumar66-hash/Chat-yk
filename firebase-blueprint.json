@@ -35,6 +35,17 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "type", "recipientId", "title", "body", "status", "createdAt"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "System-wide global configuration document",
+      "type": "object",
+      "properties": {
+        "publicKey": { "type": "string" },
+        "privateKey": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["publicKey", "privateKey"]
     }
   },
   "firestore": {
@@ -45,6 +56,10 @@
     "notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/Notification" },
       "description": "Durable user notifications"
+    },
+    "system_config/{configId}": {
+      "schema": { "$ref": "#/entities/SystemConfig" },
+      "description": "System global configuration documents (e.g., VAPID keys)"
     }
   }
 }

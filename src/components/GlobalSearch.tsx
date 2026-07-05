@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Avatar, Card, Button } from './UI';
-import { useStore, useAppStore, shallowEqual } from '../store';
+import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { db, collection, query as firestoreQuery, where, getDocs } from '../firebase';
 
 interface SearchResult {
@@ -124,7 +124,7 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
                id: doc.id,
                title: userData.displayName || userData.username,
                subtitle: userData.username,
-               avatar: userData.avatar || `https://picsum.photos/seed/${doc.id}/200`,
+               avatar: userData.avatar || generateInitialsAvatar(doc.id, userData.displayName || userData.username || 'User'),
              });
              
              // Add to local store so they exist if clicked!
@@ -132,7 +132,7 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
                id: doc.id,
                username: userData.username,
                displayName: userData.displayName || userData.username,
-               avatar: userData.avatar || `https://picsum.photos/seed/${doc.id}/200`,
+               avatar: userData.avatar || generateInitialsAvatar(doc.id, userData.displayName || userData.username || 'User'),
                description: userData.description || '',
                isAdmin: userData.isAdmin || false,
                joinDate: userData.joinDate || new Date().toISOString(),

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStore, shallowEqual } from '../store';
+import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { QRCodeCanvas } from 'qrcode.react';
 import { MediaGallery } from './MediaGallery';
 
@@ -9,14 +9,31 @@ interface ProfileViewProps {
   onSettingsClick: () => void;
 }
 
+const generateMediaPlaceholder = (seed: string): string => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1', '#8b5cf6'];
+  const color = colors[Math.abs(hash) % colors.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="${color}" opacity="0.15" /><circle cx="50" cy="50" r="30" fill="${color}" opacity="0.3" /></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
 const PRELOADED_AVATARS = [
-  'https://picsum.photos/seed/avatar1/200',
-  'https://picsum.photos/seed/avatar2/200',
-  'https://picsum.photos/seed/avatar3/200',
-  'https://picsum.photos/seed/avatar4/200',
-  'https://picsum.photos/seed/avatar5/200',
-  'https://picsum.photos/seed/avatar6/200',
-];
+  'avatar1', 'avatar2', 'avatar3', 'avatar4', 'avatar5', 'avatar6'
+].map((seed, i) => {
+  const hash = i * 20;
+  const colors = [
+    '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1',
+    '#8b5cf6', '#ec4899', '#14b8a6', '#06b6d4', '#84cc16',
+    '#f97316', '#64748b'
+  ];
+  const color = colors[hash % colors.length];
+  const initials = `A${i + 1}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="${color}" /><text x="50%" y="54%" font-family="&apos;Inter&apos;, system-ui, sans-serif" font-size="38" font-weight="600" fill="#ffffff" dominant-baseline="middle" text-anchor="middle">${initials}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+});
 
 export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
   const { user, setUser, updateUser, setActiveGroupInfoId, setViewingUserId, chats, blockedUserIds, removedFriendIds, friendRequests, sentFriendRequests, users } = useStore(s => ({
@@ -416,7 +433,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
           <div className="relative group">
             <div className="size-40 rounded-[3rem] overflow-hidden border-8 border-white shadow-2xl relative">
               <img 
-                src={user?.avatar || "https://picsum.photos/seed/user/200"} 
+                src={user?.avatar || generateInitialsAvatar(user?.id || 'u1', user?.displayName || 'User')} 
                 alt="Profile" 
                 className="size-full object-cover group-hover:scale-110 transition-transform duration-700"
               />
@@ -570,7 +587,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
           </div>
 
           <div className="w-full flex items-center gap-3 p-3 bg-primary/5 rounded-2xl border border-primary/5">
-            <Avatar src={user?.avatar || "https://picsum.photos/seed/user/200"} className="size-10" />
+            <Avatar src={user?.avatar || generateInitialsAvatar(user?.id || 'u1', user?.displayName || 'User')} className="size-10" />
             <div className="flex-1">
               <p className="text-xs font-bold text-slate-800">{user?.displayName}</p>
               <p className="text-[8px] text-slate-400 uppercase tracking-widest">@{user?.username}</p>
@@ -588,7 +605,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
             <div className="flex -space-x-2">
               {[4, 5, 6].map(i => (
                 <div key={`profile-avatar-${i}`} className="size-10 rounded-lg bg-slate-200 border-2 border-white overflow-hidden">
-                  <img src={`https://picsum.photos/seed/media${i}/100`} alt="media" className="size-full object-cover" referrerPolicy="no-referrer" />
+                  <img src={generateMediaPlaceholder(`media${i}`)} alt="media" className="size-full object-cover" referrerPolicy="no-referrer" />
                 </div>
               ))}
             </div>

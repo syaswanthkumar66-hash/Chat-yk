@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Icon, Avatar, Button, Card } from './UI';
-import { useStore, shallowEqual } from '../store';
+import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 
 export const JoinGroupView = () => {
   const { joinGroupId, setJoinGroupId, setActiveChatId, isLoggedIn, chats, addInAppToast } = useStore(s => ({
@@ -33,7 +33,7 @@ export const JoinGroupView = () => {
         addInAppToast({
           title: "Authentication Required",
           body: "Please register or log in first to join this group chat.",
-          avatar: chat.avatar || 'https://picsum.photos/seed/default/200',
+          avatar: chat.avatar || generateInitialsAvatar(chat.id, chat.name || 'Group Chat'),
           chatId: chat.id
         });
       } else {
