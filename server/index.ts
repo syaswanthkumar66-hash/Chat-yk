@@ -1055,6 +1055,22 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("notify_cloud_sync", () => {
+      const senderId = (socket as any).userId;
+      const originDeviceId = (socket as any).deviceId;
+      if (!senderId) return;
+
+      const senderDevices = users.get(senderId);
+      if (senderDevices) {
+        console.log(`[notify_cloud_sync] Broadcasting cloud_sync_triggered to other devices of user ${senderId} from device ${originDeviceId}`);
+        for (const [devId, socketId] of senderDevices.entries()) {
+          if (devId !== originDeviceId) {
+            io.to(socketId).emit("cloud_sync_triggered", { lastUpdated: new Date().toISOString() });
+          }
+        }
+      }
+    });
+
     socket.on("send_message", async (data) => {
       const { recipientId, groupId, recipientIds, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
       const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, deviceMap]) => Array.from(deviceMap.values()).includes(socket.id))?.[0];

@@ -1433,6 +1433,39 @@ export const useAppStore = create<AppState>((set) => ({
         }
         useAppStore.setState(stateUpdate);
       });
+
+      // 17. cloud_sync_triggered
+      sock.off('cloud_sync_triggered').on('cloud_sync_triggered', async (data: { lastUpdated: string }) => {
+        console.log('[cloud_sync_triggered] Received real-time sync request from another device:', data);
+        const { user, authMethod } = useAppStore.getState();
+        if (user && authMethod !== 'local' && navigator.onLine) {
+          try {
+            const { db, doc, getDoc } = await import('./firebase');
+            const syncDocRef = doc(db, 'cloud_syncs', user.id);
+            const syncSnapshot = await getDoc(syncDocRef);
+            if (syncSnapshot.exists()) {
+              const syncData = syncSnapshot.data();
+              if (syncData) {
+                const { mergeCloudSyncPayload } = await import('./store');
+                mergeCloudSyncPayload(syncData, user.id);
+                // Save last updated timestamp to local storage to prevent duplicate pull
+                const storageKey = `proto_last_synced_at_${user.id}`;
+                localStorage.setItem(storageKey, syncData.lastUpdated || new Date().toISOString());
+                (window as any).__lastUploadedSyncTime = syncData.lastUpdated;
+                
+                useAppStore.getState().addInAppToast({
+                  title: 'Real-Time Cloud Synced',
+                  body: 'Received state update from another device.',
+                  avatar: user.avatar || '',
+                  chatId: ''
+                });
+              }
+            }
+          } catch (e) {
+            console.error("Error doing real-time background sync:", e);
+          }
+        }
+      });
     };
 
     setupSocketListeners(socket, userId);
@@ -2412,6 +2445,11 @@ export const triggerCloudAutoSync = (userId: string) => {
       console.log("[Auto-Sync] Successfully synchronized database to Firestore.");
       
       (window as any).__lastUploadedSyncTime = payload.lastUpdated;
+      
+      // Notify other active sessions of the same account via websocket so they pull immediately
+      if (store.socket && store.socket.connected) {
+        store.socket.emit('notify_cloud_sync');
+      }
     } catch (err) {
       console.warn("[Auto-Sync] Failed to push update to Firestore:", err);
     }
