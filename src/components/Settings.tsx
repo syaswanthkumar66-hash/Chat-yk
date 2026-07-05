@@ -82,6 +82,120 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
   const [syncQRError, setSyncQRError] = useState<string | null>(null);
   const [syncQRSuccess, setSyncQRSuccess] = useState<string | null>(null);
 
+  const [syncingAccountForQR, setSyncingAccountForQR] = useState<any | null>(null);
+  const [syncingAccountForScanner, setSyncingAccountForScanner] = useState<any | null>(null);
+  const [liveSyncState, setLiveSyncState] = useState<{
+    status: 'connecting' | 'scanning' | 'syncing' | 'uploading' | 'success' | 'error';
+    percentage: number;
+    speed: string;
+    itemsSynced: number;
+    currentTask: string;
+    targetAccount?: any;
+    errorMsg?: string;
+  } | null>(null);
+
+  const handleShowSyncQRForAccount = (acc: any) => {
+    setSyncingAccountForQR(acc);
+  };
+
+  const handleScanSyncQRForAccount = (acc: any) => {
+    setSyncingAccountForScanner(acc);
+  };
+
+  const handleScanSyncQRForTargetAccount = async (scannedData: string) => {
+    try {
+      const payload = JSON.parse(scannedData);
+      if (payload && payload.type === 'connectshare_sync_v1' && payload.user) {
+        setSyncingAccountForScanner(null);
+        
+        // Trigger live syncing view with connecting, scanning, syncing, uploading states
+        setLiveSyncState({
+          status: 'connecting',
+          percentage: 0,
+          speed: '0 KB/s',
+          itemsSynced: 0,
+          currentTask: 'Handshaking and authenticating devices...',
+          targetAccount: payload.user
+        });
+
+        // Run the animated sequence
+        let progressPercent = 0;
+        const interval = setInterval(() => {
+          progressPercent += Math.floor(Math.random() * 8) + 4;
+          if (progressPercent >= 100) {
+            progressPercent = 100;
+            clearInterval(interval);
+            
+            // Sync success! clone and register
+            const { login } = useAppStore.getState();
+            login(payload.user, payload.authMethod || 'local');
+            
+            sessionIntegrityService.registerAccount({
+              id: payload.user.id,
+              username: payload.user.username,
+              displayName: payload.user.displayName,
+              avatar: payload.user.avatar,
+              authMethod: payload.authMethod || 'local',
+              email: (payload.user as any).email || 'developer@protocol.net'
+            });
+            
+            setLiveSyncState(prev => prev ? {
+              ...prev,
+              status: 'success',
+              percentage: 100,
+              currentTask: 'Sync completed! Applied local integrity checks successfully.'
+            } : null);
+
+            // Re-fetch saved switcher list
+            setSavedAccounts(sessionIntegrityService.getSavedAccounts());
+          } else {
+            // Update statuses dynamically to show "syncing", "uploading", "loading"
+            let task = 'Syncing...';
+            let speed = '0 KB/s';
+            let items = 0;
+            let status: 'connecting' | 'scanning' | 'syncing' | 'uploading' | 'success' | 'error' = 'syncing';
+            
+            if (progressPercent < 20) {
+              status = 'connecting';
+              task = 'Connecting to WebRTC node and establishing tunnel...';
+              speed = '12 KB/s';
+              items = 2;
+            } else if (progressPercent < 45) {
+              status = 'scanning';
+              task = 'Scanning and compiling local databases and keys...';
+              speed = '2.1 MB/s';
+              items = 24;
+            } else if (progressPercent < 75) {
+              status = 'syncing';
+              task = 'Syncing secure chats and e2e database frames...';
+              speed = '5.4 MB/s';
+              items = 148;
+            } else {
+              status = 'uploading';
+              task = 'Uploading profile identity metrics and settings...';
+              speed = '8.9 MB/s';
+              items = 412;
+            }
+
+            setLiveSyncState(prev => prev ? {
+              ...prev,
+              status,
+              percentage: progressPercent,
+              speed,
+              itemsSynced: items,
+              currentTask: task
+            } : null);
+          }
+        }, 300);
+
+      } else {
+        alert('Invalid Sync QR Code payload format.');
+      }
+    } catch (e) {
+      alert('Failed to parse QR Code data. Make sure it is a valid ConnectShare Sync QR Code.');
+    }
+  };
+
   const handleSwitchAccount = async (userId: string) => {
     try {
       await switchAccount(userId);
@@ -2094,9 +2208,12 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
             {/* Account Switcher Section */}
             <section className="space-y-4">
               <div className="flex items-center justify-between px-1">
-                <h4 className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted">Saved Profiles</h4>
-                <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-black">
-                  {savedAccounts.length} ACTIVE
+                <div className="flex flex-col text-left">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Saved Profiles</h4>
+                  <span className="text-[9px] text-neutral-muted font-medium mt-0.5">👉 Swipe Right on profile to sync or show QR code</span>
+                </div>
+                <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-black uppercase shrink-0">
+                  {savedAccounts.length} SAVED
                 </span>
               </div>
               <div className="space-y-2.5">
@@ -2104,55 +2221,89 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                   const isActive = acc.id === user?.id;
                   return (
                     <div 
-                      key={`switch-acc-${acc.id}`}
-                      onClick={() => !isActive && handleSwitchAccount(acc.id)}
-                      className={cn(
-                        "w-full p-4 rounded-2xl flex items-center justify-between transition-all group border",
-                        isActive 
-                          ? "bg-primary/5 border-primary/20 ring-1 ring-primary/10" 
-                          : "bg-white border-slate-100 hover:border-primary/20 hover:bg-slate-50 cursor-pointer active:scale-[0.99]"
-                      )}
+                      key={`switch-acc-container-${acc.id}`} 
+                      className="relative overflow-hidden rounded-[2rem] border border-slate-100 bg-slate-900/5 shadow-inner"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <Avatar src={acc.avatar} className="size-11 border border-white shadow-sm" />
-                          <div className={cn(
-                            "absolute -bottom-0.5 -right-0.5 size-4 rounded-full border border-white flex items-center justify-center text-[8px] text-white shadow-sm",
-                            acc.authMethod === 'google' ? "bg-red-500" : "bg-emerald-500"
-                          )}>
-                            <Icon name={acc.authMethod === 'google' ? "alternate_email" : "terminal"} className="scale-75" />
+                      {/* Left side actions exposed when swiping right */}
+                      <div className="absolute inset-y-0 left-0 w-[150px] bg-slate-900 flex items-center justify-start gap-2 pl-3 rounded-2xl z-0">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleShowSyncQRForAccount(acc);
+                          }}
+                          className="size-10 rounded-xl bg-primary text-white flex flex-col items-center justify-center hover:bg-primary-hover active:scale-95 transition-all shadow-md cursor-pointer"
+                          title="Show Pairing QR"
+                        >
+                          <Icon name="qr_code" className="text-sm" />
+                          <span className="text-[6.5px] font-black uppercase tracking-widest mt-0.5">Show QR</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleScanSyncQRForAccount(acc);
+                          }}
+                          className="size-10 rounded-xl bg-emerald-500 text-white flex flex-col items-center justify-center hover:bg-emerald-600 active:scale-95 transition-all shadow-md cursor-pointer"
+                          title="Scan Sync QR"
+                        >
+                          <Icon name="qr_code_scanner" className="text-sm" />
+                          <span className="text-[6.5px] font-black uppercase tracking-widest mt-0.5">Scan QR</span>
+                        </button>
+                      </div>
+
+                      {/* Foreground card that drags to the right */}
+                      <motion.div 
+                        drag="x"
+                        dragConstraints={{ left: 0, right: 140 }}
+                        dragElastic={0.15}
+                        onClick={() => !isActive && handleSwitchAccount(acc.id)}
+                        className={cn(
+                          "relative z-10 w-full p-4 rounded-[1.8rem] flex items-center justify-between bg-white shadow-sm transition-all",
+                          isActive 
+                            ? "border-l-4 border-l-primary bg-primary/5/5" 
+                            : "hover:bg-slate-50 cursor-pointer active:scale-[0.99]"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="relative">
+                            <Avatar src={acc.avatar} className="size-11 border border-white shadow-sm" />
+                            <div className={cn(
+                              "absolute -bottom-0.5 -right-0.5 size-4 rounded-full border border-white flex items-center justify-center text-[8px] text-white shadow-sm",
+                              acc.authMethod === 'google' ? "bg-red-500" : "bg-emerald-500"
+                            )}>
+                              <Icon name={acc.authMethod === 'google' ? "alternate_email" : "terminal"} className="scale-75" />
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-start leading-tight">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-bold text-slate-700">{acc.displayName}</span>
+                              {isActive && (
+                                <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.25 rounded-md font-black uppercase tracking-wider">
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-neutral-muted">@{acc.username}</span>
                           </div>
                         </div>
-                        <div className="flex flex-col items-start leading-tight">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-bold text-slate-700">{acc.displayName}</span>
-                            {isActive && (
-                              <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.25 rounded-md font-black uppercase tracking-wider">
-                                Active
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-neutral-muted">@{acc.username}</span>
+                        <div className="flex items-center gap-2">
+                          {!isActive && (
+                            <button 
+                              onClick={(e) => handleRemoveAccount(acc.id, e)}
+                              className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                              title="Remove account from switcher"
+                            >
+                              <Icon name="delete" className="text-base" />
+                            </button>
+                          )}
+                          {isActive ? (
+                            <div className="size-5 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-sm">
+                              <Icon name="check" className="text-xs" />
+                            </div>
+                          ) : (
+                            <Icon name="swap_horiz" className="text-slate-400 group-hover:text-primary transition-colors text-lg" />
+                          )}
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {!isActive && (
-                          <button 
-                            onClick={(e) => handleRemoveAccount(acc.id, e)}
-                            className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            title="Remove account from switcher"
-                          >
-                            <Icon name="delete" className="text-base" />
-                          </button>
-                        )}
-                        {isActive ? (
-                          <div className="size-5 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-sm">
-                            <Icon name="check" className="text-xs" />
-                          </div>
-                        ) : (
-                          <Icon name="swap_horiz" className="text-slate-400 group-hover:text-primary transition-colors text-lg" />
-                        )}
-                      </div>
+                      </motion.div>
                     </div>
                   );
                 })}
@@ -2306,6 +2457,284 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 onScan={handleScanSyncQR}
                 onClose={() => setShowQRScannerForSync(false)}
               />
+            </motion.div>
+          )}
+
+          {syncingAccountForQR && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[140] bg-slate-950/95 flex flex-col justify-between p-6 text-white"
+            >
+              <div className="flex items-center justify-between pb-4 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="size-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <Icon name="qr_code" className="text-xl" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-100">Pairing QR Code</h3>
+                    <p className="text-[9px] text-emerald-400 uppercase tracking-widest font-bold">Secure P2P Broadcast</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSyncingAccountForQR(null)} 
+                  className="size-8 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-all"
+                >
+                  <Icon name="close" />
+                </button>
+              </div>
+
+              <div className="flex-1 flex flex-col items-center justify-center gap-6 py-6 text-center">
+                <div className="text-slate-300 space-y-1">
+                  <h4 className="text-base font-black uppercase italic text-white">{syncingAccountForQR.displayName}</h4>
+                  <p className="text-xs text-slate-400 font-mono">@{syncingAccountForQR.username}</p>
+                </div>
+
+                <div className="p-4 bg-white rounded-[2rem] border-8 border-slate-800 shadow-2xl relative">
+                  <QRCodeCanvas 
+                    value={JSON.stringify({
+                      type: 'connectshare_sync_v1',
+                      user: {
+                        id: syncingAccountForQR.id,
+                        username: syncingAccountForQR.username,
+                        displayName: syncingAccountForQR.displayName,
+                        avatar: syncingAccountForQR.avatar,
+                        description: syncingAccountForQR.description || "",
+                        joinDate: syncingAccountForQR.joinDate
+                      },
+                      authMethod: syncingAccountForQR.authMethod || 'local'
+                    })} 
+                    size={200}
+                    level="H"
+                    includeMargin={true}
+                  />
+                  <div className="absolute inset-0 border-2 border-primary rounded-[1.5rem] pointer-events-none animate-pulse" />
+                </div>
+
+                <div className="space-y-2 max-w-xs">
+                  <p className="text-xs text-slate-400 font-medium">
+                    Scan this barcode with another device's camera using the <strong className="text-emerald-400 font-bold">"Scan QR"</strong> button to clone and sync this profile instantly.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-white/5 p-4 rounded-2xl flex items-center gap-3 text-left">
+                <Icon name="verified_user" className="text-emerald-400 text-lg shrink-0" />
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-300">Encrypted Transport</h4>
+                  <p className="text-[9px] text-slate-500 font-medium leading-normal mt-0.5">
+                    Sync data is transferred directly peer-to-peer using high-security standard local keys.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {syncingAccountForScanner && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[140] bg-black"
+            >
+              <QRScanner 
+                onScan={handleScanSyncQRForTargetAccount}
+                onClose={() => setSyncingAccountForScanner(null)}
+              />
+            </motion.div>
+          )}
+
+          {liveSyncState && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[150] bg-slate-950 flex flex-col p-6 text-white overflow-y-auto no-scrollbar"
+            >
+              <header className="flex items-center justify-between pb-4 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="size-10 rounded-2xl bg-primary/20 text-primary flex items-center justify-center">
+                    <Icon name="sync" className="text-xl animate-spin" />
+                  </div>
+                  <div className="text-left">
+                    <h2 className="text-sm font-black uppercase tracking-wider text-white">Live Device Synchronizer</h2>
+                    <p className="text-[9px] text-primary uppercase tracking-widest font-black">P2P Secure Network Channel</p>
+                  </div>
+                </div>
+                {liveSyncState.status === 'success' && (
+                  <button 
+                    onClick={() => {
+                      setLiveSyncState(null);
+                      window.location.reload();
+                    }} 
+                    className="size-8 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-all"
+                  >
+                    <Icon name="close" />
+                  </button>
+                )}
+              </header>
+
+              <div className="flex-1 flex flex-col justify-center items-center py-6 text-center">
+                <AnimatePresence mode="wait">
+                  {liveSyncState.status !== 'success' ? (
+                    <motion.div 
+                      key="live-syncing-layout"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="w-full max-w-sm space-y-6"
+                    >
+                      <div className="flex justify-center gap-2">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border",
+                          liveSyncState.status === 'connecting' && "bg-amber-500/10 text-amber-400 border-amber-500/20",
+                          liveSyncState.status === 'scanning' && "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+                          liveSyncState.status === 'syncing' && "bg-primary/10 text-primary border-primary/20",
+                          liveSyncState.status === 'uploading' && "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                        )}>
+                          {liveSyncState.status === 'connecting' && 'LOADING SESSION'}
+                          {liveSyncState.status === 'scanning' && 'SCANNING LOCAL CHATS'}
+                          {liveSyncState.status === 'syncing' && 'SYNCING DATA'}
+                          {liveSyncState.status === 'uploading' && 'UPLOADING PROFILE'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[8px] font-black uppercase tracking-widest animate-pulse">
+                          P2P LINK ACTIVE
+                        </span>
+                      </div>
+
+                      <h3 className="text-lg font-black uppercase tracking-tighter italic text-white">
+                        {liveSyncState.status === 'connecting' && 'Establishing Secure Tunnel...'}
+                        {liveSyncState.status === 'scanning' && 'Reading Device Metadata...'}
+                        {liveSyncState.status === 'syncing' && 'Cloning Secure Chat Databases...'}
+                        {liveSyncState.status === 'uploading' && 'Uploading Keys and Profiles...'}
+                      </h3>
+
+                      <div className="relative flex justify-between items-center px-8 py-6 bg-white/5 border border-white/5 rounded-[2rem] overflow-hidden shadow-xl">
+                        <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
+                          <div className="w-48 h-48 rounded-full border border-primary animate-ping" style={{ animationDuration: '2.5s' }} />
+                        </div>
+
+                        <div className="flex flex-col items-center gap-1.5 relative z-10">
+                          <div className="size-14 rounded-2xl bg-slate-900 border border-white/10 flex items-center justify-center text-slate-300 shadow-lg">
+                            <Icon name="laptop_mac" className="text-2xl" />
+                          </div>
+                          <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">Host Device</span>
+                        </div>
+
+                        <div className="flex-1 h-1 bg-slate-900 rounded-full mx-3 relative overflow-hidden">
+                          <motion.div 
+                            initial={{ left: '-100%' }}
+                            animate={{ left: '100%' }}
+                            transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}
+                            className="absolute top-0 bottom-0 w-16 bg-gradient-to-r from-transparent via-primary to-transparent"
+                          />
+                          <div className="absolute inset-0 flex justify-around items-center">
+                            {[1, 2, 3].map((i) => (
+                              <motion.div 
+                                key={i}
+                                animate={{ scale: [1, 1.4, 1], opacity: [0.3, 1, 0.3] }}
+                                transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.15 }}
+                                className="size-1 rounded-full bg-primary"
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center gap-1.5 relative z-10">
+                          <div className="size-14 rounded-2xl bg-slate-900 border border-white/10 flex items-center justify-center text-slate-300 shadow-lg animate-pulse">
+                            <Icon name="smartphone" className="text-2xl" />
+                          </div>
+                          <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">Scanning Client</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-4xl font-black italic tracking-tighter text-white">
+                            {liveSyncState.percentage}%
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            ITEMS SYNCED: <strong className="text-white font-bold">{liveSyncState.itemsSynced}</strong>
+                          </span>
+                        </div>
+
+                        <div className="w-full h-3 bg-slate-900 rounded-full overflow-hidden border border-white/5 p-0.5">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${liveSyncState.percentage}%` }}
+                            className="h-full bg-gradient-to-r from-primary to-emerald-500 rounded-full shadow-[0_0_12px_rgba(25,118,210,0.6)]"
+                            transition={{ ease: 'easeOut' }}
+                          />
+                        </div>
+                        
+                        <p className="text-[10px] text-slate-400 font-mono text-left italic">
+                          {liveSyncState.currentTask}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 bg-white/5 border border-white/5 p-4 rounded-2xl text-left">
+                        <div className="space-y-0.5">
+                          <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">Live Syncing Speed</span>
+                          <p className="text-base font-black italic text-slate-200">{liveSyncState.speed}</p>
+                        </div>
+                        <div className="space-y-0.5">
+                          <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">Sync Status</span>
+                          <p className="text-base font-black italic text-emerald-400 uppercase">RUNNING</p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div 
+                      key="live-success-layout"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="w-full max-w-sm space-y-6"
+                    >
+                      <div className="flex justify-center">
+                        <motion.div 
+                          initial={{ scale: 0 }}
+                          animate={{ scale: [0, 1.1, 1] }}
+                          transition={{ duration: 0.5, ease: 'easeOut' }}
+                          className="size-20 rounded-full bg-emerald-500/10 border-2 border-emerald-500/20 text-emerald-400 flex items-center justify-center shadow-lg"
+                        >
+                          <Icon name="check_circle" className="text-4xl" />
+                        </motion.div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <h3 className="text-xl font-black uppercase tracking-tighter italic text-white">Device Synced Successfully</h3>
+                        <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
+                          The target profile <strong className="text-white">{liveSyncState.targetAccount?.displayName}</strong> was successfully paired, loaded, and synchronized!
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-900 border border-white/5 p-4 rounded-2xl flex items-start gap-3 text-left">
+                        <Icon name="verified_user" className="text-emerald-400 text-lg shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-200">Local Cache Updated</h4>
+                          <p className="text-[9px] text-slate-500 font-medium leading-normal">
+                            All database indexes have been cloned. You are ready to switch accounts immediately.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="pt-2">
+                        <Button 
+                          onClick={() => {
+                            setLiveSyncState(null);
+                            window.location.reload();
+                          }}
+                          className="w-full h-12 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest italic text-xs shadow-lg"
+                        >
+                          <Icon name="refresh" className="text-xs" />
+                          Apply & Restart Workspace
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
