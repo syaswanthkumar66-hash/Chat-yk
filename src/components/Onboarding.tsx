@@ -4,6 +4,7 @@ import { BACKEND_URL } from '../config';
 import { Button, Icon, Avatar } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, doc, getDoc, setDoc } from '../firebase';
+import { QRScanner } from './QRScanner';
 import { 
   GoogleAuthProvider, 
   signInWithPopup, 
@@ -46,6 +47,40 @@ export const Onboarding = () => {
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected'>('connecting');
   const [isLocalDev, setIsLocalDev] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+
+  const handleQRScan = (scannedData: string) => {
+    try {
+      const payload = JSON.parse(scannedData);
+      if (payload && payload.type === 'connectshare_sync_v1' && payload.user) {
+        setShowQRScanner(false);
+        setIsLoading(true);
+        login(payload.user, payload.authMethod || 'local');
+        
+        // Register account in session switcher list
+        import('../services/sessionIntegrityService').then(({ sessionIntegrityService }) => {
+          sessionIntegrityService.registerAccount({
+            id: payload.user.id,
+            username: payload.user.username,
+            displayName: payload.user.displayName,
+            avatar: payload.user.avatar,
+            authMethod: payload.authMethod || 'local',
+            email: (payload.user as any).email || 'developer@protocol.net'
+          });
+          
+          setTimeout(() => {
+            window.location.reload();
+          }, 800);
+        }).catch(() => {
+          window.location.reload();
+        });
+      } else {
+        setError('Invalid Sync QR Code payload format.');
+      }
+    } catch (e) {
+      setError('Failed to parse scanned QR Code. Make sure it is a valid ConnectShare Sync QR Code.');
+    }
+  };
 
   // Email login states
   const [authMethod, setAuthMethod] = useState<'google' | 'email'>('google');
@@ -663,14 +698,23 @@ export const Onboarding = () => {
               <div className="space-y-4">
                 <div className="relative flex py-2 items-center justify-center">
                   <div className="flex-grow border-t border-slate-100"></div>
-                  <span className="flex-shrink mx-4 text-[9px] font-black uppercase tracking-widest text-slate-300">or troubleshoot</span>
+                  <span className="flex-shrink mx-4 text-[9px] font-black uppercase tracking-widest text-slate-300">or link device</span>
                   <div className="flex-grow border-t border-slate-100"></div>
                 </div>
 
                 <Button 
+                  onClick={() => setShowQRScanner(true)}
+                  disabled={isLoading}
+                  className="w-full h-12 rounded-xl font-black uppercase tracking-widest italic text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/50 shadow-sm flex items-center justify-center gap-2"
+                >
+                  <Icon name="qr_code_scanner" className="text-sm text-emerald-600" />
+                  Scan QR to Link Device
+                </Button>
+
+                <Button 
                   onClick={handleDevLogin}
                   disabled={isLoading}
-                  className="w-full h-12 rounded-xl font-black uppercase tracking-widest italic text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/60 shadow-sm animate-pulse"
+                  className="w-full h-12 rounded-xl font-black uppercase tracking-widest italic text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/60 shadow-sm"
                 >
                   <Icon name="construction" className="text-sm mr-2 text-primary" />
                   Developer / Demo Session
@@ -850,6 +894,18 @@ export const Onboarding = () => {
                 </button>
               </div>
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* QR Scanner Overlay for Syncing same account */}
+      <AnimatePresence>
+        {showQRScanner && (
+          <div className="fixed inset-0 z-[150] bg-black">
+            <QRScanner 
+              onScan={handleQRScan}
+              onClose={() => setShowQRScanner(false)}
+            />
           </div>
         )}
       </AnimatePresence>
