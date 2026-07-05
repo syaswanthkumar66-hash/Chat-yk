@@ -178,6 +178,11 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 import * as webpushModule from "web-push";
 const webpush = ((webpushModule as any).default || webpushModule) as typeof webpushModule;
 
+let resolveVapidReady: () => void = () => {};
+const vapidReady = new Promise<void>((resolve) => {
+  resolveVapidReady = resolve;
+});
+
 let vapidKeys = {
   publicKey: "",
   privateKey: ""
@@ -344,6 +349,8 @@ async function initVapid() {
     console.log("Successfully configured WebPush VAPID details with public key:", vapidKeys.publicKey.slice(0, 20) + "...");
   } catch (err) {
     console.error("Failed to set VAPID details:", err);
+  } finally {
+    resolveVapidReady();
   }
 }
 
@@ -356,18 +363,21 @@ const memorySubscriptions = new Map<string, any[]>();
 const recentPushNotifications = new Map<string, number>();
 
 async function sendPushNotification(recipientId: string, payload: { title: string, body: string, icon?: string, data?: any }) {
-  // Gracefully wait for VAPID initialization to finish before trying to dispatch any notifications
+  // Gracefully wait for VAPID initialization to finish before trying to dispatch any notifications (max 10s)
   try {
-    await vapidInitPromise;
+    await Promise.race([
+      vapidReady,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout waiting for VAPID keys initialization (10s)")), 10000))
+    ]);
   } catch (err: any) {
-    console.error(`Cannot send push notification to ${recipientId}: VAPID initialization failed`, err);
-    return { success: false, error: `VAPID initialization failed: ${err.message || err}`, devicesCount: 0, sentCount: 0 };
+    console.error(`Cannot send push notification to ${recipientId}: VAPID initialization timed out or failed`, err);
+    return { success: false, error: `VAPID initialization timed out or failed: ${err.message || err}`, devicesCount: 0, sentCount: 0 };
   }
 
-  // Guard: if VAPID keys aren't loaded yet, skip silently with a clear log
+  // Guard: if VAPID keys aren't loaded yet, return clear error
   if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
-    console.warn(`sendPushNotification skipped for ${recipientId}: VAPID keys not yet initialized`);
-    return { success: false, error: "VAPID keys not yet initialized on server", devicesCount: 0, sentCount: 0 };
+    console.warn(`sendPushNotification failed for ${recipientId}: VAPID keys not yet initialized or missing`);
+    return { success: false, error: "VAPID keys not yet initialized or missing on server", devicesCount: 0, sentCount: 0 };
   }
 
   let subscriptions: any[] = [];
@@ -1673,6 +1683,35 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         }
       } else {
         console.warn("FIREBASE_CONFIG is not set. Sending test push without dynamic verification in local development mode.");
+      }
+
+      // Pre-check for subscription existence to avoid silent drops
+      let hasSubscription = false;
+      if (db) {
+        try {
+          const subDoc = await db.collection('pushSubscriptions').doc(userId).get();
+          if (subDoc.exists) {
+            const data = subDoc.data();
+            if (data && ((Array.isArray(data.subscriptions) && data.subscriptions.length > 0) || data.endpoint)) {
+              hasSubscription = true;
+            }
+          }
+        } catch (dbErr) {
+          console.error("Error pre-checking Firestore subscriptions:", dbErr);
+        }
+      }
+      if (!hasSubscription) {
+        const memSubs = memorySubscriptions.get(userId);
+        if (memSubs && ((Array.isArray(memSubs) && memSubs.length > 0) || (memSubs as any).endpoint)) {
+          hasSubscription = true;
+        }
+      }
+
+      if (!hasSubscription) {
+        return res.status(404).json({
+          success: false,
+          error: "No push subscription found — click Force Sync VAPID first."
+        });
       }
 
       const notificationTitle = title || "🔔 Server Push Alert (VAPID)";

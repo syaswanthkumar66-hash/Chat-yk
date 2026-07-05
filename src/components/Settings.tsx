@@ -201,7 +201,8 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
             "Working Test: Dispatched securely from Express using locked VAPID keys!"
           );
           if (result.success) {
-            addLog("🎉 SUCCESS! Live Web Push notification was sent and dispatched by the browser!");
+            addLog("🎉 Backend confirmed dispatch! Please check your device notifications.");
+            addLog("ℹ️ Note: If you don't see the notification immediately, try backgrounding this tab, minimizing your browser, or checking your OS/browser's notification settings (notifications might not display while the tab is actively focused).");
           } else {
             addLog(`❌ Backend dispatch failed: ${result.error}`);
           }
