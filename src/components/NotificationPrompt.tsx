@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Card } from './UI';
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
+import { showLocalNotification } from '../services/notificationService';
 
 export function NotificationPrompt() {
   const [status, setStatus] = useState<'hidden' | 'request' | 'success'>('hidden');
@@ -48,7 +49,7 @@ export function NotificationPrompt() {
         }
 
         // Show a standard system notification
-        new Notification("Notifications Enabled!", {
+        showLocalNotification("Notifications Enabled!", {
           body: "Thank you for allowing notifications! You will now receive alerts for new messages.",
           icon: "https://picsum.photos/seed/chat/200"
         });
@@ -94,18 +95,14 @@ export function NotificationPrompt() {
     const body = "This is a real-time notification test! Notification delivery is operational.";
     const avatar = "https://picsum.photos/seed/test/200";
 
-    // Standard desktop alert
+    // Standard desktop and mobile browser system alert
     if ('Notification' in window && Notification.permission === 'granted') {
-      try {
-        new Notification(title, {
-          body,
-          icon: avatar,
-          tag: 'test-notification',
-          renotify: true
-        } as any);
-      } catch (e) {
-        console.warn('System Notification failed:', e);
-      }
+      showLocalNotification(title, {
+        body,
+        icon: avatar,
+        tag: 'test-notification',
+        renotify: true
+      });
     }
 
     // Trigger a real backend VAPID push notification with retry

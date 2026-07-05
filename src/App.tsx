@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests, setScopedUserInstance } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { sessionIntegrityService } from './services/sessionIntegrityService';
+import { showLocalNotification } from './services/notificationService';
 
 async function testConnection() {
   try {
@@ -200,16 +201,12 @@ function useNotifications(processedNotificationsRef: React.RefObject<Set<string>
 
       // 9. Trigger system OS notification
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(data.groupName || senderName, {
-            body: bodyText,
-            icon: senderAvatar,
-            tag: chatId,
-            renotify: true
-          } as any);
-        } catch (e) {
-          console.warn('System OS Notification failed:', e);
-        }
+        showLocalNotification(data.groupName || senderName, {
+          body: bodyText,
+          icon: senderAvatar,
+          tag: chatId,
+          renotify: true
+        });
       }
     };
 
@@ -255,16 +252,12 @@ function useNotifications(processedNotificationsRef: React.RefObject<Set<string>
 
       // Trigger standard web notification
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(`${friendName} is back online!`, {
-            body: `${friendName} is now active on Chat.`,
-            icon: targetUser.avatar || 'https://picsum.photos/seed/default/200',
-            tag: `online-${data.userId}`,
-            renotify: true
-          } as any);
-        } catch (e) {
-          console.warn('Friend online notification failed:', e);
-        }
+        showLocalNotification(`${friendName} is back online!`, {
+          body: `${friendName} is now active on Chat.`,
+          icon: targetUser.avatar || 'https://picsum.photos/seed/default/200',
+          tag: `online-${data.userId}`,
+          renotify: true
+        });
       }
     };
 
@@ -918,16 +911,12 @@ export default function App() {
           });
 
           if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-            try {
-              new Notification(notif.title, {
-                body: bodyText,
-                icon: notif.senderAvatar || '/pwa-192x192.png',
-                tag: notif.chatId || notif.id,
-                renotify: true
-              } as any);
-            } catch (e) {
-              console.warn('Browser OS Notification failed:', e);
-            }
+            showLocalNotification(notif.title, {
+              body: bodyText,
+              icon: notif.senderAvatar || '/pwa-192x192.png',
+              tag: notif.chatId || notif.id,
+              renotify: true
+            });
           }
         }
       }

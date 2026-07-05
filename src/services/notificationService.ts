@@ -360,3 +360,70 @@ export async function triggerPushNotificationWithRetry(
     return { success: false, error: err.message || String(err) };
   }
 }
+
+/**
+ * Universally safe local notification helper.
+ * On mobile devices (like Chrome on Android), 'new Notification()' throws an error.
+ * This helper automatically checks for an active Service Worker registration
+ * and uses reg.showNotification() as a bulletproof fallback, falls back to
+ * standard Notification constructor, and logs failures gracefully.
+ */
+export async function showLocalNotification(
+  title: string, 
+  options: {
+    body?: string;
+    icon?: string;
+    badge?: string;
+    tag?: string;
+    renotify?: boolean;
+    data?: any;
+    [key: string]: any;
+  } = {}
+): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (!('Notification' in window)) return false;
+  if (Notification.permission !== 'granted') return false;
+
+  try {
+    // 1. Try displaying via Service Worker registration (required for Android Chrome/Firefox and highly recommended)
+    if ('serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (registration && 'showNotification' in registration) {
+          // Some options (like renotify without tag) might fail on certain browsers,
+          // so we ensure tag is present if renotify is true.
+          const swOptions = { ...options };
+          if (swOptions.renotify && !swOptions.tag) {
+            swOptions.tag = 'default-tag';
+          }
+          await registration.showNotification(title, swOptions as any);
+          console.log('[Notification Utility] Displayed successfully via Service Worker');
+          return true;
+        }
+      } catch (swErr) {
+        console.warn('[Notification Utility] SW showNotification failed, trying standard constructor:', swErr);
+      }
+    }
+
+    // 2. Fall back to standard Notification constructor (standard on desktop browsers)
+    const fallbackOptions = { ...options };
+    // 'renotify' requires 'tag' to be set, otherwise standard constructor throws
+    if (fallbackOptions.renotify && !fallbackOptions.tag) {
+      fallbackOptions.tag = 'default-tag';
+    }
+    const notification = new Notification(title, fallbackOptions as any);
+    console.log('[Notification Utility] Displayed successfully via standard Notification constructor');
+    return true;
+  } catch (err) {
+    console.warn('[Notification Utility] Standard Notification constructor also failed:', err);
+    // Absolute minimal parameters fallback
+    try {
+      new Notification(title, { body: options.body });
+      return true;
+    } catch (finalErr) {
+      console.error('[Notification Utility] All notification mechanisms failed:', finalErr);
+      return false;
+    }
+  }
+}
+
