@@ -76,7 +76,9 @@ export const SocialLayout = () => {
     connectSpot,
     disconnectSpot,
     initSocket,
-    typingUsers
+    typingUsers,
+    selfTypingChats,
+    isSyncing
   } = useStore(s => ({
     setMode: s.setMode,
     activeChatId: s.activeChatId,
@@ -109,7 +111,9 @@ export const SocialLayout = () => {
     connectSpot: s.connectSpot,
     disconnectSpot: s.disconnectSpot,
     initSocket: s.initSocket,
-    typingUsers: s.typingUsers
+    typingUsers: s.typingUsers,
+    selfTypingChats: s.selfTypingChats,
+    isSyncing: s.isSyncing
   }), shallowEqual);
 
   useEffect(() => {
@@ -324,6 +328,15 @@ export const SocialLayout = () => {
                       {wssStatus === 'connected' ? 'Online' : wssStatus === 'connecting' ? 'Syncing...' : 'Offline'}
                     </span>
                   </button>
+                  {isSyncing && (
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-100 animate-pulse text-[9px] font-black text-indigo-600 tracking-wider uppercase">
+                      <svg className="animate-spin h-2.5 w-2.5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Syncing State...
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -582,8 +595,17 @@ export const SocialLayout = () => {
                           ? chat.participants.filter(p => p.id !== user?.id && typingUsers[p.id])
                           : [];
                         const isDirectTyping = !chat.isGroup && typingUsers[chat.participants[0]?.id];
+                        const isSelfTyping = chat.isGroup
+                          ? selfTypingChats[chat.id]
+                          : (chat.participants[0]?.id && selfTypingChats[chat.participants[0].id]);
                         
-                        if (chat.isGroup && typingParticipants.length > 0) {
+                        if (isSelfTyping) {
+                          return (
+                            <span className="text-slate-400 font-medium italic text-xs animate-pulse">
+                              Typing from another device...
+                            </span>
+                          );
+                        } else if (chat.isGroup && typingParticipants.length > 0) {
                           const names = typingParticipants.map(p => p.name);
                           const typingText = names.length === 1 
                             ? `${names[0]} is typing...` 

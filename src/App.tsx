@@ -455,33 +455,15 @@ export default function App() {
     const handleRefocusSync = () => {
       const state = useAppStore.getState();
       if (state.isLoggedIn && state.user?.id) {
-        console.log('[Auto-Sync] Tab focused or became visible. Checking and restoring multi-device socket connection and cloud state...');
+        console.log('[Auto-Sync] Tab focused or became visible. Triggering catch-up sync...');
         
         // 1. Re-connect or wake up socket if needed
-        if (state.socket) {
-          if (!state.socket.connected) {
-            state.addConnectionLog('Auto-Sync: Tab focused. Re-connecting socket...');
-            state.socket.connect();
-          } else {
-            // Re-register to make sure map is warm on server
-            const { cryptoService } = import('./services/cryptoService') as any;
-            if (cryptoService && typeof cryptoService.getMyPublicKeyBase64 === 'function') {
-              cryptoService.getMyPublicKeyBase64(state.user.id).then((publicKey: string) => {
-                const deviceId = getOrCreateDeviceId();
-                state.socket?.emit('register', { userId: state.user!.id, publicKey, deviceId });
-              }).catch(console.error);
-            } else {
-              const deviceId = getOrCreateDeviceId();
-              state.socket?.emit('register', { userId: state.user!.id, deviceId });
-            }
-          }
-        }
-        
-        // 2. Trigger Cloud Sync check to pull down any offline edits
-        if (state.authMethod !== 'local' && navigator.onLine) {
-          import('./store').then(({ triggerCloudAutoSync }) => {
-            triggerCloudAutoSync(state.user!.id);
-          }).catch(console.error);
+        if (state.socket && !state.socket.connected) {
+          state.addConnectionLog('Auto-Sync: Tab focused. Re-connecting socket...');
+          state.socket.connect();
+        } else {
+          // If already connected, run catch-up sync manually
+          state.performCatchUpSync().catch(console.error);
         }
       }
     };
@@ -741,6 +723,14 @@ export default function App() {
           console.error("[Auto-Register Push] Failed to load notificationService:", err);
         });
       }
+    }
+  }, [isLoggedIn, user?.id]);
+
+  // Trigger initial catch-up sync on login
+  useEffect(() => {
+    if (isLoggedIn && user?.id) {
+      console.log('[Initial-Sync] App loaded & user logged in. Triggering initial catch-up sync...');
+      useAppStore.getState().performCatchUpSync().catch(console.error);
     }
   }, [isLoggedIn, user?.id]);
 

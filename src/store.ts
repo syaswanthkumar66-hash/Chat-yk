@@ -231,6 +231,10 @@ interface AppState {
   offlineMessageQueue: { id: string, chatId: string | null, recipientId: string | null, text: string, type: string, fileUrl?: string, fileSize?: string, e2eData?: any }[];
   switchAccount: (userId: string) => Promise<void>;
   generateInitialsAvatar: (id: string, name: string) => string;
+  selfTypingChats: Record<string, boolean>;
+  setSelfTypingChat: (key: string, isTyping: boolean) => void;
+  isSyncing: boolean;
+  performCatchUpSync: () => Promise<void>;
 }
 
 export const generateInitialsAvatar = (id: string, name: string): string => {
@@ -740,6 +744,105 @@ export const useAppStore = create<AppState>((set) => ({
       }
     };
     state.login(userProfile, targetAccount.authMethod);
+  },
+  performCatchUpSync: async () => {
+    const state = useAppStore.getState();
+    const userId = state.user?.id;
+    if (!userId) return;
+
+    if ((window as any).__catchUpSyncInFlight) {
+      console.log('[Catch-Up Sync] Sync already in progress, skipping redundant call.');
+      return;
+    }
+    (window as any).__catchUpSyncInFlight = true;
+    set({ isSyncing: true });
+
+    try {
+      console.log('[Catch-Up Sync] Starting catch-up sync for user:', userId);
+
+      // 1. Re-emit register to socket and re-join group rooms
+      const socket = state.socket;
+      if (socket && socket.connected) {
+        state.addConnectionLog('Catch-up Sync: Re-registering socket and re-joining rooms...');
+        const { cryptoService } = await import('./services/cryptoService');
+        const publicKey = await cryptoService.getMyPublicKeyBase64(userId).catch(() => '');
+        const deviceId = getOrCreateDeviceId();
+        socket.emit('register', { userId, publicKey, deviceId });
+
+        // 2. Re-join group rooms
+        state.chats.forEach(chat => {
+          if (chat.isGroup) {
+            socket.emit('join_group', chat.id);
+          }
+        });
+      }
+
+      // 3. Fetch Cloud Sync (pull latest chats/messages/friends/blocked) from Firestore
+      if (state.authMethod !== 'local' && navigator.onLine) {
+        const { db, doc, getDoc, collection, query, where, getDocs, updateDoc } = await import('./firebase');
+        
+        // Retrieve the stored lastSyncedAt timestamp
+        const storageKey = `proto_last_synced_at_${userId}`;
+        const lastSyncedAt = localStorage.getItem(storageKey) || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+        // Pull latest cloud sync document
+        const syncDocRef = doc(db, 'cloud_syncs', userId);
+        const syncSnapshot = await getDoc(syncDocRef);
+        if (syncSnapshot.exists()) {
+          const syncData = syncSnapshot.data();
+          if (syncData && syncData.lastUpdated && syncData.lastUpdated > lastSyncedAt) {
+            console.log('[Catch-Up Sync] Merging updated state from cloud_syncs...');
+            const { mergeCloudSyncPayload } = await import('./store');
+            mergeCloudSyncPayload(syncData, userId);
+            (window as any).__lastUploadedSyncTime = syncData.lastUpdated;
+          }
+        }
+
+        // Pull and deliver any missed notifications (since lastSyncedAt)
+        const notificationsRef = collection(db, 'notifications');
+        const qNotifs = query(notificationsRef, where('recipientId', '==', userId));
+        const notifSnapshot = await getDocs(qNotifs);
+        const missedNotifs: any[] = [];
+        notifSnapshot.forEach(docSnap => {
+          const notif = docSnap.data();
+          if (notif.createdAt && notif.createdAt > lastSyncedAt) {
+            missedNotifs.push({ id: docSnap.id, ...notif });
+          }
+        });
+
+        if (missedNotifs.length > 0) {
+          console.log(`[Catch-Up Sync] Found ${missedNotifs.length} new notifications since ${lastSyncedAt}`);
+          const currentNotifs = useAppStore.getState().notifications;
+          const mergedNotifs = [...missedNotifs, ...currentNotifs];
+          // deduplicate
+          const uniqueNotifs = mergedNotifs.filter((n, idx, self) => self.findIndex(x => x.id === n.id) === idx);
+          uniqueNotifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          
+          set({ notifications: uniqueNotifs });
+
+          // Mark as delivered in Firestore
+          for (const notif of missedNotifs) {
+            if (notif.status === 'created') {
+              try {
+                await updateDoc(doc(db, 'notifications', notif.id), { status: 'delivered', deliveredAt: new Date().toISOString() });
+              } catch (e) {
+                console.error("Failed to mark delivered during catch-up:", e);
+              }
+            }
+          }
+        }
+
+        // Update lastSyncedAt
+        const nextSyncTime = new Date().toISOString();
+        localStorage.setItem(storageKey, nextSyncTime);
+        console.log('[Catch-Up Sync] Catch-up sync finished successfully. Updated lastSyncedAt:', nextSyncTime);
+      }
+    } catch (err) {
+      console.error('[Catch-Up Sync] Failed during sync:', err);
+    } finally {
+      (window as any).__catchUpSyncInFlight = false;
+      set({ isSyncing: false });
+    }
   },
   socket: null,
   tempMessages: [],
@@ -1255,12 +1358,17 @@ export const useAppStore = create<AppState>((set) => ({
       // 7. message_status_update
       sock.off('message_status_update').on('message_status_update', (data: { chatId: string, messageId: string, status: 'delivered' | 'read' }) => {
         set((state) => ({
-          chats: state.chats.map(c => 
-            (c.id === data.chatId || c.participants.some(p => p.id === data.chatId)) ? {
-              ...c,
-              messages: (c.messages || []).map(m => m.id === data.messageId ? { ...m, status: data.status } : m)
-            } : c
-          )
+          chats: state.chats.map(c => {
+            const isMatch = c.id === data.chatId || c.participants.some(p => p.id === data.chatId);
+            if (isMatch) {
+              return {
+                ...c,
+                unreadCount: data.status === 'read' ? 0 : c.unreadCount,
+                messages: (c.messages || []).map(m => m.id === data.messageId ? { ...m, status: data.status } : m)
+              };
+            }
+            return c;
+          })
         }));
       });
 
@@ -1306,6 +1414,12 @@ export const useAppStore = create<AppState>((set) => ({
         set((currentState) => ({
           chats: currentState.chats.map(c => c.id === data.chatId ? { ...c, unreadCount: 0 } : c)
         }));
+      });
+
+      // 15. self_typing_sync
+      sock.off('self_typing_sync').on('self_typing_sync', (data: { recipientId: string, isTyping: boolean }) => {
+        console.log('[self_typing_sync] Received typing update for self from another device:', data);
+        useAppStore.getState().setSelfTypingChat(data.recipientId, data.isTyping);
       });
     };
 
@@ -1537,6 +1651,9 @@ export const useAppStore = create<AppState>((set) => ({
   setChats: (chats) => set({ chats }),
   typingUsers: {},
   setTypingUser: (userId, isTyping) => set(state => ({ typingUsers: { ...state.typingUsers, [userId]: isTyping } })),
+  selfTypingChats: {},
+  setSelfTypingChat: (key, isTyping) => set(state => ({ selfTypingChats: { ...state.selfTypingChats, [key]: isTyping } })),
+  isSyncing: false,
   activeGroupCall: null,
   setActiveGroupCall: (call) => set({ activeGroupCall: call }),
   blockedUserIds: cachedBlockedUserIds,

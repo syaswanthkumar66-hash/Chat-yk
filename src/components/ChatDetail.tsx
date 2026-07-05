@@ -477,6 +477,7 @@ export const ChatDetail = () => {
     setActiveGroupInfoId,
     chats,
     typingUsers,
+    selfTypingChats,
     sendMessage,
     users,
     onlineUserIds,
@@ -499,6 +500,7 @@ export const ChatDetail = () => {
     setActiveGroupInfoId: s.setActiveGroupInfoId,
     chats: s.chats,
     typingUsers: s.typingUsers,
+    selfTypingChats: s.selfTypingChats,
     sendMessage: s.sendMessage,
     users: s.users,
     onlineUserIds: s.onlineUserIds,
@@ -1242,6 +1244,20 @@ export const ChatDetail = () => {
     return [];
   }, [chat, activeRecipientId, recipient, typingUsers, user?.id]);
 
+  const isSelfTyping = useMemo(() => {
+    if (chat) {
+      if (chat.isGroup) {
+        return !!selfTypingChats[chat.id];
+      } else {
+        const partnerId = activeRecipientId || chat.participants.find(p => p.id !== user?.id)?.id;
+        return !!(partnerId && selfTypingChats[partnerId]);
+      }
+    } else if (recipient) {
+      return !!selfTypingChats[recipient.id];
+    }
+    return false;
+  }, [chat, activeRecipientId, recipient, selfTypingChats, user?.id]);
+
   const isRecipientTyping = typingUsersInChat.length > 0;
   const typingText = useMemo(() => {
     if (typingUsersInChat.length === 0) return '';
@@ -1574,9 +1590,11 @@ export const ChatDetail = () => {
                           <h3 className="font-black text-slate-900 truncate tracking-tight italic uppercase text-xs sm:text-base">{chatName}</h3>
                           {isMuted && <Icon name="notifications_off" className="text-[10px] text-slate-400" />}
                         </div>
-                        <p className={`text-[10px] font-black uppercase tracking-widest transition-colors duration-200 ${isRecipientTyping ? 'text-green-500 animate-pulse' : (isOnline ? 'text-primary' : 'text-slate-400')}`}>
+                        <p className={`text-[10px] font-black uppercase tracking-widest transition-colors duration-200 ${isRecipientTyping ? 'text-green-500 animate-pulse' : (isSelfTyping ? 'text-slate-400 animate-pulse italic' : (isOnline ? 'text-primary' : 'text-slate-400'))}`}>
                           {isRecipientTyping ? (
                             <span>{typingText}</span>
+                          ) : isSelfTyping ? (
+                            <span>Typing from another device...</span>
                           ) : (
                             chat?.isGroup ? `${memberCount} members` : (isOnline ? 'Live Now' : (lastSeenVal ? `Last seen: ${formatLastSeen(lastSeenVal)}` : 'Offline'))
                           )}
