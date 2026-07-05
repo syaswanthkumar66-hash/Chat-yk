@@ -4,6 +4,16 @@ import { Chat, Message, Device, Transfer, Notification } from './types';
 import { io, Socket } from 'socket.io-client';
 import { BACKEND_URL } from './config';
 
+export function getOrCreateDeviceId(): string {
+  if (typeof window === 'undefined') return 'server';
+  let deviceId = localStorage.getItem('proto_device_id');
+  if (!deviceId) {
+    deviceId = `dev-${Math.random().toString(36).substring(2, 11)}`;
+    localStorage.setItem('proto_device_id', deviceId);
+  }
+  return deviceId;
+}
+
 export type AppMode = 'social' | 'fileshare' | 'hub' | 'admin';
 
 interface UserProfile {
@@ -114,6 +124,8 @@ interface AppState {
   selectedMessageIds: string[];
   setSelectedMessageIds: (ids: string[]) => void;
   toggleMessageSelection: (id: string) => void;
+  autoSyncEnabled: boolean;
+  setAutoSyncEnabled: (enabled: boolean) => void;
   friendRequests: FriendRequest[];
   setFriendRequests: (requests: FriendRequest[]) => void;
   acceptFriendRequest: (requestId: string) => void;
@@ -346,6 +358,13 @@ export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
   offlineMessageQueue: [],
   generateInitialsAvatar: generateInitialsAvatar,
+  autoSyncEnabled: getLocalStorageJSON<boolean>('auto_sync_enabled', true),
+  setAutoSyncEnabled: (enabled: boolean) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('auto_sync_enabled', JSON.stringify(enabled));
+    }
+    set({ autoSyncEnabled: enabled });
+  },
   devices: [
     { id: 'd1', name: 'MacBook Pro', type: 'desktop', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '45.2 Mbps', totalSent: '12.4 GB', totalReceived: '8.7 GB' },
     { id: 'd2', name: 'iPhone 15 Pro', type: 'mobile', status: 'online', connectionType: 'Wi-Fi Direct', transferSpeed: '32.1 Mbps', totalSent: '4.1 GB', totalReceived: '2.3 GB' },
@@ -966,7 +985,8 @@ export const useAppStore = create<AppState>((set) => ({
         startHeartbeat();
         const { cryptoService } = await import('./services/cryptoService');
         const publicKey = await cryptoService.getMyPublicKeyBase64(uid);
-        sock.emit('register', { userId: uid, publicKey });
+        const deviceId = getOrCreateDeviceId();
+        sock.emit('register', { userId: uid, publicKey, deviceId });
         
         // Auto join group rooms on connect
         const activeState = useAppStore.getState();
@@ -1110,30 +1130,34 @@ export const useAppStore = create<AppState>((set) => ({
       });
 
       // 6. receive_message
-      sock.off('receive_message').on('receive_message', async (data: { id?: string, messageId?: string, groupId?: string, senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[] }) => {
+      sock.off('receive_message').on('receive_message', async (data: { id?: string, messageId?: string, groupId?: string, senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[], recipientId?: string }) => {
         const state = useAppStore.getState();
         const { cryptoService } = await import('./services/cryptoService');
         
+        const isOwnMessage = data.senderId === uid;
         let decryptedText = data.text;
         
         if (data.iv && data.text) {
           try {
-            const remotePubKeyBase64 = await new Promise<string>((resolve) => {
-              const socket = state.socket;
-              if (socket && socket.connected) {
-                const timeout = setTimeout(() => resolve(''), 1000);
-                socket.emit("get_public_key", { userId: data.senderId }, (res: string) => {
-                  clearTimeout(timeout);
-                  resolve(res || '');
-                });
-              } else {
-                resolve('');
+            const decryptPartnerId = isOwnMessage ? data.recipientId : data.senderId;
+            if (decryptPartnerId) {
+              const remotePubKeyBase64 = await new Promise<string>((resolve) => {
+                const socket = state.socket;
+                if (socket && socket.connected) {
+                  const timeout = setTimeout(() => resolve(''), 1000);
+                  socket.emit("get_public_key", { userId: decryptPartnerId }, (res: string) => {
+                    clearTimeout(timeout);
+                    resolve(res || '');
+                  });
+                } else {
+                  resolve('');
+                }
+              });
+              if (remotePubKeyBase64) {
+                const sharedSecret = await cryptoService.deriveSharedSecret(decryptPartnerId, remotePubKeyBase64, uid);
+                const encryptedObj = JSON.parse(data.text);
+                decryptedText = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
               }
-            });
-            if (remotePubKeyBase64) {
-              const sharedSecret = await cryptoService.deriveSharedSecret(data.senderId, remotePubKeyBase64, uid);
-              const encryptedObj = JSON.parse(data.text);
-              decryptedText = await cryptoService.decryptText(encryptedObj.iv, encryptedObj.ciphertext, sharedSecret);
             }
           } catch(e) {
             console.error("Decryption failed", e);
@@ -1162,7 +1186,7 @@ export const useAppStore = create<AppState>((set) => ({
           encryptedFileKey: data.encryptedFileKey,
           iv: data.iv,
           isE2E: !!(data.iv || data.encryptedFileKey || (data.text && typeof data.text === 'string' && data.text.includes('"iv"'))),
-          isOwn: false
+          isOwn: isOwnMessage
         };
 
         // Find chat or create one
@@ -1170,7 +1194,7 @@ export const useAppStore = create<AppState>((set) => ({
           let updatedChats = [...state.chats];
           let chat = data.groupId
             ? updatedChats.find(c => c.id === data.groupId)
-            : updatedChats.find(c => !c.isGroup && c.participants.some(p => p.id === data.senderId));
+            : updatedChats.find(c => !c.isGroup && c.participants.some(p => p.id === (isOwnMessage ? data.recipientId : data.senderId)));
           
           if (chat) {
             // Guard against duplicates
@@ -1181,33 +1205,36 @@ export const useAppStore = create<AppState>((set) => ({
               ...c,
               messages: [...(c.messages || []), newMessage],
               lastMessage: newMessage,
-              unreadCount: state.activeChatId === c.id ? c.unreadCount : (c.unreadCount || 0) + 1
+              unreadCount: isOwnMessage ? 0 : (state.activeChatId === c.id ? c.unreadCount : (c.unreadCount || 0) + 1)
             } : c);
           } else if (!data.groupId) {
             // For individual chats only, create if not found
-            const sender = state.users.find(u => u.id === data.senderId) || {
-              id: data.senderId,
-              displayName: 'Unknown User',
-              username: data.senderId,
-              avatar: generateInitialsAvatar(data.senderId, 'Unknown User')
-            };
-            const newChat: Chat = {
-              id: `c-${Date.now()}`,
-              participants: [
-                { id: sender.id, name: sender.displayName, username: sender.username, avatar: sender.avatar, status: 'online' },
-                { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
-              ],
-              unreadCount: 1,
-              messages: [newMessage],
-              lastMessage: newMessage
-            };
-            updatedChats.push(newChat);
+            const peerId = isOwnMessage ? data.recipientId : data.senderId;
+            if (peerId) {
+              const peer = state.users.find(u => u.id === peerId) || {
+                id: peerId,
+                displayName: 'Unknown User',
+                username: peerId,
+                avatar: generateInitialsAvatar(peerId, 'Unknown User')
+              };
+              const newChat: Chat = {
+                id: `c-${Date.now()}`,
+                participants: [
+                  { id: peer.id, name: peer.displayName, username: peer.username, avatar: peer.avatar, status: 'online' },
+                  { id: state.user!.id, name: state.user!.displayName, username: state.user!.username, avatar: state.user!.avatar, status: 'online' }
+                ],
+                unreadCount: isOwnMessage ? 0 : 1,
+                messages: [newMessage],
+                lastMessage: newMessage
+              };
+              updatedChats.push(newChat);
+            }
           }
           return { chats: updatedChats };
         });
 
-        // Emit real-time message status delivered/read receipts
-        if (sock && sock.connected) {
+        // Emit real-time message status delivered/read receipts (only if it's NOT our own echoed message)
+        if (!isOwnMessage && sock && sock.connected) {
           sock.emit('message_delivered', {
             messageId: newMessage.id,
             senderId: data.senderId,
@@ -1273,6 +1300,13 @@ export const useAppStore = create<AppState>((set) => ({
       sock.off('typing_stop').on('typing_stop', (data: { senderId: string }) => {
         debounceTypingState(data.senderId, false);
       });
+
+      // 14. sync_chat_read
+      sock.off('sync_chat_read').on('sync_chat_read', (data: { chatId: string }) => {
+        set((currentState) => ({
+          chats: currentState.chats.map(c => c.id === data.chatId ? { ...c, unreadCount: 0 } : c)
+        }));
+      });
     };
 
     setupSocketListeners(socket, userId);
@@ -1281,8 +1315,8 @@ export const useAppStore = create<AppState>((set) => ({
   },
   activeChatId: null,
   setActiveChatId: (id) => set((state) => {
+    const chat = state.chats.find(c => c.id === id);
     if (id && state.socket && state.socket.connected) {
-      const chat = state.chats.find(c => c.id === id);
       if (chat?.isGroup) {
         state.socket.emit('join_group', id);
       }
@@ -1297,6 +1331,10 @@ export const useAppStore = create<AppState>((set) => ({
           });
         }
       });
+
+      // Emit sync_chat_read to clear unread counts on other devices of same user
+      const recId = chat?.isGroup ? undefined : chat?.participants.find(p => p.id !== state.user?.id)?.id;
+      state.socket.emit('sync_chat_read', { chatId: id, recipientId: recId });
     }
     const updatedChats = state.chats.map(c => c.id === id ? { ...c, unreadCount: 0 } : c);
     return { chats: updatedChats, activeChatId: id, activeRecipientId: null, selectedMessageIds: [] };
@@ -1315,6 +1353,9 @@ export const useAppStore = create<AppState>((set) => ({
           });
         }
       });
+
+      // Emit sync_chat_read to clear unread counts on other devices of same user
+      state.socket.emit('sync_chat_read', { chatId: chat.id, recipientId: id });
     }
     const updatedChats = state.chats.map(c => 
       (!c.isGroup && c.participants.some(p => p.id === id)) ? { ...c, unreadCount: 0 } : c
@@ -2203,5 +2244,117 @@ export function useStore<T>(selector: (state: AppState) => T, equalityFn?: (a: T
   };
 
   return useSyncExternalStore(useAppStore.subscribe, getSnapshot, getSnapshot);
+}
+
+let syncDebounceTimeout: any = null;
+
+export const triggerCloudAutoSync = (userId: string) => {
+  if (!userId) return;
+  const store = useAppStore.getState();
+  if (!store.autoSyncEnabled) return;
+  if (store.authMethod === 'local') return; // Skip Firestore for local guest profiles
+
+  if (syncDebounceTimeout) {
+    clearTimeout(syncDebounceTimeout);
+  }
+
+  syncDebounceTimeout = setTimeout(async () => {
+    try {
+      const { db, doc, setDoc, auth } = await import('./firebase');
+      if (auth.currentUser?.uid !== userId) return;
+
+      const payload = {
+        chats: store.chats,
+        users: getLocalStorageJSON(`proto_users_${userId}`, []),
+        friendRequests: getLocalStorageJSON(`proto_friendRequests_${userId}`, []),
+        sentFriendRequests: getLocalStorageJSON(`proto_sentFriendRequests_${userId}`, []),
+        blockedUserIds: store.blockedUserIds,
+        removedFriendIds: store.removedFriendIds,
+        lastUpdated: new Date().toISOString(),
+        deviceInfo: {
+          name: navigator.userAgent.includes('Mobile') ? 'Mobile Web' : 'Desktop Web',
+          userId: userId
+        }
+      };
+
+      await setDoc(doc(db, 'cloud_syncs', userId), payload);
+      console.log("[Auto-Sync] Successfully synchronized database to Firestore.");
+      
+      (window as any).__lastUploadedSyncTime = payload.lastUpdated;
+    } catch (err) {
+      console.warn("[Auto-Sync] Failed to push update to Firestore:", err);
+    }
+  }, 3000); // Debounce by 3 seconds
+};
+
+export function mergeCloudSyncPayload(payload: any, userId: string) {
+  if (!userId) return;
+  const store = useAppStore.getState();
+
+  const saveLocalJSON = (key: string, value: any) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.error("Local storage error in mergeCloudSyncPayload:", e);
+    }
+  };
+
+  // 1. Merge Chats & Messages
+  const existingChats = store.chats || [];
+  const incomingChats = payload.chats || [];
+  const mergedChats = [...existingChats];
+
+  for (const incChat of incomingChats) {
+    const existingIdx = mergedChats.findIndex(c => c.id === incChat.id);
+    if (existingIdx >= 0) {
+      const existingMessages = mergedChats[existingIdx].messages || [];
+      const incomingMessages = incChat.messages || [];
+      
+      const msgMap = new Map<string, any>();
+      existingMessages.forEach(m => msgMap.set(m.id, m));
+      incomingMessages.forEach(m => msgMap.set(m.id, m));
+      
+      mergedChats[existingIdx] = {
+        ...mergedChats[existingIdx],
+        ...incChat,
+        messages: Array.from(msgMap.values()).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      };
+    } else {
+      mergedChats.push(incChat);
+    }
+  }
+
+  // Update store and local storage
+  store.setChats(mergedChats);
+  saveLocalJSON(`proto_chats_${userId}`, mergedChats);
+
+  // 2. Merge Friends/Users
+  const existingUsers = store.users || [];
+  const incomingUsers = payload.users || [];
+  const userMap = new Map<string, any>();
+  existingUsers.forEach((u: any) => userMap.set(u.id, u));
+  incomingUsers.forEach((u: any) => userMap.set(u.id, u));
+  const mergedUsers = Array.from(userMap.values());
+  saveLocalJSON(`proto_users_${userId}`, mergedUsers);
+  
+  useAppStore.setState({ users: mergedUsers });
+
+  // 3. Sync friendRequests, sentFriendRequests, blockedUserIds, removedFriendIds
+  if (payload.friendRequests) {
+    saveLocalJSON(`proto_friendRequests_${userId}`, payload.friendRequests);
+    store.setFriendRequests(payload.friendRequests);
+  }
+  if (payload.sentFriendRequests) {
+    saveLocalJSON(`proto_sentFriendRequests_${userId}`, payload.sentFriendRequests);
+    useAppStore.setState({ sentFriendRequests: payload.sentFriendRequests });
+  }
+  if (payload.blockedUserIds) {
+    saveLocalJSON(`proto_blockedUserIds_${userId}`, payload.blockedUserIds);
+    useAppStore.setState({ blockedUserIds: payload.blockedUserIds });
+  }
+  if (payload.removedFriendIds) {
+    saveLocalJSON(`proto_removedFriendIds_${userId}`, payload.removedFriendIds);
+    useAppStore.setState({ removedFriendIds: payload.removedFriendIds });
+  }
 }
 

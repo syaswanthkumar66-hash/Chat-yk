@@ -321,7 +321,7 @@ export const SocialLayout = () => {
                         ? 'text-amber-600 font-bold normal-case text-[10px]'
                         : 'text-rose-500 font-bold'
                     }>
-                      {wssStatus === 'connected' ? 'Online' : wssStatus === 'connecting' ? 'Reconnecting...' : 'Offline'}
+                      {wssStatus === 'connected' ? 'Online' : wssStatus === 'connecting' ? 'Syncing...' : 'Offline'}
                     </span>
                   </button>
                 </div>

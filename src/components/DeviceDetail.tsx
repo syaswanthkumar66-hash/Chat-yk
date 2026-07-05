@@ -35,6 +35,19 @@ export const DeviceDetail = () => {
       </header>
 
       <main className="flex-1 overflow-y-auto p-6 space-y-10 no-scrollbar">
+        {/* PHASE 1 AUDIT - Explicitly Flag Simulated Stats */}
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-3xl p-4 flex gap-3 items-center">
+          <div className="size-10 rounded-2xl bg-amber-500/20 text-amber-600 flex items-center justify-center shrink-0">
+            <Icon name="warning" className="text-xl" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-amber-800 uppercase tracking-wider">Prototype Mode Notice</h4>
+            <p className="text-[10px] font-black text-amber-600 uppercase tracking-wider mt-0.5 leading-relaxed">
+              The metrics shown below (speed, signal, and logs) are simulated placeholder stats. Use the Peer Sync feature to establish real live WebRTC connections.
+            </p>
+          </div>
+        </div>
+
         <div className="flex flex-col items-center gap-6 py-4">
           <div className="size-40 rounded-[2.5rem] bg-white border-8 border-slate-50 shadow-2xl shadow-slate-200 flex items-center justify-center text-slate-400 relative">
             <Icon name={device.type === 'desktop' ? 'laptop_mac' : 'smartphone'} className="text-7xl" />
@@ -52,7 +65,7 @@ export const DeviceDetail = () => {
 
         <div className="grid grid-cols-2 gap-4">
           <Card className="p-6 space-y-4 bg-white border-slate-100 shadow-xl shadow-slate-200/50">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Current Speed</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Current Speed (Simulated)</p>
             <div className="flex items-baseline gap-1">
               <span className="text-3xl font-black text-slate-900 italic">45.2</span>
               <span className="text-xs font-black text-slate-400 uppercase">Mbps</span>
@@ -64,7 +77,7 @@ export const DeviceDetail = () => {
           </Card>
 
           <Card className="p-6 space-y-4 bg-white border-slate-100 shadow-xl shadow-slate-200/50">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Signal Strength</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Signal Strength (Simulated)</p>
             <div className="flex items-baseline gap-1">
               <span className="text-3xl font-black text-slate-900 italic">92</span>
               <span className="text-xs font-black text-slate-400 uppercase">%</span>
@@ -79,18 +92,18 @@ export const DeviceDetail = () => {
 
         <div className="grid grid-cols-2 gap-8 px-2">
           <div className="space-y-2">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Total Sent</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Total Sent (Simulated)</p>
             <p className="text-2xl font-black text-slate-900 italic">12.4 <span className="text-xs font-black text-slate-400 uppercase tracking-widest not-italic ml-1">GB</span></p>
           </div>
           <div className="space-y-2">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Total Received</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Total Received (Simulated)</p>
             <p className="text-2xl font-black text-slate-900 italic">8.7 <span className="text-xs font-black text-slate-400 uppercase tracking-widest not-italic ml-1">GB</span></p>
           </div>
         </div>
 
         <div className="space-y-6">
           <div className="flex justify-between items-center px-1">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Recent Transfers</h3>
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Recent Transfers (Simulated)</h3>
             <button className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline">View All</button>
           </div>
           

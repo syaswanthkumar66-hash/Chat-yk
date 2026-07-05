@@ -7,12 +7,14 @@ import { GlobalSearch } from './GlobalSearch';
 import { FilePreviewModal } from './FilePreviewModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Transfer } from '../types';
+import { DeviceSyncFlow } from './DeviceSyncFlow';
 
 export const FileShareLayout = () => {
   const [activeTab, setActiveTab] = useState<'devices' | 'transfers' | 'files' | 'settings'>('devices');
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [selectedPreviewTransfer, setSelectedPreviewTransfer] = useState<Transfer | null>(null);
   const [syncFilter, setSyncFilter] = useState<'all' | 'pending' | 'active' | 'completed'>('all');
+  const [showSyncFlow, setShowSyncFlow] = useState(false);
   
   const { 
     setMode, 
@@ -26,7 +28,11 @@ export const FileShareLayout = () => {
     isWssConnected,
     wssMessage,
     connectSpot,
-    disconnectSpot
+    disconnectSpot,
+    autoSyncEnabled,
+    setAutoSyncEnabled,
+    authMethod,
+    user
   } = useStore(s => ({
     setMode: s.setMode,
     activeDeviceId: s.activeDeviceId,
@@ -39,7 +45,11 @@ export const FileShareLayout = () => {
     isWssConnected: s.isWssConnected,
     wssMessage: s.wssMessage,
     connectSpot: s.connectSpot,
-    disconnectSpot: s.disconnectSpot
+    disconnectSpot: s.disconnectSpot,
+    autoSyncEnabled: s.autoSyncEnabled,
+    setAutoSyncEnabled: s.setAutoSyncEnabled,
+    authMethod: s.authMethod,
+    user: s.user
   }), shallowEqual);
 
   if (activeDeviceId) {
@@ -291,6 +301,88 @@ export const FileShareLayout = () => {
                 })
               )}
             </div>
+
+            {/* Sync a Device Trigger Card */}
+            <Card className="p-5 bg-gradient-to-br from-primary/10 via-slate-50 to-white border border-primary/15 shadow-xl shadow-primary/5 rounded-[2rem] space-y-4 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-2xl -mr-10 -mt-10" />
+              <div className="flex justify-between items-start">
+                <div className="size-12 rounded-2xl bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/25">
+                  <Icon name="sync_lock" className="text-2xl" />
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase tracking-widest border border-emerald-500/15">
+                  Secure Peer Link
+                </span>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-md font-black text-slate-900 uppercase tracking-tight italic">Sync a New Device</h3>
+                <p className="text-xs text-slate-500 max-w-sm font-medium">
+                  Direct peer-to-peer data synchronization. Scan a QR code to import or export your chats, settings, and encryption states instantly.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowSyncFlow(true)}
+                className="w-full h-11 rounded-xl bg-primary text-white hover:brightness-110 font-black uppercase tracking-widest italic text-[10px] shadow-md shadow-primary/10 transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                <Icon name="sync" className="text-sm" />
+                Initialize Secure Sync
+              </button>
+            </Card>
+
+            {/* Continuous Cloud Sync Card */}
+            <Card className="p-5 bg-gradient-to-br from-indigo-50/30 via-slate-50 to-white border border-indigo-100 shadow-xl shadow-indigo-500/5 rounded-[2rem] space-y-4 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl -mr-10 -mt-10" />
+              
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="size-12 rounded-2xl bg-indigo-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+                    <Icon name="cloud_sync" className="text-2xl" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-black uppercase text-indigo-600 tracking-wider block">Automated Backup</span>
+                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight italic mt-0.5 leading-none">Real-Time Cloud Sync</h3>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {authMethod === 'local' ? (
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 text-[8px] font-black uppercase tracking-widest border border-amber-500/15">
+                      Guest Mode
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 bg-emerald-500/10 text-emerald-600 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/15">
+                      <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Active
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                Automatically keep your encrypted chats, friends lists, and client settings updated in the cloud. Changes propagate to all other active devices in near real-time.
+              </p>
+
+              {authMethod === 'local' ? (
+                <div className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl flex items-center gap-2.5 text-xs text-amber-800 font-semibold leading-normal">
+                  <Icon name="lock" className="text-amber-600 shrink-0" />
+                  <span>Please sign in with a Google Account under settings to activate continuous real-time cloud synchronization.</span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-indigo-900 uppercase tracking-wide">Sync Status</span>
+                    <span className="text-xs font-semibold text-indigo-700 mt-0.5">
+                      {autoSyncEnabled ? "Connected & Synchronizing" : "Auto-Sync Paused"}
+                    </span>
+                  </div>
+                  <button 
+                    onClick={() => setAutoSyncEnabled(!autoSyncEnabled)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${autoSyncEnabled ? 'bg-indigo-600' : 'bg-slate-200'}`}
+                  >
+                    <span className={`pointer-events-none inline-block size-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${autoSyncEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+              )}
+            </Card>
 
             <div className="space-y-4">
               <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 px-1">Paired Devices</h2>
@@ -587,6 +679,20 @@ export const FileShareLayout = () => {
       >
         <Icon name="add" className="text-3xl" />
       </motion.button>
+
+      {/* Device Sync Flow Panel/Overlay */}
+      <AnimatePresence>
+        {showSyncFlow && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[150] bg-slate-950 flex flex-col"
+          >
+            <DeviceSyncFlow onClose={() => setShowSyncFlow(false)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

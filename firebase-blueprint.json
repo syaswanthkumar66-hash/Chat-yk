@@ -46,6 +46,21 @@
         "createdAt": { "type": "string" }
       },
       "required": ["publicKey", "privateKey"]
+    },
+    "CloudSync": {
+      "title": "CloudSync",
+      "description": "Database payload for the user auto-syncing across active devices",
+      "type": "object",
+      "properties": {
+        "chats": { "type": "array" },
+        "users": { "type": "array" },
+        "friendRequests": { "type": "array" },
+        "sentFriendRequests": { "type": "array" },
+        "blockedUserIds": { "type": "array" },
+        "removedFriendIds": { "type": "array" },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["lastUpdated"]
     }
   },
   "firestore": {
@@ -60,6 +75,10 @@
     "system_config/{configId}": {
       "schema": { "$ref": "#/entities/SystemConfig" },
       "description": "System global configuration documents (e.g., VAPID keys)"
+    },
+    "cloud_syncs/{userId}": {
+      "schema": { "$ref": "#/entities/CloudSync" },
+      "description": "Encrypted multi-device sync data"
     }
   }
 }

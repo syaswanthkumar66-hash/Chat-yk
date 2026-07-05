@@ -49,5 +49,9 @@ service cloud.firestore {
       allow create: if isVerified();
       allow read, update, delete: if isVerified() && (resource == null || resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid);
     }
+
+    match /cloud_syncs/{userId} {
+      allow read, write: if isVerified() && request.auth.uid == userId;
+    }
   }
 }

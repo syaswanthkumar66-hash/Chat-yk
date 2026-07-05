@@ -40,7 +40,9 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     connectionLogs,
     connectSpot,
     disconnectSpot,
-    switchAccount
+    switchAccount,
+    autoSyncEnabled,
+    setAutoSyncEnabled
   } = useStore(s => ({
     user: s.user,
     updateUser: s.updateUser,
@@ -59,7 +61,9 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     connectionLogs: s.connectionLogs,
     connectSpot: s.connectSpot,
     disconnectSpot: s.disconnectSpot,
-    switchAccount: s.switchAccount
+    switchAccount: s.switchAccount,
+    autoSyncEnabled: s.autoSyncEnabled,
+    setAutoSyncEnabled: s.setAutoSyncEnabled
   }), shallowEqual);
   const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection'>('main');
   const [isEditing, setIsEditing] = useState(false);
@@ -1031,6 +1035,31 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                 </div>
                 <span className="text-xs text-neutral-muted font-bold">{removedFriendIds.length} users</span>
               </button>
+
+              {/* Real-Time Cloud Auto-Sync Settings block */}
+              <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-800">Cloud Auto-Sync Database</span>
+                    <span className="text-[10px] text-neutral-muted">Continuous background sync across active devices</span>
+                  </div>
+                  <div 
+                    onClick={() => {
+                      setAutoSyncEnabled(!autoSyncEnabled);
+                    }}
+                    className={cn(
+                      "w-12 h-6 rounded-full p-1 transition-all cursor-pointer",
+                      autoSyncEnabled ? 'bg-indigo-600' : 'bg-slate-300'
+                    )}
+                  >
+                    <motion.div 
+                      animate={{ x: autoSyncEnabled ? 24 : 0 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      className="size-4 bg-white rounded-full shadow-sm" 
+                    />
+                  </div>
+                </div>
+              </div>
 
               {/* E2EE Cloud Sync & Encryption Status Card */}
               <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 space-y-4">
