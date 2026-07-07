@@ -9,6 +9,7 @@ import { JoinGroupView } from './components/JoinGroupView';
 import { AdminPanel } from './components/AdminPanel';
 import { Icon, cn } from './components/UI';
 import { NotificationPrompt } from './components/NotificationPrompt';
+import { QuickProfileSwitcher } from './components/QuickProfileSwitcher';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests, setScopedUserInstance } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -1228,6 +1229,7 @@ export default function App() {
       </div>
 
       {isLoggedIn && <NotificationPrompt />}
+      {isLoggedIn && <QuickProfileSwitcher />}
     </div>
   );
 }

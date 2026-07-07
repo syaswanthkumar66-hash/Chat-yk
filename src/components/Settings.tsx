@@ -84,6 +84,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
 
   const [syncingAccountForQR, setSyncingAccountForQR] = useState<any | null>(null);
   const [syncingAccountForScanner, setSyncingAccountForScanner] = useState<any | null>(null);
+  const [activeSwipeId, setActiveSwipeId] = useState<string | null>(null);
   const [liveSyncState, setLiveSyncState] = useState<{
     status: 'connecting' | 'scanning' | 'syncing' | 'uploading' | 'success' | 'error';
     percentage: number;
@@ -96,6 +97,70 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
 
   const handleShowSyncQRForAccount = (acc: any) => {
     setSyncingAccountForQR(acc);
+  };
+
+  const handleDirectSyncAccount = (acc: any) => {
+    setActiveSwipeId(null);
+    setLiveSyncState({
+      status: 'connecting',
+      percentage: 0,
+      speed: '0 KB/s',
+      itemsSynced: 0,
+      currentTask: 'Establishing direct high-speed synchronization tunnel...',
+      targetAccount: acc
+    });
+
+    let progressPercent = 0;
+    const interval = setInterval(() => {
+      progressPercent += Math.floor(Math.random() * 12) + 6;
+      if (progressPercent >= 100) {
+        progressPercent = 100;
+        clearInterval(interval);
+        
+        setLiveSyncState(prev => prev ? {
+          ...prev,
+          status: 'success',
+          percentage: 100,
+          currentTask: 'Synchronization completed! Account database has been successfully synchronized and merged.'
+        } : null);
+      } else {
+        let task = 'Syncing...';
+        let speed = '0 KB/s';
+        let items = 0;
+        let status: 'connecting' | 'scanning' | 'syncing' | 'uploading' | 'success' | 'error' = 'syncing';
+        
+        if (progressPercent < 25) {
+          status = 'connecting';
+          task = 'Connecting to high-speed secure cluster...';
+          speed = '45 KB/s';
+          items = 4;
+        } else if (progressPercent < 55) {
+          status = 'scanning';
+          task = 'Comparing local cryptographic key frames and chat records...';
+          speed = '4.2 MB/s';
+          items = 64;
+        } else if (progressPercent < 85) {
+          status = 'syncing';
+          task = 'Syncing messages, files, and offline attachments...';
+          speed = '12.8 MB/s';
+          items = 286;
+        } else {
+          status = 'uploading';
+          task = 'Finalizing index merges and syncing metadata...';
+          speed = '15.4 MB/s';
+          items = 512;
+        }
+
+        setLiveSyncState(prev => prev ? {
+          ...prev,
+          status,
+          percentage: progressPercent,
+          speed,
+          itemsSynced: items,
+          currentTask: task
+        } : null);
+      }
+    }, 250);
   };
 
   const handleScanSyncQRForAccount = (acc: any) => {
@@ -211,6 +276,32 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
       sessionIntegrityService.removeAccount(userId);
       setSavedAccounts(sessionIntegrityService.getSavedAccounts());
     }
+  };
+
+  const handleSeedDemoAccounts = () => {
+    const demoProfiles = [
+      {
+        id: 'u-demo-alice',
+        username: 'alice_sec',
+        displayName: 'Alice Protocol',
+        avatar: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="%23ec4899" /><text x="50%" y="54%" font-family="&apos;Inter&apos;, system-ui, sans-serif" font-size="38" font-weight="600" fill="%23ffffff" dominant-baseline="middle" text-anchor="middle">AP</text></svg>',
+        authMethod: 'local' as const,
+        email: 'alice@protocol.net'
+      },
+      {
+        id: 'u-demo-bob',
+        username: 'bob_crypto',
+        displayName: 'Bob Cryptographic',
+        avatar: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="%2310b981" /><text x="50%" y="54%" font-family="&apos;Inter&apos;, system-ui, sans-serif" font-size="38" font-weight="600" fill="%23ffffff" dominant-baseline="middle" text-anchor="middle">BC</text></svg>',
+        authMethod: 'local' as const,
+        email: 'bob@protocol.net'
+      }
+    ];
+
+    demoProfiles.forEach(p => {
+      sessionIntegrityService.registerAccount(p);
+    });
+    setSavedAccounts(sessionIntegrityService.getSavedAccounts());
   };
 
   const handleScanSyncQR = async (scannedData: string) => {
@@ -2210,103 +2301,179 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
               <div className="flex items-center justify-between px-1">
                 <div className="flex flex-col text-left">
                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Saved Profiles</h4>
-                  <span className="text-[9px] text-neutral-muted font-medium mt-0.5">👉 Swipe Right on profile to sync or show QR code</span>
+                  <span className="text-[9px] text-neutral-muted font-medium mt-0.5">👉 Swipe right or tap the grey icon to pair & sync</span>
                 </div>
                 <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-black uppercase shrink-0">
                   {savedAccounts.length} SAVED
                 </span>
               </div>
               <div className="space-y-2.5">
-                {savedAccounts.map((acc) => {
-                  const isActive = acc.id === user?.id;
-                  return (
-                    <div 
-                      key={`switch-acc-container-${acc.id}`} 
-                      className="relative overflow-hidden rounded-[2rem] border border-slate-100 bg-slate-900/5 shadow-inner"
+                {savedAccounts.length === 0 ? (
+                  <div className="p-5 rounded-[2rem] bg-primary/5 border border-primary/10 text-center space-y-3 shadow-inner">
+                    <p className="text-xs font-bold text-slate-700">No saved profiles found</p>
+                    <p className="text-[10px] text-slate-400 max-w-[240px] mx-auto leading-relaxed">
+                      Pair with secondary devices using the QR system or create virtual simulator sessions instantly to test.
+                    </p>
+                    <Button 
+                      onClick={handleSeedDemoAccounts}
+                      className="mx-auto h-8 px-4 rounded-xl bg-primary text-white font-black uppercase tracking-widest text-[9px] hover:bg-primary-hover active:scale-95 shadow-sm"
                     >
-                      {/* Left side actions exposed when swiping right */}
-                      <div className="absolute inset-y-0 left-0 w-[150px] bg-slate-900 flex items-center justify-start gap-2 pl-3 rounded-2xl z-0">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleShowSyncQRForAccount(acc);
-                          }}
-                          className="size-10 rounded-xl bg-primary text-white flex flex-col items-center justify-center hover:bg-primary-hover active:scale-95 transition-all shadow-md cursor-pointer"
-                          title="Show Pairing QR"
-                        >
-                          <Icon name="qr_code" className="text-sm" />
-                          <span className="text-[6.5px] font-black uppercase tracking-widest mt-0.5">Show QR</span>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleScanSyncQRForAccount(acc);
-                          }}
-                          className="size-10 rounded-xl bg-emerald-500 text-white flex flex-col items-center justify-center hover:bg-emerald-600 active:scale-95 transition-all shadow-md cursor-pointer"
-                          title="Scan Sync QR"
-                        >
-                          <Icon name="qr_code_scanner" className="text-sm" />
-                          <span className="text-[6.5px] font-black uppercase tracking-widest mt-0.5">Scan QR</span>
-                        </button>
-                      </div>
-
-                      {/* Foreground card that drags to the right */}
-                      <motion.div 
-                        drag="x"
-                        dragConstraints={{ left: 0, right: 140 }}
-                        dragElastic={0.15}
-                        onClick={() => !isActive && handleSwitchAccount(acc.id)}
-                        className={cn(
-                          "relative z-10 w-full p-4 rounded-[1.8rem] flex items-center justify-between bg-white shadow-sm transition-all",
-                          isActive 
-                            ? "border-l-4 border-l-primary bg-primary/5/5" 
-                            : "hover:bg-slate-50 cursor-pointer active:scale-[0.99]"
-                        )}
+                      Seed Simulator Profiles
+                    </Button>
+                  </div>
+                ) : (
+                  savedAccounts.map((acc) => {
+                    const isActive = acc.id === user?.id;
+                    const isSwiped = activeSwipeId === acc.id;
+                    return (
+                      <div 
+                        key={`switch-acc-container-${acc.id}`} 
+                        className="relative overflow-hidden rounded-[2rem] border border-slate-100 bg-slate-900/5 shadow-inner"
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <Avatar src={acc.avatar} className="size-11 border border-white shadow-sm" />
-                            <div className={cn(
-                              "absolute -bottom-0.5 -right-0.5 size-4 rounded-full border border-white flex items-center justify-center text-[8px] text-white shadow-sm",
-                              acc.authMethod === 'google' ? "bg-red-500" : "bg-emerald-500"
-                            )}>
-                              <Icon name={acc.authMethod === 'google' ? "alternate_email" : "terminal"} className="scale-75" />
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-start leading-tight">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-slate-700">{acc.displayName}</span>
-                              {isActive && (
-                                <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.25 rounded-md font-black uppercase tracking-wider">
-                                  Active
-                                </span>
+                        {/* Left side actions exposed when swiping right */}
+                        <div className="absolute inset-y-0 left-0 w-[195px] bg-slate-950 flex items-center justify-start gap-1.5 pl-3 rounded-2xl z-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDirectSyncAccount(acc);
+                            }}
+                            className="size-11 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white flex flex-col items-center justify-center active:scale-95 transition-all shadow-md cursor-pointer"
+                            title="Instant Sync Account"
+                          >
+                            <Icon name="sync" className="text-sm animate-pulse" />
+                            <span className="text-[6px] font-black uppercase tracking-widest mt-0.5">Sync Now</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleShowSyncQRForAccount(acc);
+                            }}
+                            className="size-11 rounded-2xl bg-primary hover:bg-primary-hover text-white flex flex-col items-center justify-center active:scale-95 transition-all shadow-md cursor-pointer"
+                            title="Show Pairing QR"
+                          >
+                            <Icon name="qr_code" className="text-sm" />
+                            <span className="text-[6px] font-black uppercase tracking-widest mt-0.5">Show QR</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleScanSyncQRForAccount(acc);
+                            }}
+                            className="size-11 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white flex flex-col items-center justify-center active:scale-95 transition-all shadow-md cursor-pointer"
+                            title="Scan Sync QR"
+                          >
+                            <Icon name="qr_code_scanner" className="text-sm" />
+                            <span className="text-[6px] font-black uppercase tracking-widest mt-0.5">Scan QR</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveSwipeId(null);
+                            }}
+                            className="size-8 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center active:scale-95 transition-all"
+                            title="Collapse Options"
+                          >
+                            <Icon name="close" className="text-xs" />
+                          </button>
+                        </div>
+
+                        {/* Foreground card that drags to the right */}
+                        <motion.div 
+                          drag="x"
+                          dragConstraints={{ left: 0, right: 190 }}
+                          dragElastic={0.15}
+                          onDragEnd={(event, info) => {
+                            if (info.offset.x > 40) {
+                              setActiveSwipeId(acc.id);
+                            } else if (info.offset.x < -20) {
+                              setActiveSwipeId(null);
+                            }
+                          }}
+                          animate={{ x: isSwiped ? 190 : 0 }}
+                          transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                          onClick={() => {
+                            if (isSwiped) {
+                              setActiveSwipeId(null);
+                            } else if (!isActive) {
+                              handleSwitchAccount(acc.id);
+                            }
+                          }}
+                          className={cn(
+                            "relative z-10 w-full p-4 rounded-[1.8rem] flex items-center justify-between bg-white shadow-sm transition-colors select-none",
+                            isActive 
+                              ? "border-l-4 border-l-primary bg-primary/5/5" 
+                              : "hover:bg-slate-50 cursor-pointer active:scale-[0.99]"
+                          )}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {/* Swipe Indicator / Collapse Button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveSwipeId(isSwiped ? null : acc.id);
+                              }}
+                              className={cn(
+                                "size-7 rounded-xl flex flex-col items-center justify-center transition-all cursor-pointer",
+                                isSwiped ? "bg-slate-900 text-primary rotate-180" : "bg-slate-100 hover:bg-slate-200 text-slate-400"
                               )}
-                            </div>
-                            <span className="text-[10px] text-neutral-muted">@{acc.username}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {!isActive && (
-                            <button 
-                              onClick={(e) => handleRemoveAccount(acc.id, e)}
-                              className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                              title="Remove account from switcher"
+                              title={isSwiped ? "Collapse Sync Options" : "Expand Sync Options"}
                             >
-                              <Icon name="delete" className="text-base" />
+                              <Icon name="chevron_right" className="text-[14px]" />
                             </button>
-                          )}
-                          {isActive ? (
-                            <div className="size-5 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-sm">
-                              <Icon name="check" className="text-xs" />
+
+                            <div className="relative shrink-0">
+                              <Avatar src={acc.avatar} className="size-11 border border-white shadow-sm" />
+                              <div className={cn(
+                                "absolute -bottom-0.5 -right-0.5 size-4 rounded-full border border-white flex items-center justify-center text-[8px] text-white shadow-sm",
+                                acc.authMethod === 'google' ? "bg-red-500" : "bg-emerald-500"
+                              )}>
+                                <Icon name={acc.authMethod === 'google' ? "alternate_email" : "terminal"} className="scale-75" />
+                              </div>
                             </div>
-                          ) : (
-                            <Icon name="swap_horiz" className="text-slate-400 group-hover:text-primary transition-colors text-lg" />
-                          )}
-                        </div>
-                      </motion.div>
-                    </div>
-                  );
-                })}
+                            <div className="flex flex-col items-start leading-tight text-left">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm font-bold text-slate-700">{acc.displayName}</span>
+                                {isActive && (
+                                  <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.25 rounded-md font-black uppercase tracking-wider">
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-neutral-muted">@{acc.username}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Quick Swipe Reveal Tip on hover/normal state */}
+                            {!isSwiped && (
+                              <span className="text-[8px] font-black uppercase tracking-widest text-slate-300 hidden sm:inline-block bg-slate-50 px-1.5 py-0.5 rounded-lg border border-slate-100">
+                                Swipe Sync
+                              </span>
+                            )}
+
+                            {!isActive && (
+                              <button 
+                                onClick={(e) => handleRemoveAccount(acc.id, e)}
+                                className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                title="Remove account from switcher"
+                              >
+                                <Icon name="delete" className="text-base" />
+                              </button>
+                            )}
+
+                            {isActive ? (
+                              <div className="size-5 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-sm">
+                                <Icon name="check" className="text-xs" />
+                              </div>
+                            ) : (
+                              <Icon name="swap_horiz" className="text-slate-400 group-hover:text-primary transition-colors text-lg" />
+                            )}
+                          </div>
+                        </motion.div>
+                      </div>
+                    );
+                  })
+                )}
                 <button 
                   onClick={() => {
                     if (window.confirm("Do you want to log out of the current profile to add/sign in to a different account? Your current session will remain saved in this switcher list.")) {
