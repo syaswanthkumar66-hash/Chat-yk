@@ -682,8 +682,12 @@ app.use((req, res, next) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: (origin, callback) => {
+      // Dynamically allow any origin to correctly support credentials
+      callback(null, true);
+    },
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -928,6 +932,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         } else {
           clearTypingTimeout(`user-${senderId}`);
         }
+
+        // Echo typing to sender's OTHER devices as self_typing_sync
+        const senderDevices = users.get(senderId);
+        if (senderDevices) {
+          for (const [devId, socketId] of senderDevices.entries()) {
+            if (devId !== (socket as any).deviceId) {
+              io.to(socketId).emit("self_typing_sync", { recipientId, isTyping });
+            }
+          }
+        }
       }
     });
 
@@ -955,6 +969,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         for (const [devId, socketId] of senderDevices.entries()) {
           if (devId !== (socket as any).deviceId) {
             io.to(socketId).emit("typing_start", { senderId, recipientId, groupId, isOwnDeviceEcho: true });
+            io.to(socketId).emit("self_typing_sync", { recipientId: groupId || recipientId, isTyping: true });
           }
         }
       }
@@ -985,6 +1000,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         for (const [devId, socketId] of senderDevices.entries()) {
           if (devId !== (socket as any).deviceId) {
             io.to(socketId).emit("typing_stop", { senderId, recipientId, groupId, isOwnDeviceEcho: true });
+            io.to(socketId).emit("self_typing_sync", { recipientId: groupId || recipientId, isTyping: false });
           }
         }
       }
@@ -2073,7 +2089,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   async function startServer() {
     if (!process.env.VERCEL) {
       const isProd = process.env.NODE_ENV === "production";
-      const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+      const port = 3000;
 
       if (!isProd) {
         try {

@@ -349,6 +349,13 @@ export const SocialLayout = () => {
                     </span>
                   </button>
 
+                  {isSyncing && (
+                    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-indigo-50 border border-indigo-100/40 text-indigo-600 text-[8px] font-black uppercase tracking-wider animate-pulse">
+                      <Icon name="sync" className="text-[10px] animate-spin" />
+                      <span>Syncing...</span>
+                    </div>
+                  )}
+
                   {wssStatus === 'connected' && (
                     <div className="relative">
                       <button 

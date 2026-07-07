@@ -781,8 +781,14 @@ export const useAppStore = create<AppState>((set) => ({
 
       // 3. Fetch Cloud Sync (pull latest chats/messages/friends/blocked) from Firestore
       if (state.authMethod !== 'local' && navigator.onLine) {
-        const { db, doc, getDoc, collection, query, where, getDocs, updateDoc } = await import('./firebase');
+        const { db, doc, getDoc, collection, query, where, getDocs, updateDoc, auth } = await import('./firebase');
         
+        // Prevent permission-denied crashes if the authenticated Firebase user does not match the active user profile
+        if (!auth.currentUser || auth.currentUser.uid !== userId) {
+          console.warn(`[Catch-Up Sync] Skipping Firestore sync because active profile (${userId}) does not match authenticated Firebase user (${auth.currentUser?.uid || 'none'}).`);
+          return;
+        }
+
         // Retrieve the stored lastSyncedAt timestamp
         const storageKey = `proto_last_synced_at_${userId}`;
         const lastSyncedAt = localStorage.getItem(storageKey) || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -1032,7 +1038,8 @@ export const useAppStore = create<AppState>((set) => ({
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
+      withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -1100,6 +1107,9 @@ export const useAppStore = create<AppState>((set) => ({
             sock.emit('join_group', c.id);
           }
         });
+
+        // Trigger automatic catch-up sync on app open/reconnect
+        activeState.performCatchUpSync().catch((err) => console.error('[Socket Connect] Catch-up sync failed:', err));
 
         // Resend offline queued messages automatically on connect
         if (activeState.offlineMessageQueue && activeState.offlineMessageQueue.length > 0) {
@@ -1414,7 +1424,11 @@ export const useAppStore = create<AppState>((set) => ({
       // 14. sync_chat_read
       sock.off('sync_chat_read').on('sync_chat_read', (data: { chatId: string }) => {
         set((currentState) => ({
-          chats: currentState.chats.map(c => c.id === data.chatId ? { ...c, unreadCount: 0 } : c)
+          chats: currentState.chats.map(c => c.id === data.chatId ? {
+            ...c,
+            unreadCount: 0,
+            messages: (c.messages || []).map(m => m.senderId !== currentState.user?.id ? { ...m, status: 'read' as const } : m)
+          } : c)
         }));
       });
 
@@ -2468,6 +2482,19 @@ export function mergeCloudSyncPayload(payload: any, userId: string) {
     }
   };
 
+  const getMessageTimestamp = (m: any): number => {
+    if (m.id && typeof m.id === 'string' && m.id.startsWith('m-')) {
+      const parts = m.id.split('-');
+      const parsed = parseInt(parts[1], 10);
+      if (!isNaN(parsed) && parsed > 100000) {
+        return parsed;
+      }
+    }
+    const parsed = Date.parse(m.timestamp);
+    if (!isNaN(parsed)) return parsed;
+    return 0;
+  };
+
   // 1. Merge Chats & Messages
   const existingChats = store.chats || [];
   const incomingChats = payload.chats || [];
@@ -2486,7 +2513,7 @@ export function mergeCloudSyncPayload(payload: any, userId: string) {
       mergedChats[existingIdx] = {
         ...mergedChats[existingIdx],
         ...incChat,
-        messages: Array.from(msgMap.values()).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        messages: Array.from(msgMap.values()).sort((a, b) => getMessageTimestamp(a) - getMessageTimestamp(b))
       };
     } else {
       mergedChats.push(incChat);

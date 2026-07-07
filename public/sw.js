@@ -1,6 +1,6 @@
 // Service Worker for Web Push Notifications and Offline Support
 
-const CACHE_NAME = 'app-cache-v2';
+const CACHE_NAME = 'app-cache-v4';
 const OFFLINE_URL = '/offline.html';
 const ASSETS_TO_CACHE = [
   '/',
@@ -41,7 +41,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event listener: cache-first with network fallback and offline page support
+// Fetch event listener: Network-First with Cache Fallback to ensure latest updates are served
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
@@ -51,25 +51,26 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(event.request)
-        .then((response) => {
-          // Cache successful responses for next time
-          if (response.status === 200) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => {
+    fetch(event.request)
+      .then((response) => {
+        // Cache successful responses for next time
+        if (response.status === 200) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      })
+      .catch(() => {
+        // Fallback to cache if network fails
+        return caches.match(event.request).then((cached) => {
+          if (cached) return cached;
+          
           // User is offline and asset isn't cached
           if (event.request.mode === 'navigate') {
             return caches.match(OFFLINE_URL);
           }
         });
-    })
+      })
   );
 });
 
