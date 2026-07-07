@@ -37,23 +37,29 @@ service cloud.firestore {
 
     match /offline_messages/{messageId} {
       allow create: if isVerified() && (incoming().senderId == request.auth.uid || incoming().from == request.auth.uid);
-      allow read: if isVerified() && (resource == null || resource.data.to == request.auth.uid);
-      allow read: if isVerified() && (resource == null || resource.data.senderId == request.auth.uid);
+      allow get: if isVerified() && (resource == null || resource.data.to == request.auth.uid || resource.data.senderId == request.auth.uid);
+      allow list: if isVerified() && (resource.data.to == request.auth.uid || resource.data.senderId == request.auth.uid);
       allow delete: if isVerified() && (resource == null || resource.data.to == request.auth.uid || resource.data.senderId == request.auth.uid);
     }
 
     match /friendRequests/{requestId} {
       allow create: if isVerified() && incoming().fromUserId == request.auth.uid;
-      allow read: if isVerified() && (resource == null || resource.data.toUserId == request.auth.uid);
-      allow read: if isVerified() && (resource == null || resource.data.fromUserId == request.auth.uid);
+      allow get: if isVerified() && (resource == null || resource.data.toUserId == request.auth.uid || resource.data.fromUserId == request.auth.uid);
+      allow list: if isVerified() && (resource.data.toUserId == request.auth.uid || resource.data.fromUserId == request.auth.uid);
       allow update, delete: if isVerified() && (resource == null || resource.data.toUserId == request.auth.uid || resource.data.fromUserId == request.auth.uid);
     }
 
     match /notifications/{notificationId} {
       allow create: if isVerified();
-      allow read: if isVerified() && (resource == null || resource.data.recipientId == request.auth.uid);
-      allow read: if isVerified() && (resource == null || resource.data.senderId == request.auth.uid);
+      allow get: if isVerified() && (resource == null || resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid);
+      allow list: if isVerified() && (resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid);
       allow update, delete: if isVerified() && (resource == null || resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid);
+    }
+
+    match /uploaded_files/{fileId} {
+      allow create: if isVerified() && incoming().ownerId == request.auth.uid;
+      allow read: if isVerified();
+      allow update, delete: if isVerified() && (resource == null || resource.data.ownerId == request.auth.uid);
     }
 
     match /cloud_syncs/{userId} {

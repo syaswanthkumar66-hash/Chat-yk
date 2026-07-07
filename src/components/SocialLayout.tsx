@@ -1049,7 +1049,7 @@ export const SocialLayout = () => {
 
         {/* Floating Action Button */}
         {activeTab === 'chats' && (
-          <div className="absolute bottom-24 right-6 flex flex-col items-end gap-3 z-[45]">
+          <div className="absolute bottom-40 md:bottom-24 right-6 flex flex-col items-end gap-3 z-[45]">
             <AnimatePresence>
               {showFabMenu && (
                 <motion.div 

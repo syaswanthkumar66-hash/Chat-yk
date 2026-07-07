@@ -682,12 +682,8 @@ app.use((req, res, next) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, callback) => {
-      // Dynamically allow any origin to correctly support credentials
-      callback(null, true);
-    },
-    methods: ["GET", "POST"],
-    credentials: true
+    origin: "*",
+    methods: ["GET", "POST"]
   }
 });
 

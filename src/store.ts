@@ -224,6 +224,8 @@ interface AppState {
   inAppToasts: { id: string; title: string; body: string; avatar: string; chatId: string }[];
   addInAppToast: (toast: { title: string; body: string; avatar: string; chatId: string }) => void;
   removeInAppToast: (id: string) => void;
+  cloudSyncStatus: 'syncing' | 'synced' | null;
+  setCloudSyncStatus: (status: 'syncing' | 'synced' | null) => void;
   devices: Device[];
   transfers: Transfer[];
   acceptTransfer: (transferId: string) => void;
@@ -752,6 +754,14 @@ export const useAppStore = create<AppState>((set) => ({
     const userId = state.user?.id;
     if (!userId) return;
 
+    const now = Date.now();
+    const lastSyncTime = (window as any).__lastCatchUpSyncTime || 0;
+    if (now - lastSyncTime < 10000) {
+      console.log('[Catch-Up Sync] Throttled: Catch-up sync already executed in the last 10 seconds.');
+      return;
+    }
+    (window as any).__lastCatchUpSyncTime = now;
+
     if ((window as any).__catchUpSyncInFlight) {
       console.log('[Catch-Up Sync] Sync already in progress, skipping redundant call.');
       return;
@@ -857,6 +867,8 @@ export const useAppStore = create<AppState>((set) => ({
   addTempMessage: (msg) => set((state) => ({ tempMessages: [...state.tempMessages, msg] })),
   clearTempMessages: () => set({ tempMessages: [] }),
   inAppToasts: [],
+  cloudSyncStatus: null,
+  setCloudSyncStatus: (status) => set({ cloudSyncStatus: status }),
   addInAppToast: (toast) => set((state) => {
     const id = `toast-${Math.random().toString(36).substr(2, 9)}`;
     return {
@@ -1038,14 +1050,13 @@ export const useAppStore = create<AppState>((set) => ({
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
-      transports: ["polling", "websocket"],
-      withCredentials: true,
+      transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 30000,
       randomizationFactor: 0.5,
-      timeout: 20000,
+      timeout: 60000,
       autoConnect: true,
     });
 
@@ -1451,8 +1462,15 @@ export const useAppStore = create<AppState>((set) => ({
       // 17. cloud_sync_triggered
       sock.off('cloud_sync_triggered').on('cloud_sync_triggered', async (data: { lastUpdated: string }) => {
         console.log('[cloud_sync_triggered] Received real-time sync request from another device:', data);
-        const { user, authMethod } = useAppStore.getState();
+        const { user, authMethod, onlineDevices } = useAppStore.getState();
         if (user && authMethod !== 'local' && navigator.onLine) {
+          // Only show popup if there's actually another device online
+          const hasOtherOnlineDevice = onlineDevices.length > 1;
+          
+          if (hasOtherOnlineDevice) {
+            useAppStore.getState().setCloudSyncStatus('syncing');
+          }
+
           try {
             const { db, doc, getDoc } = await import('./firebase');
             const syncDocRef = doc(db, 'cloud_syncs', user.id);
@@ -1467,16 +1485,23 @@ export const useAppStore = create<AppState>((set) => ({
                 localStorage.setItem(storageKey, syncData.lastUpdated || new Date().toISOString());
                 (window as any).__lastUploadedSyncTime = syncData.lastUpdated;
                 
-                useAppStore.getState().addInAppToast({
-                  title: 'Real-Time Cloud Synced',
-                  body: 'Received state update from another device.',
-                  avatar: user.avatar || '',
-                  chatId: ''
-                });
+                if (hasOtherOnlineDevice) {
+                  useAppStore.getState().setCloudSyncStatus('synced');
+                  setTimeout(() => {
+                    if (useAppStore.getState().cloudSyncStatus === 'synced') {
+                      useAppStore.getState().setCloudSyncStatus(null);
+                    }
+                  }, 3000);
+                }
               }
+            } else if (hasOtherOnlineDevice) {
+               useAppStore.getState().setCloudSyncStatus(null);
             }
           } catch (e) {
             console.error("Error doing real-time background sync:", e);
+            if (hasOtherOnlineDevice) {
+               useAppStore.getState().setCloudSyncStatus(null);
+            }
           }
         }
       });
@@ -2432,6 +2457,11 @@ export const triggerCloudAutoSync = (userId: string) => {
   if (!store.autoSyncEnabled) return;
   if (store.authMethod === 'local') return; // Skip Firestore for local guest profiles
 
+  if ((window as any).__isMergingCloudSync) {
+    console.log("[Auto-Sync] Skipping auto-sync trigger because we are currently merging remote state.");
+    return;
+  }
+
   if (syncDebounceTimeout) {
     clearTimeout(syncDebounceTimeout);
   }
@@ -2473,6 +2503,12 @@ export const triggerCloudAutoSync = (userId: string) => {
 export function mergeCloudSyncPayload(payload: any, userId: string) {
   if (!userId) return;
   const store = useAppStore.getState();
+
+  // Set merging flag to prevent infinite loops and sync flooding
+  (window as any).__isMergingCloudSync = true;
+  if ((window as any).__mergeTimeout) {
+    clearTimeout((window as any).__mergeTimeout);
+  }
 
   const saveLocalJSON = (key: string, value: any) => {
     try {
@@ -2552,5 +2588,10 @@ export function mergeCloudSyncPayload(payload: any, userId: string) {
     saveLocalJSON(`proto_removedFriendIds_${userId}`, payload.removedFriendIds);
     useAppStore.setState({ removedFriendIds: payload.removedFriendIds });
   }
+
+  // Clear merging flag after state updates flush
+  (window as any).__mergeTimeout = setTimeout(() => {
+    (window as any).__isMergingCloudSync = false;
+  }, 500);
 }
 

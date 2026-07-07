@@ -675,7 +675,7 @@ export const FileShareLayout = () => {
       <motion.button 
         whileHover={{ scale: 1.1, rotate: 90 }}
         whileTap={{ scale: 0.9 }}
-        className="absolute bottom-28 right-6 size-16 rounded-[2rem] bg-primary text-white shadow-2xl shadow-primary/40 flex items-center justify-center z-40 border-4 border-white"
+        className="absolute bottom-40 md:bottom-28 right-6 size-16 rounded-[2rem] bg-primary text-white shadow-2xl shadow-primary/40 flex items-center justify-center z-40 border-4 border-white"
       >
         <Icon name="add" className="text-3xl" />
       </motion.button>

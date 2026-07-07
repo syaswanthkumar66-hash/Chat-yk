@@ -435,6 +435,7 @@ export default function App() {
   }, [user?.id, setActiveChatId, setMode]);
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+  const cloudSyncStatus = useAppStore((state) => state.cloudSyncStatus);
 
   useEffect(() => {
     // Run startup session integrity and cryptographic verification
@@ -1129,6 +1130,42 @@ export default function App() {
           >
             <Icon name="cloud_off" className="text-sm animate-pulse" />
             <span>Working Offline • Changes will sync automatically upon reconnection</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Cloud Sync Status Toast */}
+      <AnimatePresence>
+        {cloudSyncStatus && !isOffline && (
+          <motion.div
+            initial={{ y: 50, opacity: 0, scale: 0.95 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 50, opacity: 0, scale: 0.95 }}
+            className="fixed bottom-24 left-6 md:bottom-10 md:left-10 z-[300]"
+          >
+            <div className="bg-slate-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl flex items-center gap-3 shadow-2xl border border-white/10 min-w-[200px]">
+              {cloudSyncStatus === 'syncing' ? (
+                <>
+                  <div className="size-8 rounded-full bg-primary/20 flex items-center justify-center text-primary">
+                    <Icon name="sync" className="text-base animate-spin" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-black uppercase tracking-widest text-slate-200">Cloud Sync</span>
+                    <span className="text-[10px] font-bold text-slate-400">Syncing changes...</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="size-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <Icon name="cloud_done" className="text-base" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-black uppercase tracking-widest text-emerald-400">Sync Complete</span>
+                    <span className="text-[10px] font-bold text-slate-400">Data is up to date</span>
+                  </div>
+                </>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

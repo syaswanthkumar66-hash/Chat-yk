@@ -18,17 +18,8 @@ export function NotificationPrompt() {
     if (typeof window === 'undefined') return;
     if (!('Notification' in window)) return;
     
-    // Only show if logged in and permission is 'default' (not yet allowed or denied)
-    if (user && Notification.permission === 'default') {
-      const dismissed = localStorage.getItem('notification_prompt_dismissed');
-      if (!dismissed) {
-        // Show after a short delay for a more natural entry
-        const timer = setTimeout(() => {
-          setStatus('request');
-        }, 4000);
-        return () => clearTimeout(timer);
-      }
-    }
+    // Do not automatically show the prompt. 
+    // It should only be triggered manually from settings or specific user actions.
   }, [user]);
 
   const handleAllow = async () => {
