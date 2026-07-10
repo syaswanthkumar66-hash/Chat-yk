@@ -149,9 +149,12 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
       className="fixed inset-0 z-[200] bg-black"
     >
       {/* The Scanner Element - Background */}
-      <div 
+      <motion.div 
         id={scannerId} 
-        className="absolute inset-0 z-0" 
+        initial={{ opacity: 0, scale: 1.1 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.8, ease: "easeOut" }}
+        className="absolute inset-0 z-0 bg-black flex items-center justify-center" 
       />
 
       {/* UI Overlay */}
@@ -183,6 +186,19 @@ export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void,
           <div className="text-center space-y-2 px-6 mt-8">
             <p className="text-white font-bold drop-shadow-lg">Align QR code within the frame</p>
             <p className="text-white/70 text-xs drop-shadow-lg">Scanning will start automatically</p>
+            
+            {!error && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+                className="inline-flex items-center gap-2 px-4 py-2 mt-4 rounded-full bg-black/60 backdrop-blur-md border border-white/20 shadow-xl"
+              >
+                <Icon name="center_focus_weak" className="text-primary text-sm animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-200">Scanning...</span>
+              </motion.div>
+            )}
+
             {error && (
               <div className="space-y-4 mt-4">
                 <p className="text-red-400 text-xs font-bold bg-black/60 px-4 py-2 rounded-full backdrop-blur-md border border-red-500/20">

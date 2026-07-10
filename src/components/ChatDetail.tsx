@@ -68,6 +68,8 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   const [currentChunkSize, setCurrentChunkSize] = useState<number | null>(null);
 
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     const handleProgress = (e: Event) => {
@@ -95,6 +97,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   useEffect(() => {
     let active = true;
     const fetchDecrypted = async () => {
+      setLoadError(null);
       const targetUrl = msg.fileUrl || msg.url;
       if (!targetUrl) return;
 
@@ -149,7 +152,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
         // Fetch remote pub key to derive shared secret for E2EE decryption
         const remoteId = isOwn ? msg.recipientId : msg.senderId;
         const state = useAppStore.getState();
-        const pubKeyBase64 = await new Promise<string>((resolve) => {
+        let pubKeyBase64 = await new Promise<string>((resolve) => {
           const socket = state.socket;
           if (socket && socket.connected) {
             const timeout = setTimeout(() => resolve(''), 1000);
@@ -161,6 +164,26 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
             resolve('');
           }
         });
+
+        // Fallback to Firestore if live socket fetch failed (e.g. peer is offline)
+        if (!pubKeyBase64) {
+          try {
+            const { db, doc, getDoc } = await import('../firebase');
+            if (db) {
+              const userDoc = await getDoc(doc(db, 'users', remoteId));
+              if (userDoc.exists()) {
+                pubKeyBase64 = userDoc.data().publicKey || '';
+              }
+            }
+          } catch (fallbackErr) {
+            console.error("Failed to fetch public key from Firestore:", fallbackErr);
+          }
+        }
+
+        if (!pubKeyBase64) {
+          throw new Error("Could not resolve remote public key for decryption");
+        }
+
         sharedSecret = await cryptoService.deriveSharedSecret(remoteId, pubKeyBase64);
 
         const decryptedBlob = await cryptoService.decryptFile(encryptedBlob, msg.iv, sharedSecret, msg.type === 'audio' ? 'audio/webm' : (msg.type === 'file' ? 'application/octet-stream' : 'image/jpeg'));
@@ -181,12 +204,15 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
         if (active) setUrl(URL.createObjectURL(decompressed));
       } catch (e) {
         console.error("Decryption/Decompression failed", e);
-        if (active) setDownloadProgress(null);
+        if (active) {
+          setDownloadProgress(null);
+          setLoadError(msg.type === 'audio' ? "Couldn't load voice note" : msg.type === 'image' ? "Couldn't load image" : "Couldn't load file");
+        }
       }
     };
     fetchDecrypted();
     return () => { active = false; };
-  }, [msg.fileUrl, msg.url, msg.encryptedFileKey, msg.iv, isOwn, msg.recipientId, msg.senderId, msg.id, msg.type]);
+  }, [msg.fileUrl, msg.url, msg.encryptedFileKey, msg.iv, isOwn, msg.recipientId, msg.senderId, msg.id, msg.type, retryKey]);
 
   useEffect(() => {
     if (msg.type === 'audio' && msg.fileSize && msg.fileSize.includes('|')) {
@@ -216,16 +242,23 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
         }
       };
       const handleEnded = () => setIsPlaying(false);
+      const handleError = () => {
+        console.error("Audio playback error");
+        setLoadError("Couldn't load voice note");
+        setIsPlaying(false);
+      };
 
       audio.addEventListener('timeupdate', handleTimeUpdate);
       audio.addEventListener('loadedmetadata', handleLoadedMetadata);
       audio.addEventListener('ended', handleEnded);
+      audio.addEventListener('error', handleError);
 
       return () => {
         audio.pause();
         audio.removeEventListener('timeupdate', handleTimeUpdate);
         audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
         audio.removeEventListener('ended', handleEnded);
+        audio.removeEventListener('error', handleError);
       };
     }
   }, [url, msg.type]);
@@ -271,13 +304,37 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   };
 
   if (msg.type === 'image') {
+    if (loadError) {
+      return (
+        <div className="flex flex-col items-center justify-center p-4 min-w-[150px] min-h-[100px] bg-black/5 rounded-xl border border-red-500/20 text-red-500">
+          <Icon name="broken_image" className="text-2xl mb-2 opacity-80" />
+          <span className="text-[10px] font-bold uppercase tracking-wider mb-2">{loadError}</span>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setRetryKey(k => k + 1); }}
+            className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 rounded-full text-[10px] font-bold transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    
     return (
       <div 
         className="space-y-2 cursor-pointer group/image relative min-w-[150px] min-h-[100px]" 
         onClick={() => !showProgress && onPreview?.({ type: 'image', url, name: msg.text || 'Image', size: msg.fileSize })}
       >
-        <div className="relative rounded-xl overflow-hidden shadow-sm border border-slate-100 hover:border-primary/20 transition-all">
-          <img src={url} className="max-w-full rounded-xl hover:scale-[1.01] transition-transform duration-300" referrerPolicy="no-referrer" />
+        <div className="relative rounded-xl overflow-hidden shadow-sm border border-slate-100 hover:border-primary/20 transition-all min-h-[100px] bg-black/5 flex items-center justify-center">
+          {url ? (
+            <img 
+              src={url} 
+              onError={() => setLoadError("Couldn't load image")} 
+              className="max-w-full rounded-xl hover:scale-[1.01] transition-transform duration-300" 
+              referrerPolicy="no-referrer" 
+            />
+          ) : (
+            !showProgress && <div className="text-slate-400 text-xs font-medium">Loading...</div>
+          )}
           {renderProgressOverlay()}
           <div className="absolute inset-0 bg-black/0 hover:bg-black/10 flex items-center justify-center transition-colors">
             <Icon name="zoom_in" className="text-white opacity-0 group-hover/image:opacity-100 transition-opacity text-2xl drop-shadow-md" />
@@ -289,6 +346,24 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   }
   
   if (msg.type === 'file') {
+    if (loadError) {
+      return (
+        <div className="flex items-center gap-3 bg-red-500/5 p-2 rounded-xl border border-red-500/20 text-red-500 min-w-[220px]">
+          <div className="size-10 rounded-xl flex items-center justify-center bg-red-500/10 shrink-0">
+            <Icon name="error_outline" />
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <p className="text-xs font-bold truncate">{loadError}</p>
+          </div>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setRetryKey(k => k + 1); }}
+            className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 rounded-full text-[10px] font-bold transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
     return (
       <div 
         className="flex flex-col gap-2 min-w-[220px] cursor-pointer hover:bg-black/5 rounded-xl p-1.5 transition-all relative"
@@ -310,7 +385,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
               {msg.fileSize || 'FILE'}
             </div>
           </div>
-          {!showProgress && (
+          {!showProgress && url && (
             <a href={url} download={msg.text || 'file'} className={cn("size-9 rounded-full flex items-center justify-center shrink-0 hover:bg-black/10 transition-colors", isOwn ? "text-white" : "text-primary")}>
               <Icon name="download" className="text-base" />
             </a>
@@ -333,14 +408,32 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
   }
 
   if (msg.type === 'audio') {
+    if (loadError) {
+      return (
+        <div className="flex items-center gap-3 bg-red-500/5 p-2 rounded-xl border border-red-500/20 text-red-500 min-w-[220px]">
+          <div className="size-10 rounded-full flex items-center justify-center bg-red-500/10 shrink-0">
+            <Icon name="error_outline" />
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <p className="text-xs font-bold truncate">{loadError}</p>
+          </div>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setRetryKey(k => k + 1); }}
+            className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 rounded-full text-[10px] font-bold transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
     const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
     return (
       <div className="flex flex-col gap-1 min-w-[220px] py-1">
         <div className="flex items-center gap-3">
           <button 
-            disabled={isTransferring || showProgress}
+            disabled={isTransferring || showProgress || !url}
             onClick={togglePlay}
-            className={cn("size-10 rounded-full flex items-center justify-center transition-transform active:scale-95 shrink-0 shadow-sm", isOwn ? "bg-white/25 text-white hover:bg-white/35" : "bg-primary/10 text-primary hover:bg-primary/20", (isTransferring || showProgress) && "opacity-50 cursor-not-allowed")}
+            className={cn("size-10 rounded-full flex items-center justify-center transition-transform active:scale-95 shrink-0 shadow-sm", isOwn ? "bg-white/25 text-white hover:bg-white/35" : "bg-primary/10 text-primary hover:bg-primary/20", (isTransferring || showProgress || !url) && "opacity-50 cursor-not-allowed")}
           >
             <Icon name={isTransferring || showProgress ? "sync" : (isPlaying ? "pause" : "play_arrow")} className={cn("text-xl", (isTransferring || showProgress) && "animate-spin")} />
           </button>
