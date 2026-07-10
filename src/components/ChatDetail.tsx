@@ -63,7 +63,7 @@ const fetchWithProgress = async (url: string, onProgress: (percent: number) => v
   return new Blob(chunks);
 };
 
-const DecryptedMedia = ({ msg, isOwn, onPreview, onRetrySend }: { msg: any; isOwn: boolean; onPreview?: (data: { type: 'image' | 'file'; url: string; name: string; size?: string }) => void; onRetrySend?: (msg: any) => void }) => {
+const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: any; isOwn: boolean; peerId?: string | null; onPreview?: (data: { type: 'image' | 'file'; url: string; name: string; size?: string }) => void; onRetrySend?: (msg: any) => void }) => {
   const [url, setUrl] = useState(msg.fileUrl || msg.url);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -162,7 +162,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview, onRetrySend }: { msg: any; isOw
         
         let sharedSecret: CryptoKey;
         // Fetch remote pub key to derive shared secret for E2EE decryption
-        const remoteId = isOwn ? msg.recipientId : msg.senderId;
+        const remoteId = isOwn ? (msg.recipientId || peerId) : msg.senderId;
         const state = useAppStore.getState();
         let pubKeyBase64 = await new Promise<string>((resolve) => {
           const socket = state.socket;
@@ -1060,15 +1060,9 @@ export const ChatDetail = () => {
 
     if (capturedMedia.length > 0) {
       const isSelfOnline = navigator.onLine && useAppStore.getState().socket?.connected;
-      const otherParticipantId = chat ? (chat.isGroup ? null : chat.participants[0]?.id) : recipient?.id;
-      const isRecipientOnline = chat 
-        ? (chat.isGroup || users.find(u => u.id === otherParticipantId)?.isOnline || (otherParticipantId && onlineUserIds.includes(otherParticipantId)))
-        : (recipient?.isOnline || (recipient?.id && onlineUserIds.includes(recipient.id)));
-      
-      if (!isSelfOnline || !isRecipientOnline) {
-        setToast("Files and media can only be transferred when both users are online.");
-        setTimeout(() => setToast(null), 3000);
-        return;
+      if (!isSelfOnline) {
+        setToast("You are currently offline. Files will be sent as base64 strings and may be limited in size.");
+        setTimeout(() => setToast(null), 4000);
       }
     }
 
@@ -1545,7 +1539,7 @@ export const ChatDetail = () => {
   }, [chat, activeRecipientId, incomingMediaUploads, user?.id]);
 
   return (
-    <div className="flex flex-col h-screen bg-bg-light relative overflow-hidden">
+    <div className="flex flex-col h-full bg-bg-light relative overflow-hidden">
       <AnimatePresence>
         {showReactionPicker && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
@@ -1786,7 +1780,7 @@ export const ChatDetail = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="flex flex-col flex-1 h-full relative">
-          <header className="px-3 py-2 sm:px-6 sm:py-4 bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-40">
+          <header className="px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 sm:px-6 sm:py-4 bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-40">
             <AnimatePresence mode="wait">
               {isSelectionMode ? (
                 <motion.div 
@@ -2064,7 +2058,7 @@ export const ChatDetail = () => {
                             <span>{isOwn ? "You deleted this message" : "This message was deleted"}</span>
                           </span>
                         ) : msg.type === 'image' || msg.type === 'audio' || msg.type === 'file' ? (
-                          <DecryptedMedia msg={msg} isOwn={isOwn} onPreview={(data) => setPreviewMedia(data)} onRetrySend={retrySendMedia} />
+                          <DecryptedMedia msg={msg} isOwn={isOwn} peerId={otherParticipantId} onPreview={(data) => setPreviewMedia(data)} onRetrySend={retrySendMedia} />
                         ) : (
                           <p className="text-sm whitespace-pre-wrap"><span>{msg.text}</span></p>
                         )}
@@ -2177,7 +2171,7 @@ export const ChatDetail = () => {
         )}
       </main>
 
-      <footer className="p-2 sm:p-4 bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex flex-col gap-2 sm:gap-3 sticky bottom-0 z-30">
+      <footer className="px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex flex-col gap-2 sm:gap-3 sticky bottom-0 z-30">
         <AnimatePresence>
           {capturedMedia.length > 0 && (
             <motion.div 

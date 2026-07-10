@@ -1007,7 +1007,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 relative z-10 h-full">
         {/* Header - Mobile & Desktop Top Bar */}
-        <header className="px-8 py-6 flex items-center justify-between bg-white/60 backdrop-blur-xl border-b border-primary/10 sticky top-0 z-40 min-h-[100px]">
+        <header className="px-8 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 flex items-center justify-between bg-white/60 backdrop-blur-xl border-b border-primary/10 sticky top-0 z-40 min-h-[100px]">
           <div className="flex items-center gap-6">
             <button onClick={onClose} className="md:hidden size-12 rounded-2xl bg-white shadow-lg shadow-primary/5 flex items-center justify-center text-neutral-muted hover:bg-primary hover:text-white transition-all duration-300">
               <Icon name="arrow_back" />
@@ -1071,7 +1071,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
         </header>
 
         {/* Mobile Navigation - Bottom Bar */}
-        <nav className="md:hidden fixed bottom-6 left-4 right-4 z-[100] bg-primary/95 backdrop-blur-2xl rounded-[2.5rem] px-4 py-3 flex justify-around items-center shadow-2xl shadow-primary/40 border border-white/10">
+        <nav className="md:hidden fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-4 right-4 z-[100] bg-primary/95 backdrop-blur-2xl rounded-[2.5rem] px-4 py-3 flex justify-around items-center shadow-2xl shadow-primary/40 border border-white/10">
           {visibleTabs.slice(0, 4).map(tab => (
             <button 
               key={`mobile-nav-${tab.id}`}

@@ -13,7 +13,7 @@ export const DeviceDetail = () => {
   if (!device) return null;
 
   return (
-    <div className="flex flex-col h-screen bg-bg-light overflow-hidden">
+    <div className="flex flex-col h-full bg-bg-light overflow-hidden">
       <header className="px-6 py-4 flex items-center justify-between bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-30">
         <div className="flex items-center gap-4">
           <button onClick={() => setActiveDeviceId(null)} className="size-11 rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm">

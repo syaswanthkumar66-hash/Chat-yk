@@ -149,7 +149,7 @@ export const SocialLayout = () => {
   });
 
   return (
-    <div className="flex h-screen bg-bg-light relative overflow-hidden font-sans">
+    <div className="flex h-full bg-bg-light relative overflow-hidden font-sans">
       {/* Left Sidebar - Chat List */}
       <div className={`flex flex-col h-full bg-bg-light border-r border-primary/10 transition-all duration-500 ease-in-out relative z-20 ${
         (activeChatId || activeRecipientId || viewingUserId) ? 'hidden md:flex md:w-80 lg:w-[400px]' : 'w-full md:w-80 lg:w-[400px]'
@@ -301,7 +301,7 @@ export const SocialLayout = () => {
         </AnimatePresence>
 
         {/* Header */}
-        <header className="px-6 py-6 flex flex-col gap-6 bg-bg-light/80 backdrop-blur-xl sticky top-0 z-30 border-b border-primary/5">
+        <header className="px-6 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 flex flex-col gap-6 bg-bg-light/80 backdrop-blur-xl sticky top-0 z-30 border-b border-primary/5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <motion.button 
@@ -914,7 +914,7 @@ export const SocialLayout = () => {
         </main>
 
         {/* Bottom Nav */}
-        <nav className="bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex justify-around py-4 sticky bottom-0 z-30">
+        <nav className="bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex justify-around pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sticky bottom-0 z-30">
           {[
             { id: 'chats', icon: 'chat_bubble', label: 'Chats' },
             { id: 'friends', icon: 'group', label: 'Friends' },

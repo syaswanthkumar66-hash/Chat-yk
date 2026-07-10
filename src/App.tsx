@@ -1103,7 +1103,7 @@ export default function App() {
   // Auth Loading Splash Screen
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-[#FFF1E7] flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-[100dvh] bg-[#FFF1E7] flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md space-y-6">
           <div className="size-16 rounded-2xl bg-primary flex items-center justify-center text-white shadow-2xl shadow-primary/30 rotate-3 animate-pulse mx-auto">
             <Icon name="share" className="text-3xl" />
@@ -1123,7 +1123,7 @@ export default function App() {
   // Maintenance Mode Screen
   if (systemSettings.maintenanceMode && mode !== 'admin') {
     return (
-      <div className="min-h-screen bg-[#FFF1E7] flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-[100dvh] bg-[#FFF1E7] flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md space-y-6">
           <div className="size-20 rounded-3xl bg-amber-500/10 flex items-center justify-center text-amber-500 mx-auto animate-pulse">
             <Icon name="engineering" className="text-4xl" />
@@ -1143,7 +1143,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-light overflow-hidden relative">
+    <div className="flex flex-col h-[100dvh] bg-bg-light overflow-hidden relative">
       {/* Offline Banner */}
       <AnimatePresence>
         {isOffline && (
@@ -1277,40 +1277,40 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <div className="max-w-7xl mx-auto min-h-screen bg-white shadow-2xl relative">
+      <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col bg-white shadow-2xl relative overflow-hidden">
         <AnimatePresence mode="wait">
         {joinGroupId && (
-          <motion.div key="join" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key="join" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <JoinGroupView />
           </motion.div>
         )}
         
         {mode === 'hub' && !joinGroupId && (
-          <motion.div key="hub" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key="hub" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <Hub />
           </motion.div>
         )}
         
         {mode === 'social' && !isLoggedIn && !joinGroupId && (
-          <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key="onboarding" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <Onboarding />
           </motion.div>
         )}
 
         {mode === 'social' && isLoggedIn && !joinGroupId && (
-          <motion.div key="social" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key="social" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <SocialLayout />
           </motion.div>
         )}
 
         {mode === 'fileshare' && !joinGroupId && (
-          <motion.div key="fileshare" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key="fileshare" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <FileShareLayout />
           </motion.div>
         )}
 
         {mode === 'admin' && !joinGroupId && (
-          <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key="admin" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <AdminPanel onClose={() => setMode('hub')} />
           </motion.div>
         )}

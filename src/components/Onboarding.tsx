@@ -480,7 +480,7 @@ export const Onboarding = () => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4 md:p-6 bg-bg-light relative overflow-hidden">
+    <div className="flex flex-col items-center justify-center h-full p-4 md:p-6 bg-bg-light relative overflow-hidden">
       {/* Background Decorative Elements */}
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
         <div className="absolute -top-24 -left-24 size-64 md:size-96 bg-primary/10 blur-[80px] md:blur-[100px] rounded-full" />

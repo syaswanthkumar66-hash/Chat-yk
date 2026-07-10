@@ -10,6 +10,12 @@ export class CryptoService {
   private currentUserId: string | null = null;
   private derivedKeys: Map<string, CryptoKey> = new Map();
 
+  clearState() {
+    this.keyPair = null;
+    this.currentUserId = null;
+    this.derivedKeys.clear();
+  }
+
   async initKeys(userId?: string) {
     const activeUserId = userId || auth.currentUser?.uid || "default_user";
     if (this.keyPair && this.currentUserId === activeUserId) return;

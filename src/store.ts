@@ -711,6 +711,7 @@ export const useAppStore = create<AppState>((set) => ({
       isLoggedIn: false, 
       mode: 'hub', 
       user: null, 
+      users: [],
       chats: [],
       authMethod: null,
       wssStatus: 'disconnected',
@@ -723,7 +724,37 @@ export const useAppStore = create<AppState>((set) => ({
       removedFriendIds: [],
       groupJoinRequests: [], 
       offlineMessageQueue: [],
-      socket: null 
+      socket: null,
+      typingUsers: {},
+      onlineUserIds: [],
+      incomingMediaUploads: {},
+      notifications: [],
+      activeChatId: null,
+      activeRecipientId: null,
+      activeDeviceId: null,
+      viewingUserId: null,
+      activeGroupInfoId: null,
+      joinGroupId: null,
+      deletedMsgIds: [],
+      globallyDeletedIds: [],
+      tempMessages: [],
+      inAppToasts: [],
+      cloudSyncStatus: null,
+      backendSyncStatus: 'idle',
+      backendSyncProgress: 0,
+      selfTypingChats: {},
+      isSyncing: false,
+      onlineDevices: []
+    });
+
+    // Clear crypto service session keys
+    import('./services/cryptoService').then(({ cryptoService }) => {
+      cryptoService.clearState();
+    });
+
+    // Cleanup device sync state
+    import('./services/deviceSyncService').then(({ deviceSyncService }) => {
+      deviceSyncService.cleanup();
     });
   },
   switchAccount: async (userId) => {
@@ -735,15 +766,13 @@ export const useAppStore = create<AppState>((set) => ({
       return;
     }
 
+    // Explicitly logout first to fully purge the in-memory state of the previous account
+    const state = useAppStore.getState();
+    state.logout();
+
     // Set scoped Firebase first
     const { setScopedUserInstance } = await import('./firebase');
     setScopedUserInstance(targetAccount.id);
-
-    // Disconnect old socket
-    const state = useAppStore.getState();
-    if (state.socket) {
-      state.socket.disconnect();
-    }
 
     // Construct profile and call login to re-read per-user localized cache
     const userProfile = {
@@ -1340,11 +1369,13 @@ export const useAppStore = create<AppState>((set) => ({
 
       // 5. online_users
       sock.off('online_users').on('online_users', (onlineUserIds: string[]) => {
-        set({ onlineUserIds });
-        const state = useAppStore.getState();
-        state.users.forEach(u => {
-          state.updateUserByAdmin(u.id, { isOnline: onlineUserIds.includes(u.id) });
-        });
+        set((state) => ({
+          onlineUserIds,
+          users: state.users.map(u => ({
+            ...u,
+            isOnline: onlineUserIds.includes(u.id)
+          }))
+        }));
       });
 
       // 6. receive_message
@@ -2758,7 +2789,8 @@ export function mergeCloudSyncPayload(payload: any, userId: string) {
   const userMap = new Map<string, any>();
   existingUsers.forEach((u: any) => userMap.set(u.id, u));
   incomingUsers.forEach((u: any) => userMap.set(u.id, u));
-  const mergedUsers = Array.from(userMap.values());
+  const currentOnlineUserIds = useAppStore.getState().onlineUserIds || [];
+  const mergedUsers = Array.from(userMap.values()).map(u => ({ ...u, isOnline: currentOnlineUserIds.includes(u.id) }));
   saveLocalJSON(`proto_users_${userId}`, mergedUsers);
   
   useAppStore.setState({ users: mergedUsers });

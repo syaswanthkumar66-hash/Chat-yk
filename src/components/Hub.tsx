@@ -8,9 +8,9 @@ export const Hub = () => {
   const logout = useAppStore(state => state.logout);
 
   return (
-    <div className="min-h-screen bg-bg-light text-slate-900 overflow-hidden flex flex-col md:flex-row">
+    <div className="h-full bg-bg-light text-slate-900 overflow-hidden flex flex-col md:flex-row">
       {/* Left Pane - Branding & Intro */}
-      <div className="flex-1 p-8 md:p-20 flex flex-col justify-between relative overflow-hidden border-b md:border-b-0 md:border-r border-primary/10">
+      <div className="flex-1 p-8 pt-[max(2rem,env(safe-area-inset-top))] md:p-20 flex flex-col justify-between relative overflow-hidden border-b md:border-b-0 md:border-r border-primary/10">
         <div className="relative z-10">
           <div className="flex items-center justify-between mb-10 md:mb-16">
             <div className="flex items-center gap-3">
@@ -82,7 +82,7 @@ export const Hub = () => {
       </div>
 
       {/* Right Pane - Navigation Options */}
-      <div className="flex-1 p-8 md:p-20 flex flex-col justify-center gap-6 md:gap-8 bg-white/40 backdrop-blur-sm">
+      <div className="flex-1 p-8 pb-[max(2rem,env(safe-area-inset-bottom))] md:p-20 flex flex-col justify-center gap-6 md:gap-8 bg-white/40 backdrop-blur-sm">
         <div className="mb-4 md:mb-8">
           <h2 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.5em] text-slate-300">Select Protocol</h2>
           <div className="h-px w-10 md:w-12 bg-primary mt-3 md:mt-4" />

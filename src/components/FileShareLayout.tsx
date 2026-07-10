@@ -79,7 +79,7 @@ export const FileShareLayout = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-bg-light overflow-hidden">
+    <div className="flex flex-col h-full bg-bg-light overflow-hidden">
       <AnimatePresence>
         {showGlobalSearch && (
           <GlobalSearch onClose={() => setShowGlobalSearch(false)} />
@@ -94,7 +94,7 @@ export const FileShareLayout = () => {
         )}
       </AnimatePresence>
       {/* Header */}
-      <header className="px-6 py-4 flex items-center justify-between bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-30">
+      <header className="px-6 pt-[max(1rem,env(safe-area-inset-top))] pb-4 flex items-center justify-between bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-30">
         <div className="flex items-center gap-4">
           <button onClick={() => setMode('hub')} className="size-11 rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm">
             <Icon name="grid_view" />
@@ -645,7 +645,7 @@ export const FileShareLayout = () => {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex justify-around py-4 sticky bottom-0 z-30">
+      <nav className="bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex justify-around pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sticky bottom-0 z-30">
         {[
           { id: 'devices', icon: 'devices', label: 'Devices' },
           { id: 'transfers', icon: 'sync_alt', label: 'Sync' },

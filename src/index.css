@@ -56,7 +56,7 @@
 @layer base {
   body {
     background: var(--color-bg-light);
-    @apply text-slate-900 antialiased font-sans min-h-screen;
+    @apply text-slate-900 antialiased font-sans min-h-[100dvh];
   }
   
   .dark body {
