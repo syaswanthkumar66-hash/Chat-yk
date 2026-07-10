@@ -18,8 +18,13 @@ export function NotificationPrompt() {
     if (typeof window === 'undefined') return;
     if (!('Notification' in window)) return;
     
-    // Do not automatically show the prompt. 
-    // It should only be triggered manually from settings or specific user actions.
+    if (user && Notification.permission === 'default' && !localStorage.getItem('notification_prompt_dismissed')) {
+      // Auto-show prompt after 2 seconds to not interrupt login flow
+      const timer = setTimeout(() => {
+        setStatus('request');
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
   }, [user]);
 
   const handleAllow = async () => {
