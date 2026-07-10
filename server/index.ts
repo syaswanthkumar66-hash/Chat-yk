@@ -234,8 +234,12 @@ async function initVapid() {
             }
           }
         }
-      } catch (err) {
-        console.warn("Could not load VAPID keys from Firestore:", err);
+      } catch (err: any) {
+        if (err.message?.includes('PERMISSION_DENIED')) {
+          console.log("Note: Running without Firestore VAPID keys access (expected in agent workspace or missing FIREBASE_CONFIG).");
+        } else {
+          console.warn("Could not load VAPID keys from Firestore:", err.message);
+        }
       }
     }
 
@@ -682,10 +686,7 @@ app.use((req, res, next) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, callback) => {
-      // Echo back the requesting origin or default to "*"
-      callback(null, origin || "*");
-    },
+    origin: true,
     methods: ["GET", "POST"],
     credentials: true
   }

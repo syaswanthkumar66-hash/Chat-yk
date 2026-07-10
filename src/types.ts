@@ -1,3 +1,19 @@
+export enum FileTransferError {
+  UPLOAD_NETWORK_ERROR = 'UPLOAD_NETWORK_ERROR',
+  UPLOAD_SERVER_ERROR = 'UPLOAD_SERVER_ERROR',
+  UPLOAD_QUOTA_EXCEEDED = 'UPLOAD_QUOTA_EXCEEDED',
+  ENCRYPT_KEY_MISSING = 'ENCRYPT_KEY_MISSING',
+  ENCRYPT_FAILED = 'ENCRYPT_FAILED',
+  DOWNLOAD_NETWORK_ERROR = 'DOWNLOAD_NETWORK_ERROR',
+  DOWNLOAD_SERVER_ERROR = 'DOWNLOAD_SERVER_ERROR',
+  DOWNLOAD_NOT_FOUND = 'DOWNLOAD_NOT_FOUND',
+  DECRYPT_KEY_MISSING = 'DECRYPT_KEY_MISSING',
+  DECRYPT_FAILED = 'DECRYPT_FAILED',
+  DECOMPRESS_FAILED = 'DECOMPRESS_FAILED',
+  RENDER_FAILED = 'RENDER_FAILED',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
 export interface User {
   id: string;
   name: string;
@@ -22,6 +38,8 @@ export interface Message {
   encryptedFileKey?: number[];
   iv?: number[];
   status?: 'sent' | 'delivered' | 'read' | 'pending' | 'uploading' | 'downloading' | 'failed';
+  errorCode?: string;
+  errorMessage?: string;
   uploadProgress?: number;
   downloadProgress?: number;
   fileInfo?: {

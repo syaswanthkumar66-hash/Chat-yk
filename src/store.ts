@@ -218,7 +218,7 @@ interface AppState {
   sendMessage: (chatId: string | null, recipientId: string | null, text: string, type?: Message['type'], fileUrl?: string, fileSize?: string, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean, customId?: string) => void;
   updateMessageFileUrl: (messageId: string, fileUrl: string, fileSize?: string) => void;
   addPendingMessage: (chatId: string | null, recipientId: string | null, message: Message) => void;
-  updateMessageProgress: (messageId: string, progress: number, status?: Message['status']) => void;
+  updateMessageProgress: (messageId: string, progress: number, status?: Message['status'], errorCode?: string) => void;
   deletedMsgIds: string[];
   globallyDeletedIds: string[];
   deleteMessageLocally: (messageId: string) => void;
@@ -2535,14 +2535,15 @@ export const useAppStore = create<AppState>((set) => ({
     }
     return { chats: updatedChats };
   }),
-  updateMessageProgress: (messageId, progress, status) => set((state) => {
+  updateMessageProgress: (messageId, progress, status, errorCode) => set((state) => {
     return {
       chats: state.chats.map(c => ({
         ...c,
         messages: c.messages?.map(m => m.id === messageId ? {
           ...m,
           uploadProgress: progress,
-          status: status || m.status
+          status: status || m.status,
+          errorCode: errorCode || m.errorCode
         } : m) || []
       }))
     };
