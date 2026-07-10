@@ -2104,23 +2104,38 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   app.get("/api/webrtc/config", (req, res) => {
     res.json({
       iceServers: [
+        // STUN servers allow direct peer-to-peer connections for most NAT types
+        // with zero relay cost. Always prioritize STUN to avoid unnecessary latency.
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:openrelay.metered.ca:80' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        
+        // TURN relays are used ONLY when direct connection fails (symmetric NAT, strict firewalls).
+        // Try dedicated production credentials first if provided via environment variables.
+        // Otherwise, fall back to a free public TURN relay for demo purposes.
+        // WARNING: Free public TURN relays (like metered.ca openrelay) are shared, 
+        // rate-limited, best-effort services and are NOT reliable for production load.
+        // Configure your own dedicated TURN provider (e.g. Twilio, Metered paid tier) for reliability.
         { 
           urls: process.env.TURN_SERVER_URL || 'turn:openrelay.metered.ca:80?transport=udp', 
           username: process.env.TURN_SERVER_USERNAME || 'openrelayproject', 
           credential: process.env.TURN_SERVER_PASSWORD || 'openrelayproject' 
         },
-        { 
-          urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
-          username: 'openrelayproject', 
-          credential: 'openrelayproject' 
-        },
-        { 
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp', 
-          username: 'openrelayproject', 
-          credential: 'openrelayproject' 
-        }
+        // Additional fallbacks for the public relay using TCP in case UDP is blocked
+        ...(process.env.TURN_SERVER_URL ? [] : [
+          { 
+            urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
+            username: 'openrelayproject', 
+            credential: 'openrelayproject' 
+          },
+          { 
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp', 
+            username: 'openrelayproject', 
+            credential: 'openrelayproject' 
+          }
+        ])
       ]
     });
   });
