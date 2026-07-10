@@ -1218,6 +1218,8 @@ export const useAppStore = create<AppState>((set) => ({
             const isGrp = chatObj?.isGroup;
             if (isGrp && chatObj?.participants) {
               sock.emit('send_message', {
+                id: msg.id,
+                messageId: msg.id,
                 groupId: msg.chatId,
                 text: msg.e2eData ? msg.e2eData.encryptedText : msg.text,
                 type: msg.type,
@@ -1231,6 +1233,8 @@ export const useAppStore = create<AppState>((set) => ({
               const targetId = msg.recipientId || chatObj?.participants.find(p => p.id !== activeState.user?.id)?.id;
               if (targetId) {
                 sock.emit('send_message', {
+                  id: msg.id,
+                  messageId: msg.id,
                   recipientId: targetId,
                   text: msg.e2eData ? msg.e2eData.encryptedText : msg.text,
                   type: msg.type,
@@ -2315,6 +2319,7 @@ export const useAppStore = create<AppState>((set) => ({
       if (isGroup && chat?.participants) {
         state.socket.emit('send_message', {
           id: newMessage.id,
+          messageId: newMessage.id,
           groupId: chatId,
           text: e2eData ? e2eData.encryptedText : text,
           type,
@@ -2329,6 +2334,7 @@ export const useAppStore = create<AppState>((set) => ({
         if (targetId) {
           state.socket.emit('send_message', {
             id: newMessage.id,
+            messageId: newMessage.id,
             recipientId: targetId,
             text: e2eData ? e2eData.encryptedText : text,
             type,

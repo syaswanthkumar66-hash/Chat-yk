@@ -118,7 +118,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
       }
 
       // If it is a local blob URL or not encrypted, set the URL directly and bypass decryption
-      if (targetUrl.startsWith('blob:') || !msg.encryptedFileKey) {
+      if (targetUrl.startsWith('blob:') || !msg.isE2E) {
         if (msg.type === 'audio' && !targetUrl.startsWith('blob:')) {
           try {
             const { voiceNoteCache } = await import('../services/voiceNoteCache');
@@ -184,6 +184,10 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
           throw new Error("Could not resolve remote public key for decryption");
         }
 
+        if (!msg.iv) {
+          throw new Error("Missing IV for decryption");
+        }
+
         sharedSecret = await cryptoService.deriveSharedSecret(remoteId, pubKeyBase64);
 
         const decryptedBlob = await cryptoService.decryptFile(encryptedBlob, msg.iv, sharedSecret, msg.type === 'audio' ? 'audio/webm' : (msg.type === 'file' ? 'application/octet-stream' : 'image/jpeg'));
@@ -212,7 +216,7 @@ const DecryptedMedia = ({ msg, isOwn, onPreview }: { msg: any; isOwn: boolean; o
     };
     fetchDecrypted();
     return () => { active = false; };
-  }, [msg.fileUrl, msg.url, msg.encryptedFileKey, msg.iv, isOwn, msg.recipientId, msg.senderId, msg.id, msg.type, retryKey]);
+  }, [msg.fileUrl, msg.url, msg.isE2E, msg.iv, isOwn, msg.recipientId, msg.senderId, msg.id, msg.type, retryKey]);
 
   useEffect(() => {
     if (msg.type === 'audio' && msg.fileSize && msg.fileSize.includes('|')) {

@@ -1342,7 +1342,7 @@ export default function App() {
       </div>
 
       {isLoggedIn && <NotificationPrompt />}
-      {isLoggedIn && <QuickProfileSwitcher />}
+      {isLoggedIn && onlineDevices.length > 1 && (backendSyncStatus === 'mismatch' || backendSyncStatus === 'syncing' || backendSyncStatus === 'checking') && <QuickProfileSwitcher />}
     </div>
   );
 }
