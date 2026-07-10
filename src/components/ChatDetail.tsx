@@ -477,6 +477,7 @@ export const ChatDetail = () => {
     setActiveGroupInfoId,
     chats,
     typingUsers,
+    incomingMediaUploads,
     selfTypingChats,
     sendMessage,
     users,
@@ -500,6 +501,7 @@ export const ChatDetail = () => {
     setActiveGroupInfoId: s.setActiveGroupInfoId,
     chats: s.chats,
     typingUsers: s.typingUsers,
+    incomingMediaUploads: s.incomingMediaUploads,
     selfTypingChats: s.selfTypingChats,
     sendMessage: s.sendMessage,
     users: s.users,
@@ -1010,11 +1012,29 @@ export const ChatDetail = () => {
             formData.append('file', uploadBlob, filename);
             if (user?.id) formData.append('userId', user.id);
 
+            let lastSentPercent = -10;
+
             xhr.upload.addEventListener('progress', (e) => {
               if (e.lengthComputable) {
                 const percent = Math.round((e.loaded / e.total) * 100);
                 // Update progress in global state
                 useAppStore.getState().updateMessageProgress(generatedMessageId, percent, 'uploading');
+
+                // Throttled progress event emit
+                if (percent - lastSentPercent >= 10 || percent === 100) {
+                  lastSentPercent = percent;
+                  const socket = useAppStore.getState().socket;
+                  if (socket && socket.connected) {
+                    socket.emit('media_upload_progress', {
+                      recipientId: isGroup ? undefined : targetId,
+                      groupId: isGroup ? chat?.id : undefined,
+                      messageId: generatedMessageId,
+                      percent,
+                      mediaType: media.type,
+                      fileName: media.type === 'file' ? media.name : undefined
+                    });
+                  }
+                }
               }
             });
 
@@ -1273,6 +1293,33 @@ export const ChatDetail = () => {
       return 'Typing...';
     }
   }, [typingUsersInChat, chat?.isGroup]);
+
+  const activeUploads = useMemo(() => {
+    const currentChatUploads: Array<{ senderId: string; senderName: string; percent: number; mediaType: string; fileName?: string; messageId: string }> = [];
+    if (!chat) return currentChatUploads;
+
+    if (chat.isGroup) {
+      chat.participants.forEach(p => {
+        if (p.id !== user?.id && incomingMediaUploads?.[p.id]) {
+          currentChatUploads.push({
+            senderId: p.id,
+            senderName: p.name,
+            ...incomingMediaUploads[p.id]
+          });
+        }
+      });
+    } else {
+      const partnerId = activeRecipientId || chat.participants.find(p => p.id !== user?.id)?.id;
+      if (partnerId && incomingMediaUploads?.[partnerId]) {
+        currentChatUploads.push({
+          senderId: partnerId,
+          senderName: chat.participants.find(p => p.id === partnerId)?.name || 'Friend',
+          ...incomingMediaUploads[partnerId]
+        });
+      }
+    }
+    return currentChatUploads;
+  }, [chat, activeRecipientId, incomingMediaUploads, user?.id]);
 
   return (
     <div className="flex flex-col h-screen bg-bg-light relative overflow-hidden">
@@ -1842,6 +1889,49 @@ export const ChatDetail = () => {
                 );
               })}
               
+              {activeUploads.map((upload) => {
+                let iconName = 'insert_drive_file';
+                let typeText = 'file';
+                if (upload.mediaType === 'audio') {
+                  iconName = 'mic';
+                  typeText = 'voice note';
+                } else if (upload.mediaType === 'image') {
+                  iconName = 'image';
+                  typeText = 'photo';
+                } else if (upload.mediaType === 'video') {
+                  iconName = 'videocam';
+                  typeText = 'video';
+                }
+
+                const fileLabel = upload.fileName || typeText;
+
+                return (
+                  <div key={`upload-${upload.senderId}-${upload.messageId}`} className="flex flex-col gap-1.5 max-w-[85%] self-start items-start text-xs font-semibold text-slate-500">
+                    <div className="flex items-end gap-2">
+                      <div className="px-4 py-3 rounded-[1.5rem] bg-white rounded-tl-none border border-slate-100 shadow-sm flex items-center gap-3">
+                        <div className="relative flex items-center justify-center">
+                          <div className="size-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                          <div className="absolute flex items-center justify-center">
+                            <Icon name={iconName} className="text-[10px] text-primary" />
+                          </div>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-medium text-slate-700 leading-tight">
+                            {chat?.isGroup && (
+                              <span className="font-bold text-primary mr-1">{upload.senderName}:</span>
+                            )}
+                            Sending {fileLabel}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono mt-0.5">
+                            Progress: {upload.percent}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
               {(() => {
                 const partnerId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
                 if (partnerId && typingUsers[partnerId]) {

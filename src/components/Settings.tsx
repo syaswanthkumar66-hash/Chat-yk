@@ -2098,33 +2098,6 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
               </div>
             </div>
 
-            {/* Cloud Integrity Auditor Callout */}
-            <div className="p-5 bg-slate-900 text-white rounded-3xl border border-slate-800 space-y-4">
-              <div className="flex gap-3">
-                <div className="size-10 rounded-2xl bg-white/10 flex items-center justify-center text-primary shrink-0">
-                  <Icon name="verified_user" className="text-xl" />
-                </div>
-                <div className="text-left">
-                  <h4 className="text-xs font-black uppercase tracking-widest text-white">State Integrity Auditor</h4>
-                  <p className="text-[10px] text-slate-300 leading-normal mt-1">
-                    Is your data out of sync across devices? Force audit checks, compare database item counts, and resolve conflicts instantly with our bidirectional merge algorithms.
-                  </p>
-                </div>
-              </div>
-              
-              <button 
-                onClick={() => {
-                  onClose(); // Close settings to see the overlay cleanly
-                  setTimeout(() => {
-                    (window as any).__openSyncAuditModal?.();
-                  }, 200);
-                }}
-                className="w-full py-3.5 px-4 bg-primary text-white rounded-2xl hover:bg-primary-hover active:scale-98 transition-all font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
-              >
-                <Icon name="radar" />
-                <span>Launch Deep Sync Auditor</span>
-              </button>
-            </div>
           </div>
         );
       default:

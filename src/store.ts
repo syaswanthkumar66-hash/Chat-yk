@@ -145,6 +145,13 @@ interface AppState {
   setChats: (chats: Chat[]) => void;
   typingUsers: Record<string, boolean>;
   setTypingUser: (userId: string, isTyping: boolean) => void;
+  incomingMediaUploads: Record<string, {
+    percent: number;
+    mediaType: string;
+    fileName?: string;
+    messageId: string;
+  }>;
+  setIncomingMediaUpload: (senderId: string, data: { percent: number; mediaType: string; fileName?: string; messageId: string } | null) => void;
   activeGroupCall: { type: 'voice' | 'video', groupId?: string, userId?: string } | null;
   setActiveGroupCall: (call: { type: 'voice' | 'video', groupId?: string, userId?: string } | null) => void;
   blockedUserIds: string[];
@@ -226,6 +233,12 @@ interface AppState {
   removeInAppToast: (id: string) => void;
   cloudSyncStatus: 'syncing' | 'synced' | null;
   setCloudSyncStatus: (status: 'syncing' | 'synced' | null) => void;
+  backendSyncStatus: 'idle' | 'checking' | 'mismatch' | 'syncing' | 'done' | 'error';
+  backendSyncProgress: number;
+  setBackendSyncStatus: (status: 'idle' | 'checking' | 'mismatch' | 'syncing' | 'done' | 'error') => void;
+  setBackendSyncProgress: (progress: number) => void;
+  reportFingerprint: () => void;
+  resolveSyncMismatch: () => Promise<void>;
   devices: Device[];
   transfers: Transfer[];
   acceptTransfer: (transferId: string) => void;
@@ -275,6 +288,7 @@ export const generateInitialsAvatar = (id: string, name: string): string => {
 let pendingStatusUpdates: Record<string, boolean> = {};
 let statusThrottleTimeout: any = null;
 let typingDebounceTimeouts: Record<string, any> = {};
+let mediaUploadStaleTimeouts: Record<string, any> = {};
 
 export const DEFAULT_PRESETS: UserProfile[] = [];
 
@@ -860,6 +874,7 @@ export const useAppStore = create<AppState>((set) => ({
     } finally {
       (window as any).__catchUpSyncInFlight = false;
       set({ isSyncing: false });
+      useAppStore.getState().reportFingerprint();
     }
   },
   socket: null,
@@ -869,6 +884,62 @@ export const useAppStore = create<AppState>((set) => ({
   inAppToasts: [],
   cloudSyncStatus: null,
   setCloudSyncStatus: (status) => set({ cloudSyncStatus: status }),
+  backendSyncStatus: 'idle',
+  backendSyncProgress: 0,
+  setBackendSyncStatus: (status) => set({ backendSyncStatus: status }),
+  setBackendSyncProgress: (progress) => set({ backendSyncProgress: progress }),
+  reportFingerprint: () => {
+    const state = useAppStore.getState();
+    if (state.socket && state.socket.connected && state.user) {
+      const fingerprint = calculateLocalChatFingerprint();
+      console.log("[Sync-Check] Reporting fingerprint to backend:", fingerprint);
+      state.socket.emit("report_fingerprint", { fingerprint });
+    }
+  },
+  resolveSyncMismatch: async () => {
+    const state = useAppStore.getState();
+    const userId = state.user?.id;
+    if (!userId) return;
+
+    set({ backendSyncStatus: 'syncing', backendSyncProgress: 10 });
+
+    try {
+      const { db, doc, getDoc } = await import('./firebase');
+      const syncDocRef = doc(db, 'cloud_syncs', userId);
+      
+      set({ backendSyncProgress: 35 });
+      const syncSnapshot = await getDoc(syncDocRef);
+      
+      set({ backendSyncProgress: 60 });
+      if (syncSnapshot.exists()) {
+        const syncData = syncSnapshot.data();
+        if (syncData) {
+          set({ backendSyncProgress: 80 });
+          const { mergeCloudSyncPayload } = await import('./store');
+          mergeCloudSyncPayload(syncData, userId);
+          
+          set({ backendSyncProgress: 95 });
+          const storageKey = `proto_last_synced_at_${userId}`;
+          localStorage.setItem(storageKey, syncData.lastUpdated || new Date().toISOString());
+          (window as any).__lastUploadedSyncTime = syncData.lastUpdated;
+          
+          state.reportFingerprint();
+        }
+      }
+      
+      set({ backendSyncProgress: 100, backendSyncStatus: 'done' });
+      
+      setTimeout(() => {
+        if (useAppStore.getState().backendSyncStatus === 'done') {
+          set({ backendSyncStatus: 'idle', backendSyncProgress: 0 });
+        }
+      }, 2000);
+
+    } catch (err) {
+      console.error("[Sync-Check] Failed to resolve mismatch:", err);
+      set({ backendSyncStatus: 'error', backendSyncProgress: 0 });
+    }
+  },
   addInAppToast: (toast) => set((state) => {
     const id = `toast-${Math.random().toString(36).substr(2, 9)}`;
     return {
@@ -884,7 +955,23 @@ export const useAppStore = create<AppState>((set) => ({
       return;
     }
 
-    const targetUrl = BACKEND_URL || window.location.origin;
+    let targetUrl = BACKEND_URL;
+    if (!targetUrl && typeof window !== 'undefined' && window.location) {
+      if (window.location.origin && window.location.origin !== 'null') {
+        targetUrl = window.location.origin;
+      } else {
+        try {
+          const href = window.location.href;
+          if (href && href.startsWith('http')) {
+            targetUrl = new URL(href).origin;
+          }
+        } catch (_) {}
+      }
+    }
+    if (!targetUrl) {
+      targetUrl = window.location.origin || '';
+    }
+
     state.addConnectionLog(`Initializing connection to backend server at: ${targetUrl}`);
     set({ wssStatus: 'connecting', wssMessage: 'Initializing connection...' });
 
@@ -1050,7 +1137,8 @@ export const useAppStore = create<AppState>((set) => ({
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
-      transports: ["websocket"],
+      transports: ["polling", "websocket"],
+      withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -1257,6 +1345,17 @@ export const useAppStore = create<AppState>((set) => ({
 
       // 6. receive_message
       sock.off('receive_message').on('receive_message', async (data: { id?: string, messageId?: string, groupId?: string, senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[], recipientId?: string }) => {
+        // Clear any incoming media upload progress indicator for this sender immediately
+        if (mediaUploadStaleTimeouts[data.senderId]) {
+          clearTimeout(mediaUploadStaleTimeouts[data.senderId]);
+          delete mediaUploadStaleTimeouts[data.senderId];
+        }
+        set((currentState) => {
+          const nextUploads = { ...currentState.incomingMediaUploads };
+          delete nextUploads[data.senderId];
+          return { incomingMediaUploads: nextUploads };
+        });
+
         const state = useAppStore.getState();
         const { cryptoService } = await import('./services/cryptoService');
         
@@ -1432,6 +1531,33 @@ export const useAppStore = create<AppState>((set) => ({
         debounceTypingState(data.senderId, false);
       });
 
+      // 13b. media_upload_progress
+      sock.off('media_upload_progress').on('media_upload_progress', (data: { senderId: string, percent: number, mediaType: string, fileName?: string, messageId: string }) => {
+        if (mediaUploadStaleTimeouts[data.senderId]) {
+          clearTimeout(mediaUploadStaleTimeouts[data.senderId]);
+        }
+        
+        mediaUploadStaleTimeouts[data.senderId] = setTimeout(() => {
+          set((currentState) => {
+            const nextUploads = { ...currentState.incomingMediaUploads };
+            delete nextUploads[data.senderId];
+            return { incomingMediaUploads: nextUploads };
+          });
+        }, 15000);
+
+        set((currentState) => ({
+          incomingMediaUploads: {
+            ...currentState.incomingMediaUploads,
+            [data.senderId]: {
+              percent: data.percent,
+              mediaType: data.mediaType,
+              fileName: data.fileName,
+              messageId: data.messageId
+            }
+          }
+        }));
+      });
+
       // 14. sync_chat_read
       sock.off('sync_chat_read').on('sync_chat_read', (data: { chatId: string }) => {
         set((currentState) => ({
@@ -1485,6 +1611,9 @@ export const useAppStore = create<AppState>((set) => ({
                 localStorage.setItem(storageKey, syncData.lastUpdated || new Date().toISOString());
                 (window as any).__lastUploadedSyncTime = syncData.lastUpdated;
                 
+                // Report fingerprint after successful background merge
+                useAppStore.getState().reportFingerprint();
+                
                 if (hasOtherOnlineDevice) {
                   useAppStore.getState().setCloudSyncStatus('synced');
                   setTimeout(() => {
@@ -1502,6 +1631,26 @@ export const useAppStore = create<AppState>((set) => ({
             if (hasOtherOnlineDevice) {
                useAppStore.getState().setCloudSyncStatus(null);
             }
+          }
+        }
+      });
+
+      // 18. sync_check_result
+      sock.off('sync_check_result').on('sync_check_result', (data: { status: 'mismatch' | 'synced' | 'no_peer' }) => {
+        console.log('[sync_check_result] Received result:', data);
+        const state = useAppStore.getState();
+        if (data.status === 'mismatch') {
+          if (state.backendSyncStatus !== 'syncing' && state.backendSyncStatus !== 'done') {
+            useAppStore.setState({ backendSyncStatus: 'mismatch' });
+            state.resolveSyncMismatch();
+          }
+        } else if (data.status === 'synced') {
+          if (state.backendSyncStatus !== 'syncing') {
+            useAppStore.setState({ backendSyncStatus: 'idle' });
+          }
+        } else if (data.status === 'no_peer') {
+          if (state.backendSyncStatus !== 'syncing') {
+            useAppStore.setState({ backendSyncStatus: 'idle' });
           }
         }
       });
@@ -1735,6 +1884,16 @@ export const useAppStore = create<AppState>((set) => ({
   setChats: (chats) => set({ chats }),
   typingUsers: {},
   setTypingUser: (userId, isTyping) => set(state => ({ typingUsers: { ...state.typingUsers, [userId]: isTyping } })),
+  incomingMediaUploads: {},
+  setIncomingMediaUpload: (senderId, data) => set(state => {
+    const nextUploads = { ...state.incomingMediaUploads };
+    if (data === null) {
+      delete nextUploads[senderId];
+    } else {
+      nextUploads[senderId] = data;
+    }
+    return { incomingMediaUploads: nextUploads };
+  }),
   selfTypingChats: {},
   setSelfTypingChat: (key, isTyping) => set(state => ({ selfTypingChats: { ...state.selfTypingChats, [key]: isTyping } })),
   isSyncing: false,
@@ -2493,12 +2652,38 @@ export const triggerCloudAutoSync = (userId: string) => {
       // Notify other active sessions of the same account via websocket so they pull immediately
       if (store.socket && store.socket.connected) {
         store.socket.emit('notify_cloud_sync');
+        store.reportFingerprint();
       }
     } catch (err) {
       console.warn("[Auto-Sync] Failed to push update to Firestore:", err);
     }
   }, 3000); // Debounce by 3 seconds
 };
+
+export function calculateLocalChatFingerprint(): string {
+  const state = useAppStore.getState();
+  const chats = state.chats || [];
+  
+  const sortedChats = [...chats].sort((a, b) => a.id.localeCompare(b.id));
+  const chatParts = sortedChats.map(c => {
+    const messages = c.messages || [];
+    const sortedMessages = [...messages].sort((a, b) => {
+      const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return aTime - bTime;
+    });
+    const messagePart = sortedMessages.map((m: any) => `${m.id}:${m.senderId}:${m.text ? m.text.slice(0, 15) : ''}`).join('|');
+    return `${c.id}:${messages.length}:${messagePart}`;
+  });
+
+  const canonicalString = `CHATS:[${chatParts.join(';')}]`;
+
+  let hash = 5381;
+  for (let i = 0; i < canonicalString.length; i++) {
+    hash = (hash * 33) ^ canonicalString.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
 
 export function mergeCloudSyncPayload(payload: any, userId: string) {
   if (!userId) return;

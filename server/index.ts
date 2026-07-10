@@ -682,8 +682,12 @@ app.use((req, res, next) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: (origin, callback) => {
+      // Echo back the requesting origin or default to "*"
+      callback(null, origin || "*");
+    },
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -1002,6 +1006,33 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("media_upload_progress", (data) => {
+      const { recipientId, groupId, messageId, percent, mediaType, fileName } = data;
+      const senderId = (socket as any).userId;
+      if (!senderId) return;
+
+      const progressPayload = {
+        senderId,
+        recipientId,
+        groupId,
+        messageId,
+        percent,
+        mediaType,
+        fileName
+      };
+
+      if (groupId) {
+        socket.to(`group-${groupId}`).emit("media_upload_progress", progressPayload);
+      } else if (recipientId) {
+        const targetDevices = users.get(recipientId);
+        if (targetDevices) {
+          for (const socketId of targetDevices.values()) {
+            io.to(socketId).emit("media_upload_progress", progressPayload);
+          }
+        }
+      }
+    });
+
     socket.on("message_reaction", (data) => {
       const { messageId, chatId, emoji, recipientId, groupId } = data;
       const senderId = (socket as any).userId;
@@ -1080,6 +1111,51 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             io.to(socketId).emit("cloud_sync_triggered", { lastUpdated: new Date().toISOString() });
           }
         }
+      }
+    });
+
+    socket.on("report_fingerprint", (data: { fingerprint: string }) => {
+      const senderId = (socket as any).userId;
+      const originDeviceId = (socket as any).deviceId;
+      if (!senderId) return;
+
+      (socket as any).fingerprint = data.fingerprint;
+      console.log(`[report_fingerprint] User ${senderId} device ${originDeviceId} reported fingerprint: ${data.fingerprint}`);
+
+      const senderDevices = users.get(senderId);
+      if (senderDevices && senderDevices.size > 1) {
+        const fingerprints = new Map<string, string>();
+        const socketIds = new Map<string, string>();
+
+        for (const [devId, socketId] of senderDevices.entries()) {
+          const s = io.sockets.sockets.get(socketId);
+          if (s && (s as any).fingerprint) {
+            fingerprints.set(devId, (s as any).fingerprint);
+            socketIds.set(devId, socketId);
+          }
+        }
+
+        if (fingerprints.size > 1) {
+          const fps = Array.from(fingerprints.values());
+          const uniqueFps = new Set(fps);
+
+          if (uniqueFps.size > 1) {
+            console.log(`[sync_check] Fingerprint mismatch detected for user ${senderId}:`, Array.from(fingerprints.entries()));
+            for (const socketId of senderDevices.values()) {
+              io.to(socketId).emit("sync_check_result", { status: "mismatch" });
+            }
+          } else {
+            console.log(`[sync_check] All active devices of user ${senderId} are fully in sync.`);
+            for (const socketId of senderDevices.values()) {
+              io.to(socketId).emit("sync_check_result", { status: "synced" });
+            }
+          }
+        } else {
+          // Tell this socket we don't have enough reports yet, so keep quiet
+          socket.emit("sync_check_result", { status: "no_peer" });
+        }
+      } else {
+        socket.emit("sync_check_result", { status: "no_peer" });
       }
     });
 

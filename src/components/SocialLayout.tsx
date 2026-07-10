@@ -13,7 +13,6 @@ import { NotificationPanel } from './NotificationPanel';
 import { GroupCall } from './GroupCall';
 import { GroupInfo } from './GroupInfo';
 import { DeviceSyncFlow } from './DeviceSyncFlow';
-import { SyncAuditModal } from './SyncAuditModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, collection, query, where, getDocs, getDoc, doc } from '../firebase';
 
@@ -48,7 +47,6 @@ export const SocialLayout = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showDevicesDropdown, setShowDevicesDropdown] = useState(false);
   const [showDeviceSyncFlow, setShowDeviceSyncFlow] = useState(false);
-  const [showSyncAuditModal, setShowSyncAuditModal] = useState(false);
   const { 
     setMode, 
     activeChatId, 
@@ -133,14 +131,7 @@ export const SocialLayout = () => {
     }
   }, [user?.id, initSocket]);
 
-  useEffect(() => {
-    (window as any).__openSyncAuditModal = () => {
-      setShowSyncAuditModal(true);
-    };
-    return () => {
-      delete (window as any).__openSyncAuditModal;
-    };
-  }, []);
+
 
   const filteredChats = chats.filter(chat => {
     // Filter out blocked users
@@ -421,14 +412,7 @@ export const SocialLayout = () => {
                     <span>Scan Sync</span>
                   </button>
 
-                  <button 
-                    onClick={() => setShowSyncAuditModal(true)}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 text-emerald-700 font-bold text-[9px] uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
-                    title="Compare database hashes with other devices and find missing syncs"
-                  >
-                    <Icon name="verified_user" className="text-[11px]" />
-                    <span>Sync Audit</span>
-                  </button>
+
 
                   <button 
                     onClick={() => {
@@ -1174,19 +1158,7 @@ export const SocialLayout = () => {
         )}
       </AnimatePresence>
 
-      {/* Sync Audit Modal Overlay */}
-      <AnimatePresence>
-        {showSyncAuditModal && (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed inset-0 z-[150] bg-slate-950 flex flex-col"
-          >
-            <SyncAuditModal onClose={() => setShowSyncAuditModal(false)} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+
     </div>
   );
 };

@@ -436,6 +436,10 @@ export default function App() {
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const cloudSyncStatus = useAppStore((state) => state.cloudSyncStatus);
+  const onlineDevices = useAppStore((state) => state.onlineDevices);
+  const isWssConnected = useAppStore((state) => state.isWssConnected);
+  const backendSyncStatus = useAppStore((state) => state.backendSyncStatus);
+  const backendSyncProgress = useAppStore((state) => state.backendSyncProgress);
 
   useEffect(() => {
     // Run startup session integrity and cryptographic verification
@@ -1044,6 +1048,27 @@ export default function App() {
     });
   }, [chats, blockedUserIds, removedFriendIds, isLoggedIn, user?.id, autoSyncEnabled]);
 
+  // Periodically check and report fingerprint for backend-verified sync checking
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id) return;
+    const store = useAppStore.getState();
+    if (!store.socket || !store.isWssConnected) return;
+
+    // Report fingerprint immediately on load/reconnect
+    store.reportFingerprint();
+
+    // Set up periodic sync checks every 15 seconds if other devices are online
+    const interval = setInterval(() => {
+      const activeState = useAppStore.getState();
+      if (activeState.onlineDevices.length > 1 && activeState.socket && activeState.isWssConnected) {
+        console.log("[Sync-Check] Periodic sync check triggered (multiple devices online)");
+        activeState.reportFingerprint();
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [isLoggedIn, user?.id, onlineDevices.length, isWssConnected]);
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     
@@ -1134,36 +1159,87 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Cloud Sync Status Toast */}
+      {/* Backend-Verified Sync Status Popup */}
       <AnimatePresence>
-        {cloudSyncStatus && !isOffline && (
+        {backendSyncStatus !== 'idle' && !isOffline && onlineDevices.length > 1 && (
           <motion.div
             initial={{ y: 50, opacity: 0, scale: 0.95 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: 50, opacity: 0, scale: 0.95 }}
             className="fixed bottom-24 left-6 md:bottom-10 md:left-10 z-[300]"
           >
-            <div className="bg-slate-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl flex items-center gap-3 shadow-2xl border border-white/10 min-w-[200px]">
-              {cloudSyncStatus === 'syncing' ? (
-                <>
-                  <div className="size-8 rounded-full bg-primary/20 flex items-center justify-center text-primary">
-                    <Icon name="sync" className="text-base animate-spin" />
-                  </div>
+            <div className="bg-slate-950/95 backdrop-blur-md text-white px-5 py-4 rounded-3xl flex flex-col gap-3 shadow-2xl border border-white/10 min-w-[280px] max-w-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  {backendSyncStatus === 'syncing' && (
+                    <div className="size-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                      <Icon name="sync" className="text-base animate-spin" />
+                    </div>
+                  )}
+                  {backendSyncStatus === 'mismatch' && (
+                    <div className="size-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400">
+                      <Icon name="sync_problem" className="text-base animate-pulse" />
+                    </div>
+                  )}
+                  {backendSyncStatus === 'done' && (
+                    <div className="size-8 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 animate-bounce">
+                      <Icon name="cloud_done" className="text-base" />
+                    </div>
+                  )}
+                  {backendSyncStatus === 'error' && (
+                    <div className="size-8 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-400">
+                      <Icon name="error_outline" className="text-base" />
+                    </div>
+                  )}
                   <div className="flex flex-col">
-                    <span className="text-xs font-black uppercase tracking-widest text-slate-200">Cloud Sync</span>
-                    <span className="text-[10px] font-bold text-slate-400">Syncing changes...</span>
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-200">
+                      {backendSyncStatus === 'syncing' && "Synchronizing"}
+                      {backendSyncStatus === 'mismatch' && "Mismatch Detected"}
+                      {backendSyncStatus === 'done' && "Sync Complete"}
+                      {backendSyncStatus === 'error' && "Sync Failed"}
+                    </span>
+                    <span className="text-[10px] font-medium text-slate-400">
+                      {backendSyncStatus === 'syncing' && "Merging device content..."}
+                      {backendSyncStatus === 'mismatch' && "Auto-resolving..."}
+                      {backendSyncStatus === 'done' && "All devices are up-to-date"}
+                      {backendSyncStatus === 'error' && "Please try again"}
+                    </span>
                   </div>
-                </>
-              ) : (
-                <>
-                  <div className="size-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <Icon name="cloud_done" className="text-base" />
+                </div>
+
+                {backendSyncStatus === 'syncing' && (
+                  <button
+                    onClick={() => useAppStore.setState({ backendSyncStatus: 'idle', backendSyncProgress: 0 })}
+                    className="text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors uppercase tracking-wider"
+                  >
+                    Cancel
+                  </button>
+                )}
+                {backendSyncStatus === 'error' && (
+                  <button
+                    onClick={() => useAppStore.getState().resolveSyncMismatch()}
+                    className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors uppercase tracking-wider"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+
+              {backendSyncStatus === 'syncing' && (
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between items-center text-[9px] font-black tracking-widest text-slate-500 uppercase">
+                    <span>Progress</span>
+                    <span className="text-indigo-400 font-mono font-bold">{backendSyncProgress}%</span>
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs font-black uppercase tracking-widest text-emerald-400">Sync Complete</span>
-                    <span className="text-[10px] font-bold text-slate-400">Data is up to date</span>
+                  <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${backendSyncProgress}%` }}
+                      transition={{ duration: 0.1 }}
+                    />
                   </div>
-                </>
+                </div>
               )}
             </div>
           </motion.div>
