@@ -1803,9 +1803,11 @@ export const useAppStore = create<AppState>((set) => ({
         const requestsRef = collection(db, 'friendRequests');
         
         // Prevent dupes
-        const q = query(requestsRef, where('fromUserId', '==', state.user.id), where('toUserId', '==', userId));
+        const q = query(requestsRef, where('fromUserId', '==', state.user.id));
         const existing = await getDocs(q);
-        if (existing.empty) {
+        const hasDupe = existing.docs.some(d => d.data().toUserId === userId);
+        
+        if (!hasDupe) {
           const docRef = await addDoc(requestsRef, {
             fromUserId: state.user.id,
             toUserId: userId,
@@ -1845,10 +1847,12 @@ export const useAppStore = create<AppState>((set) => ({
       try {
         const { db, deleteDoc, doc, collection, query, where, getDocs } = await import('./firebase');
         const requestsRef = collection(db, 'friendRequests');
-        const q = query(requestsRef, where('fromUserId', '==', state.user.id), where('toUserId', '==', userId));
+        const q = query(requestsRef, where('fromUserId', '==', state.user.id));
         const existing = await getDocs(q);
         existing.forEach(async (d) => {
-           await deleteDoc(doc(db, 'friendRequests', d.id));
+           if (d.data().toUserId === userId) {
+             await deleteDoc(doc(db, 'friendRequests', d.id));
+           }
         });
       } catch (err) {
         console.error("Error canceling request", err);
@@ -1966,16 +1970,20 @@ export const useAppStore = create<AppState>((set) => ({
         // Find and delete the accepted friend requests where this user and userId are participants
         const requestsRef = collection(db, 'friendRequests');
         
-        const q1 = query(requestsRef, where('fromUserId', '==', currentUserId), where('toUserId', '==', userId));
+        const q1 = query(requestsRef, where('fromUserId', '==', currentUserId));
         const s1 = await getDocs(q1);
         s1.forEach(async (d) => {
-          await deleteDoc(doc(db, 'friendRequests', d.id));
+          if (d.data().toUserId === userId) {
+            await deleteDoc(doc(db, 'friendRequests', d.id));
+          }
         });
 
-        const q2 = query(requestsRef, where('fromUserId', '==', userId), where('toUserId', '==', currentUserId));
+        const q2 = query(requestsRef, where('toUserId', '==', currentUserId));
         const s2 = await getDocs(q2);
         s2.forEach(async (d) => {
-          await deleteDoc(doc(db, 'friendRequests', d.id));
+          if (d.data().fromUserId === userId) {
+            await deleteDoc(doc(db, 'friendRequests', d.id));
+          }
         });
 
         // Save removedFriendIds to users profile in Firestore
