@@ -625,6 +625,69 @@ const AudioPreviewPlayer = ({ url, duration: initialDuration }: { url: string; d
   );
 };
 
+const validateFileBeforeUpload = (file: File | Blob, type: string): { valid: boolean; error?: FileTransferError; message?: string } => {
+  // 1. Check file exists and size is non-zero
+  if (!file || file.size === 0) {
+    return {
+      valid: false,
+      error: FileTransferError.FILE_CAPTURE_EMPTY,
+      message: 'Empty file captured — The file has no data or size is zero.'
+    };
+  }
+
+  // 2. File size within limit (50MB)
+  const MAX_LIMIT = 50 * 1024 * 1024; // 50MB
+  if (file.size > MAX_LIMIT) {
+    return {
+      valid: false,
+      error: FileTransferError.FILE_TOO_LARGE,
+      message: 'File too large — The selected file exceeds the 50MB limit.'
+    };
+  }
+
+  // 3. File type validation via actual MIME type (or name as fallback)
+  const mime = file.type || '';
+  const nameLower = (file instanceof File ? file.name : '').toLowerCase();
+
+  if (type === 'image') {
+    if (mime && !mime.startsWith('image/')) {
+      return {
+        valid: false,
+        error: FileTransferError.FILE_TYPE_UNSUPPORTED,
+        message: 'Unsupported format — The file is not a valid image.'
+      };
+    }
+  } else if (type === 'audio') {
+    if (mime && !mime.startsWith('audio/') && !nameLower.endsWith('.mp3') && !nameLower.endsWith('.wav') && !nameLower.endsWith('.m4a') && !nameLower.endsWith('.webm') && !nameLower.endsWith('.ogg') && !nameLower.endsWith('.caf') && !nameLower.endsWith('.amr')) {
+      return {
+        valid: false,
+        error: FileTransferError.FILE_TYPE_UNSUPPORTED,
+        message: 'Unsupported format — The file is not a valid audio recording.'
+      };
+    }
+  } else if (type === 'video') {
+    if (mime && !mime.startsWith('video/')) {
+      return {
+        valid: false,
+        error: FileTransferError.FILE_TYPE_UNSUPPORTED,
+        message: 'Unsupported format — The file is not a valid video file.'
+      };
+    }
+  } else if (nameLower) {
+    const blockedExtensions = ['.exe', '.bat', '.sh', '.com', '.msi', '.vbs', '.cmd'];
+    const hasBlockedExt = blockedExtensions.some(ext => nameLower.endsWith(ext));
+    if (hasBlockedExt) {
+      return {
+        valid: false,
+        error: FileTransferError.FILE_TYPE_UNSUPPORTED,
+        message: 'Unsupported format — Executable/script files are blocked for security.'
+      };
+    }
+  }
+
+  return { valid: true };
+};
+
 export const ChatDetail = () => {
   const { 
     user,
@@ -689,6 +752,7 @@ export const ChatDetail = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [capturedMedia, setCapturedMedia] = useState<{ type: 'image' | 'audio' | 'file', url: string, blob: Blob, name?: string }[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState<string | null>(null);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [showMediaGallery, setShowMediaGallery] = useState(false);
@@ -1004,9 +1068,17 @@ export const ChatDetail = () => {
   const handleCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateFileBeforeUpload(file, 'image');
+      if (!validation.valid) {
+        setToast(validation.message || 'Validation failed');
+        setTimeout(() => setToast(null), 4000);
+        e.target.value = "";
+        return;
+      }
       const url = URL.createObjectURL(file);
       setCapturedMedia(prev => [...prev, { type: 'image', url, blob: file }]);
     }
+    e.target.value = "";
   };
 
   const removeMedia = (index: number) => {
@@ -1020,6 +1092,17 @@ export const ChatDetail = () => {
 
   const handleSend = async () => {
     if (!messageText.trim() && capturedMedia.length === 0) return;
+    
+    // Copy states immediately to prevent race conditions & double-sends!
+    const textToSend = messageText;
+    const mediaToSend = [...capturedMedia];
+    
+    // Immediately clear composer UI state
+    setMessageText('');
+    setCapturedMedia([]);
+    if (cleared) setCleared(false);
+    if (replyTo) setReplyTo(null);
+    setShowEmojiPicker(false);
     
     const isGroup = chat?.isGroup;
     const targetId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
@@ -1066,20 +1149,20 @@ export const ChatDetail = () => {
       }
     }
 
-    if (messageText.trim()) {
+    if (textToSend.trim()) {
       let e2eData = undefined;
       const { cryptoService } = await import('../services/cryptoService');
       if (sharedSecret) {
-        const encrypted = await cryptoService.encryptText(messageText, sharedSecret);
+        const encrypted = await cryptoService.encryptText(textToSend, sharedSecret);
         e2eData = {
           encryptedText: JSON.stringify({ iv: encrypted.iv, ciphertext: encrypted.ciphertext }),
           iv: encrypted.iv
         };
       }
-      sendMessage(activeChatId, activeRecipientId, messageText, 'text', undefined, undefined, e2eData);
+      sendMessage(activeChatId, activeRecipientId, textToSend, 'text', undefined, undefined, e2eData);
     }
 
-    if (capturedMedia.length > 0) {
+    if (mediaToSend.length > 0) {
       const isSelfOnline = navigator.onLine && useAppStore.getState().socket?.connected;
       if (!isSelfOnline) {
         setToast("You are currently offline. Files will be sent as base64 strings and may be limited in size.");
@@ -1088,10 +1171,19 @@ export const ChatDetail = () => {
     }
 
     // Handle media sending via server storage with Compression & E2EE
-    for (const media of capturedMedia) {
+    for (const media of mediaToSend) {
       try {
         const { compressionService } = await import('../services/compressionService');
         const { cryptoService } = await import('../services/cryptoService');
+
+        // Robust pre-upload validation check
+        const validation = validateFileBeforeUpload(media.blob, media.type);
+        if (!validation.valid) {
+          console.error(`Media double-safety check failed: ${validation.message}`);
+          setToast(validation.message || 'Validation failed');
+          setTimeout(() => setToast(null), 4000);
+          continue; // Skip upload & do not add bubble
+        }
 
         // Compression
         let processedBlob = media.blob;
@@ -1196,67 +1288,127 @@ export const ChatDetail = () => {
           continue;
         }
 
-        let uploadSuccess = false;
         let finalErrorCode = FileTransferError.UNKNOWN_ERROR;
         try {
           const filename = media.type === 'audio' ? 'voice_note.webm' : (media.type === 'file' ? media.name || 'file.bin' : 'image.jpg');
           
-          const uploadPromise = () => new Promise<{ fileUrl: string; fileSize: string }>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            const formData = new FormData();
-            formData.append('file', uploadBlob, filename);
-            if (user?.id) formData.append('userId', user.id);
+          // XMLHttpRequest upload engine with exponential retry + backoff & stall detection!
+          const uploadWithRetryAndTimeout = async (
+            blobToUpload: Blob,
+            filenameStr: string,
+            onProgress: (percent: number) => void
+          ): Promise<{ fileUrl: string; fileSize: string }> => {
+            const MAX_ATTEMPTS = 3;
+            let attempt = 0;
 
-            let lastSentPercent = -10;
+            while (true) {
+              attempt++;
+              let lastProgressTime = Date.now();
+              let lastLoadedBytes = 0;
 
-            xhr.upload.addEventListener('progress', (e) => {
-              if (e.lengthComputable) {
-                const percent = Math.round((e.loaded / e.total) * 100);
-                // Update progress in global state
-                useAppStore.getState().updateMessageProgress(generatedMessageId, percent, 'uploading');
+              try {
+                return await new Promise<{ fileUrl: string; fileSize: string }>((resolve, reject) => {
+                  const xhr = new XMLHttpRequest();
+                  const formData = new FormData();
+                  formData.append('file', blobToUpload, filenameStr);
+                  if (user?.id) formData.append('userId', user.id);
 
-                // Throttled progress event emit
-                if (percent - lastSentPercent >= 10 || percent === 100) {
-                  lastSentPercent = percent;
-                  const socket = useAppStore.getState().socket;
-                  if (socket && socket.connected) {
-                    socket.emit('media_upload_progress', {
-                      recipientId: isGroup ? undefined : targetId,
-                      groupId: isGroup ? chat?.id : undefined,
-                      messageId: generatedMessageId,
-                      percent,
-                      mediaType: media.type,
-                      fileName: media.type === 'file' ? media.name : undefined
-                    });
-                  }
+                  // Stall checker (interval of 2s)
+                  const STALL_TIMEOUT_MS = 30000; // 30 seconds stall threshold
+                  const stallInterval = setInterval(() => {
+                    const now = Date.now();
+                    if (now - lastProgressTime > STALL_TIMEOUT_MS) {
+                      console.warn(`[Upload Stall Detector] No upload progress for 30s. Aborting...`);
+                      clearInterval(stallInterval);
+                      xhr.abort();
+                      reject(new Error('UPLOAD_STALLED'));
+                    }
+                  }, 2000);
+
+                  xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                      const now = Date.now();
+                      if (e.loaded > lastLoadedBytes) {
+                        lastProgressTime = now;
+                        lastLoadedBytes = e.loaded;
+                      }
+                      const percent = Math.round((e.loaded / e.total) * 100);
+                      onProgress(percent);
+                    }
+                  });
+
+                  xhr.addEventListener('load', () => {
+                    clearInterval(stallInterval);
+                    if (xhr.status === 429) {
+                      reject(new Error('QUOTA_EXCEEDED'));
+                    } else if (xhr.status >= 200 && xhr.status < 300) {
+                      try {
+                        const parsed = JSON.parse(xhr.responseText);
+                        resolve(parsed);
+                      } catch (err) {
+                        reject(new Error('Invalid JSON response'));
+                      }
+                    } else if (xhr.status >= 500) {
+                      reject(new Error(`Server error ${xhr.status}`));
+                    } else {
+                      reject(new Error(`Client error ${xhr.status}`));
+                    }
+                  });
+
+                  xhr.addEventListener('error', () => {
+                    clearInterval(stallInterval);
+                    reject(new Error('Network error'));
+                  });
+
+                  xhr.addEventListener('abort', () => {
+                    clearInterval(stallInterval);
+                    reject(new Error('Aborted'));
+                  });
+
+                  xhr.open('POST', `${BACKEND_URL}/api/upload`);
+                  xhr.send(formData);
+                });
+              } catch (err: any) {
+                console.warn(`[Upload Attempt ${attempt} failed]:`, err.message);
+                
+                const isTransientError = 
+                  err.message === 'Network error' || 
+                  err.message?.startsWith('Server error') || 
+                  err.message === 'UPLOAD_STALLED';
+
+                if (isTransientError && attempt < MAX_ATTEMPTS) {
+                  const delayMs = Math.pow(2, attempt) * 1000; // exponential backoff
+                  console.log(`[Upload Retry] Retrying in ${delayMs}ms (Attempt ${attempt + 1}/${MAX_ATTEMPTS})...`);
+                  await new Promise(r => setTimeout(r, delayMs));
+                  continue;
+                } else {
+                  throw err;
                 }
               }
-            });
+            }
+          };
 
-            xhr.addEventListener('load', () => {
-              if (xhr.status === 429) {
-                reject(new Error('QUOTA_EXCEEDED'));
-              } else if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                  const data = JSON.parse(xhr.responseText);
-                  resolve(data);
-                } catch (err) {
-                  reject(new Error('Invalid JSON response'));
-                }
-              } else {
-                reject(new Error(`Server error ${xhr.status}`));
+          let lastSentPercent = -10;
+          const data = await uploadWithRetryAndTimeout(uploadBlob, filename, (percent) => {
+            // Update progress in global state
+            useAppStore.getState().updateMessageProgress(generatedMessageId, percent, 'uploading');
+
+            // Throttled progress event emit
+            if (percent - lastSentPercent >= 10 || percent === 100) {
+              lastSentPercent = percent;
+              const socket = useAppStore.getState().socket;
+              if (socket && socket.connected) {
+                socket.emit('media_upload_progress', {
+                  recipientId: isGroup ? undefined : targetId,
+                  groupId: isGroup ? chat?.id : undefined,
+                  messageId: generatedMessageId,
+                  percent,
+                  mediaType: media.type,
+                  fileName: media.type === 'file' ? media.name : undefined
+                });
               }
-            });
-
-            xhr.addEventListener('error', () => {
-              reject(new Error('Network error'));
-            });
-
-            xhr.open('POST', `${BACKEND_URL}/api/upload`);
-            xhr.send(formData);
+            }
           });
-
-          const data = await uploadPromise();
           
           const e2eData = sharedSecret ? {
             encryptedText: encTextStr,
@@ -1267,7 +1419,6 @@ export const ChatDetail = () => {
           useAppStore.getState().updateMessageProgress(generatedMessageId, 100, 'uploading');
 
           sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData, undefined, generatedMessageId);
-          uploadSuccess = true;
         } catch (uploadErr: any) {
           if (uploadErr.message === 'QUOTA_EXCEEDED') {
             finalErrorCode = FileTransferError.UPLOAD_QUOTA_EXCEEDED;
@@ -1276,6 +1427,8 @@ export const ChatDetail = () => {
             finalErrorCode = FileTransferError.UPLOAD_NETWORK_ERROR;
           } else if (uploadErr.message?.startsWith('Server error')) {
             finalErrorCode = FileTransferError.UPLOAD_SERVER_ERROR;
+          } else if (uploadErr.message === 'UPLOAD_STALLED') {
+            finalErrorCode = FileTransferError.UPLOAD_STALLED;
           } else {
             finalErrorCode = FileTransferError.UNKNOWN_ERROR;
           }
@@ -1304,12 +1457,6 @@ export const ChatDetail = () => {
         clearTimeout(typingTimeoutRef.current);
       }
     }
-
-    setMessageText('');
-    setCapturedMedia([]);
-    if (cleared) setCleared(false);
-    if (replyTo) setReplyTo(null);
-    setShowEmojiPicker(false);
   };
 
   const forwardMessage = (targetChatId: string) => {
@@ -1561,8 +1708,68 @@ export const ChatDetail = () => {
     return currentChatUploads;
   }, [chat, activeRecipientId, incomingMediaUploads, user?.id]);
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (canSendMessages) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (!canSendMessages) return;
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        const isImage = file.type.startsWith('image/');
+        const isVideo = file.type.startsWith('video/');
+        const isAudio = file.type.startsWith('audio/');
+        const typeKey = isImage ? 'image' : (isVideo ? 'video' : (isAudio ? 'audio' : 'file'));
+
+        const validation = validateFileBeforeUpload(file, typeKey);
+        if (!validation.valid) {
+          setToast(validation.message || 'Validation failed');
+          setTimeout(() => setToast(null), 4000);
+          continue; // Skip this file safely
+        }
+
+        const url = URL.createObjectURL(file);
+        setCapturedMedia(prev => [...prev, { type: isImage ? 'image' : 'file', url, blob: file, name: file.name }]);
+      }
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full bg-bg-light relative overflow-hidden">
+    <div 
+      className="flex flex-col h-full bg-bg-light relative overflow-hidden"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="absolute inset-0 bg-primary/10 backdrop-blur-[2px] border-4 border-dashed border-primary z-[100] flex flex-col items-center justify-center pointer-events-none transition-all duration-300">
+          <div className="p-6 rounded-3xl bg-white/95 shadow-2xl flex flex-col items-center justify-center max-w-sm text-center border border-primary/20 scale-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="size-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4 animate-bounce">
+              <Icon name="cloud_upload" className="text-3xl" />
+            </div>
+            <h4 className="text-base font-bold text-slate-800 mb-1">Drag & Drop Files</h4>
+            <p className="text-xs text-neutral-muted px-4 leading-relaxed">Release to attach and share your files securely in this chat</p>
+          </div>
+        </div>
+      )}
       <AnimatePresence>
         {showReactionPicker && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
@@ -2337,10 +2544,23 @@ export const ChatDetail = () => {
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        const url = URL.createObjectURL(file);
                         const isImage = file.type.startsWith('image/');
+                        const isVideo = file.type.startsWith('video/');
+                        const isAudio = file.type.startsWith('audio/');
+                        const typeKey = isImage ? 'image' : (isVideo ? 'video' : (isAudio ? 'audio' : 'file'));
+                        
+                        const validation = validateFileBeforeUpload(file, typeKey);
+                        if (!validation.valid) {
+                          setToast(validation.message || 'Validation failed');
+                          setTimeout(() => setToast(null), 4000);
+                          e.target.value = "";
+                          return;
+                        }
+
+                        const url = URL.createObjectURL(file);
                         setCapturedMedia(prev => [...prev, { type: isImage ? 'image' : 'file', url, blob: file, name: file.name }]);
                       }
+                      e.target.value = "";
                     }}
                   />
                 </button>

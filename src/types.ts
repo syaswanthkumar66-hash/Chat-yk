@@ -11,6 +11,10 @@ export enum FileTransferError {
   DECRYPT_FAILED = 'DECRYPT_FAILED',
   DECOMPRESS_FAILED = 'DECOMPRESS_FAILED',
   RENDER_FAILED = 'RENDER_FAILED',
+  FILE_CAPTURE_EMPTY = 'FILE_CAPTURE_EMPTY',
+  FILE_TYPE_UNSUPPORTED = 'FILE_TYPE_UNSUPPORTED',
+  FILE_TOO_LARGE = 'FILE_TOO_LARGE',
+  UPLOAD_STALLED = 'UPLOAD_STALLED',
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
@@ -80,6 +84,26 @@ export const FileTransferErrorDetails: Record<FileTransferError, ErrorDetail> = 
     code: FileTransferError.RENDER_FAILED,
     message: 'Rendering failed — File loaded successfully but format is unsupported or corrupted.',
     technicalDescription: 'Browser failed to render/decode or play the file format (img onError or audio error event).'
+  },
+  [FileTransferError.FILE_CAPTURE_EMPTY]: {
+    code: FileTransferError.FILE_CAPTURE_EMPTY,
+    message: 'Empty file captured — The file has no data or size is zero.',
+    technicalDescription: 'Captured file size is 0 bytes or the file reference is empty.'
+  },
+  [FileTransferError.FILE_TYPE_UNSUPPORTED]: {
+    code: FileTransferError.FILE_TYPE_UNSUPPORTED,
+    message: 'Unsupported format — The file type is not supported.',
+    technicalDescription: 'File MIME type validation check failed.'
+  },
+  [FileTransferError.FILE_TOO_LARGE]: {
+    code: FileTransferError.FILE_TOO_LARGE,
+    message: 'File too large — The selected file exceeds the 50MB limit.',
+    technicalDescription: 'File size validation exceeded the maximum permitted size limit.'
+  },
+  [FileTransferError.UPLOAD_STALLED]: {
+    code: FileTransferError.UPLOAD_STALLED,
+    message: 'Upload stalled — No progress was made for 30 seconds.',
+    technicalDescription: 'Upload stalled threshold reached (30 seconds of inactivity).'
   },
   [FileTransferError.UNKNOWN_ERROR]: {
     code: FileTransferError.UNKNOWN_ERROR,
