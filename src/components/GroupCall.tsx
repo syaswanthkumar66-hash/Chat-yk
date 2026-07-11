@@ -210,11 +210,10 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       
       // Update participant with streamId
       setParticipants(prev => {
-        // Find a participant that doesn't have a streamId yet, or just add a new one
-        // For simplicity, we'll just add a new participant if not found
-        const existing = prev.find(p => p.id !== 'me' && !p.streamId);
+        // Match the participant by their actual peer ID first, or find one without a streamId
+        const existing = prev.find(p => p.id === from) || prev.find(p => p.id !== 'me' && !p.streamId);
         if (existing) {
-          return prev.map(p => p.id === existing.id ? { ...p, streamId: from, status: 'online' } : p);
+          return prev.map(p => p.id === existing.id ? { ...p, id: from, streamId: from, status: 'online' } : p);
         } else {
           return [...prev, {
             id: from,

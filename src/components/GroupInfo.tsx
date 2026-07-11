@@ -488,7 +488,7 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
           </div>
           <div className="flex gap-6">
             <button 
-              onClick={() => canCall && setActiveGroupCall({ type: 'voice' })}
+              onClick={() => canCall && setActiveGroupCall({ type: 'voice', groupId: chat.id })}
               disabled={!canCall}
               className={cn(
                 "flex flex-col items-center gap-1.5 group",
@@ -501,7 +501,7 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
               <span className="text-[10px] font-black uppercase tracking-widest text-neutral-muted">Audio</span>
             </button>
             <button 
-              onClick={() => canCall && setActiveGroupCall({ type: 'video' })}
+              onClick={() => canCall && setActiveGroupCall({ type: 'video', groupId: chat.id })}
               disabled={!canCall}
               className={cn(
                 "flex flex-col items-center gap-1.5 group",

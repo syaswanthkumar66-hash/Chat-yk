@@ -1029,6 +1029,12 @@ class WebRTCService {
       pc.close();
     });
     this.pcs.clear();
+    
+    this.dataChannels.forEach((dc, peerId) => {
+      dc.close();
+    });
+    this.dataChannels.clear();
+
     this.localStream = null;
     this.currentRoomId = null;
     this.pendingCandidates.clear();
