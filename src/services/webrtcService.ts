@@ -43,6 +43,9 @@ class WebRTCService {
   private dataChannels: Map<string, RTCDataChannel> = new Map();
   private isIceServersFetched = false;
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+  private isReadyForSignaling = false;
+  private pendingSignals: { from: string; signal: any; roomId: string }[] = [];
+  private statsIntervals: Map<string, any> = new Map();
 
   private activeOutgoingTransfers = new Map<string, {
     arrayBuffer: ArrayBuffer;
@@ -101,6 +104,17 @@ class WebRTCService {
       await this.fetchIceConfig(2, 500);
     }
 
+    console.log(`[Diagnostic] Local stream published. Marking WebRTC signaling ready for room ${roomId}`);
+    this.isReadyForSignaling = true;
+
+    // Process any queued signals that arrived prior to stream publishing
+    const signalsToProcess = [...this.pendingSignals];
+    this.pendingSignals = [];
+    for (const item of signalsToProcess) {
+      console.log(`[Diagnostic] Processing queued signal from ${item.from}: ${item.signal.type}`);
+      await this.handleSignal(item.from, item.signal, item.roomId);
+    }
+
     console.log(`Publishing local stream in room ${roomId}. Broadcasting presence...`);
 
     const socket = useAppStore.getState().socket;
@@ -122,7 +136,7 @@ class WebRTCService {
       return this.pcs.get(peerId)!;
     }
 
-    console.log(`Creating RTCPeerConnection for peer ${peerId} using ICE servers:`, this.iceServers);
+    console.log(`[Diagnostic] Creating RTCPeerConnection for peer ${peerId} using ICE servers:`, this.iceServers);
     const pc = new RTCPeerConnection({
       iceServers: this.iceServers,
       bundlePolicy: 'max-bundle'
@@ -130,12 +144,48 @@ class WebRTCService {
 
     this.pcs.set(peerId, pc);
 
-    // Add all local tracks to this connection
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(track => {
-        pc.addTrack(track, this.localStream!);
-      });
-    }
+    // Track all WebRTC state changes meticulously (Step 0 logs with precise timestamping)
+    pc.oniceconnectionstatechange = () => {
+      const ts = new Date().toISOString();
+      console.log(`[Diagnostic][${ts}] Peer ${peerId} iceConnectionState: ${pc.iceConnectionState}`);
+      
+      if (pc.iceConnectionState === 'connected') {
+        console.log(`[Diagnostic][${ts}] Peer ${peerId} ICE Connected! Initiating active track stats monitoring (Step 0/Step 2).`);
+        this.startStatsMonitoring(peerId);
+      }
+
+      if (pc.iceConnectionState === 'failed') {
+        window.dispatchEvent(new CustomEvent('webrtc_connection_failed', {
+          detail: { peerId }
+        }));
+        
+        // Step 4: ICE Restart recovery
+        this.handleIceFailure(peerId, roomId);
+      }
+
+      if (pc.iceConnectionState === 'disconnected') {
+        console.warn(`[Diagnostic][${ts}] Peer ${peerId} iceConnectionState is disconnected. Waiting 5 seconds for WebRTC auto-recovery...`);
+        setTimeout(() => {
+          const currentPc = this.pcs.get(peerId);
+          if (currentPc && (currentPc.iceConnectionState === 'disconnected' || currentPc.iceConnectionState === 'failed')) {
+            console.warn(`[Diagnostic] WebRTC auto-recovery timed out for peer ${peerId}. Cleaning up connection.`);
+            this.removePeer(peerId);
+          }
+        }, 5000);
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} connectionState: ${pc.connectionState}`);
+    };
+
+    pc.onsignalingstatechange = () => {
+      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} signalingState: ${pc.signalingState}`);
+    };
+
+    pc.onicegatheringstatechange = () => {
+      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} iceGatheringState: ${pc.iceGatheringState}`);
+    };
 
     // Setup DataChannel for Chat (if we are the deterministic initiator)
     const myId = useAppStore.getState().user?.id;
@@ -154,17 +204,20 @@ class WebRTCService {
     // Handle ICE candidates and transmit them via Socket.io
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        const socket = useAppStore.getState().socket;
-        if (socket) {
-          socket.emit('sfu_signal', {
-            roomId,
-            from: useAppStore.getState().user?.id,
-            signal: {
-              type: 'ice_candidate',
-              candidate: event.candidate,
-              to: peerId
-            }
-          });
+        // Step 1 point 5: Confirm candidates are sent ONLY after setLocalDescription has been called
+        if (pc.localDescription) {
+          const socket = useAppStore.getState().socket;
+          if (socket) {
+            socket.emit('sfu_signal', {
+              roomId,
+              from: useAppStore.getState().user?.id,
+              signal: {
+                type: 'ice_candidate',
+                candidate: event.candidate,
+                to: peerId
+              }
+            });
+          }
         }
       }
     };
@@ -172,24 +225,15 @@ class WebRTCService {
     // Handle remote stream tracks being added
     pc.ontrack = (event) => {
       const stream = event.streams[0];
+      const track = event.track;
+      const ts = new Date().toISOString();
+      console.log(`[Diagnostic][${ts}] ontrack event fired! Track kind: "${track?.kind}", ID: "${track?.id}", readyState: "${track?.readyState}"`);
       if (stream) {
-        console.log(`Successfully received remote track/stream from peer ${peerId}`);
+        console.log(`[Diagnostic][${ts}] Successfully received remote stream from peer ${peerId}, track count: ${stream.getTracks().length}`);
         // Dispatch custom event to notify GroupCall component
         window.dispatchEvent(new CustomEvent('webrtc_stream', {
           detail: { from: peerId, stream }
         }));
-      }
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      console.log(`ICE Connection State for peer ${peerId}:`, pc.iceConnectionState);
-      if (pc.iceConnectionState === 'failed') {
-        window.dispatchEvent(new CustomEvent('webrtc_connection_failed', {
-          detail: { peerId }
-        }));
-      }
-      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-        this.removePeer(peerId);
       }
     };
 
@@ -660,6 +704,124 @@ class WebRTCService {
     });
   }
 
+  private attachLocalTracks(pc: RTCPeerConnection) {
+    if (this.localStream) {
+      const currentSenders = pc.getSenders();
+      this.localStream.getTracks().forEach(track => {
+        // Step 0 & 1: Confirm state of local track before adding
+        console.log(`[Diagnostic] Checking local track state: kind=${track.kind}, ID=${track.id}, readyState=${track.readyState}, enabled=${track.enabled}`);
+        const exists = currentSenders.some(sender => sender.track === track);
+        if (!exists) {
+          console.log(`[Diagnostic] Attaching local track "${track.kind}" to peer connection`);
+          pc.addTrack(track, this.localStream!);
+        } else {
+          console.log(`[Diagnostic] Local track "${track.kind}" is already attached to this peer connection`);
+        }
+      });
+    } else {
+      console.warn(`[Diagnostic] Failed to attach local tracks — localStream is null!`);
+    }
+  }
+
+  private async handleIceFailure(peerId: string, roomId: string) {
+    const pc = this.pcs.get(peerId);
+    if (!pc) return;
+
+    console.warn(`[Diagnostic] ICE Connection Failed with peer ${peerId}. Initiating WhatsApp-grade ICE restart sequence (Step 4).`);
+    try {
+      if (typeof pc.restartIce === 'function') {
+        pc.restartIce();
+      } else {
+        console.log(`[Diagnostic] restartIce() is not supported, proceeding with renegotiation...`);
+      }
+
+      this.attachLocalTracks(pc);
+
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+
+      const socket = useAppStore.getState().socket;
+      if (socket) {
+        socket.emit('sfu_signal', {
+          roomId,
+          from: useAppStore.getState().user?.id,
+          signal: {
+            type: 'offer',
+            sdp: offer.sdp,
+            to: peerId,
+            isIceRestart: true
+          }
+        });
+      }
+      console.log(`[Diagnostic] Sent ICE Restart offer to peer ${peerId}`);
+    } catch (err) {
+      console.error(`[Diagnostic] ICE Restart request failed for peer ${peerId}:`, err);
+      this.removePeer(peerId);
+    }
+  }
+
+  private startStatsMonitoring(peerId: string) {
+    if (this.statsIntervals.has(peerId)) {
+      clearInterval(this.statsIntervals.get(peerId));
+    }
+
+    let lastBytesSent = 0;
+    let lastBytesReceived = 0;
+
+    const intervalId = setInterval(async () => {
+      const pc = this.pcs.get(peerId);
+      if (!pc || pc.iceConnectionState !== 'connected') {
+        console.log(`[StatsMonitor] Connection not active, stopping stats query for peer ${peerId}`);
+        clearInterval(intervalId);
+        this.statsIntervals.delete(peerId);
+        return;
+      }
+
+      try {
+        const stats = await pc.getStats();
+        let activeCandidatePair: any = null;
+        let audioBytesSent = 0;
+        let audioBytesReceived = 0;
+
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+            activeCandidatePair = report;
+          }
+          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+            audioBytesReceived = report.bytesReceived || 0;
+          }
+          if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+            audioBytesSent = report.bytesSent || 0;
+          }
+        });
+
+        let candidatePairStr = 'unknown';
+        if (activeCandidatePair) {
+          const localCandidate = stats.get(activeCandidatePair.localCandidateId);
+          const remoteCandidate = stats.get(activeCandidatePair.remoteCandidateId);
+          candidatePairStr = `Local: ${localCandidate?.candidateType || 'unknown'} (${localCandidate?.protocol || 'udp'}), Remote: ${remoteCandidate?.candidateType || 'unknown'} (${remoteCandidate?.protocol || 'udp'})`;
+        }
+
+        const sentDelta = audioBytesSent - lastBytesSent;
+        const receivedDelta = audioBytesReceived - lastBytesReceived;
+
+        console.log(`[Diagnostic][StatsMonitor][${new Date().toISOString()}] Peer ${peerId}:
+          - Candidate Pair Type: ${candidatePairStr}
+          - Total Audio Bytes Sent: ${audioBytesSent} (Delta: +${sentDelta} bytes)
+          - Total Audio Bytes Received: ${audioBytesReceived} (Delta: +${receivedDelta} bytes)
+          - Audio Flow Status: ${sentDelta > 0 || receivedDelta > 0 ? "LIVE AUDIO TRANSMITTING ✅" : "STALLED / SILENT ⚠️"}
+        `);
+
+        lastBytesSent = audioBytesSent;
+        lastBytesReceived = audioBytesReceived;
+      } catch (err) {
+        console.warn(`[StatsMonitor] Failed to query stats:`, err);
+      }
+    }, 5000);
+
+    this.statsIntervals.set(peerId, intervalId);
+  }
+
   private removePeer(peerId: string) {
     const pc = this.pcs.get(peerId);
     if (pc) {
@@ -673,6 +835,11 @@ class WebRTCService {
       this.dataChannels.delete(peerId);
     }
     this.pendingCandidates.delete(peerId);
+
+    if (this.statsIntervals.has(peerId)) {
+      clearInterval(this.statsIntervals.get(peerId));
+      this.statsIntervals.delete(peerId);
+    }
   }
 
   private async getPeerStats(peerId: string): Promise<{ rtt?: number, packetLoss?: number, jitter?: number }> {
@@ -725,11 +892,21 @@ class WebRTCService {
     const myId = useAppStore.getState().user?.id;
     if (from === myId) return; // Skip our own signals
 
+    // Queue signal processing until localStream is published and ready (Step 1)
+    if (!this.isReadyForSignaling) {
+      console.log(`[Diagnostic] WebRTC service not ready yet. Queueing signal from ${from}: ${signal.type}`);
+      this.pendingSignals.push({ from, signal, roomId });
+      return;
+    }
+
     if (signal.type === 'peer_joined') {
       const peerId = signal.peerId;
       if (peerId && peerId !== myId) {
-        console.log(`Peer ${peerId} joined. Initiating WebRTC connection offer...`);
+        console.log(`[Diagnostic] Peer ${peerId} joined. Creating Peer Connection.`);
         const pc = this.createPeerConnection(peerId, roomId);
+
+        // Step 1 point 3: Add all local tracks BEFORE calling createOffer
+        this.attachLocalTracks(pc);
 
         // ALWAYS ensure that we create the DataChannel on the SDP offer creator side
         if (roomId.startsWith('chat-webrtc-') && !this.dataChannels.has(peerId)) {
@@ -739,7 +916,9 @@ class WebRTCService {
         }
 
         try {
+          console.log(`[Diagnostic] Creating Offer for peer ${peerId}`);
           const offer = await pc.createOffer();
+          console.log(`[Diagnostic] Setting Local Description (Offer) for peer ${peerId}`);
           await pc.setLocalDescription(offer);
           
           const socket = useAppStore.getState().socket;
@@ -760,12 +939,22 @@ class WebRTCService {
       }
     } else if (signal.type === 'offer') {
       if (signal.to === myId) {
-        console.log(`Received WebRTC connection offer from peer ${from}`);
+        console.log(`[Diagnostic] Received offer from peer ${from}. Setting Remote Description FIRST (Step 1 point 6).`);
         const pc = this.createPeerConnection(from, roomId);
 
         try {
+          // Set remote description FIRST
           await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+          
+          // Apply any pending ICE candidates that arrived before SDP remote description was set (Step 1 point 7)
           await this.applyPendingIceCandidates(from, pc);
+
+          // THEN attach local tracks to the connection
+          console.log(`[Diagnostic] Attaching local tracks for answering connection to ${from}`);
+          this.attachLocalTracks(pc);
+
+          // THEN create and set the answer
+          console.log(`[Diagnostic] Creating Answer for peer ${from}`);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
@@ -787,7 +976,7 @@ class WebRTCService {
       }
     } else if (signal.type === 'answer') {
       if (signal.to === myId) {
-        console.log(`Received WebRTC connection answer from peer ${from}`);
+        console.log(`[Diagnostic] Received answer from peer ${from}`);
         const pc = this.pcs.get(from);
         if (pc) {
           try {
@@ -801,15 +990,15 @@ class WebRTCService {
     } else if (signal.type === 'ice_candidate') {
       if (signal.to === myId) {
         const pc = this.pcs.get(from);
-        if (pc && pc.remoteDescription) {
+        // Step 1 point 7: Queue candidate if remote description is not set yet
+        if (pc && pc.remoteDescription && pc.remoteDescription.type) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
           } catch (err) {
             console.error(`Failed to add ICE candidate from peer ${from}:`, err);
           }
         } else {
-          // Queue the candidate until setRemoteDescription completes
-          console.log(`Queueing ICE candidate from peer ${from} (no remoteDescription yet)`);
+          console.log(`[Diagnostic] Queueing ICE candidate from peer ${from} (no remote description set yet)`);
           if (!this.pendingCandidates.has(from)) {
             this.pendingCandidates.set(from, []);
           }
@@ -843,6 +1032,11 @@ class WebRTCService {
     this.localStream = null;
     this.currentRoomId = null;
     this.pendingCandidates.clear();
+    this.isReadyForSignaling = false;
+    this.pendingSignals = [];
+
+    this.statsIntervals.forEach(interval => clearInterval(interval));
+    this.statsIntervals.clear();
   }
 }
 

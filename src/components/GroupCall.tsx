@@ -31,8 +31,32 @@ const VideoPlayer = ({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const el = videoRef.current;
+    if (el && stream) {
+      console.log(`[Diagnostic] Setting stream on media element. Track count: ${stream.getTracks().length}`);
+      el.srcObject = stream;
+      
+      // Attempt explicit play (Step 2)
+      el.play()
+        .then(() => {
+          console.log(`[Diagnostic] Media element successfully playing stream!`);
+        })
+        .catch(err => {
+          console.warn(`[Diagnostic] Autoplay prevented or failed for stream. Binding document-wide gesture listener as a fallback...`, err);
+          const handleInteraction = () => {
+            el.play()
+              .then(() => {
+                console.log(`[Diagnostic] Media element successfully playing stream after user gesture interaction!`);
+                document.removeEventListener('click', handleInteraction);
+                document.removeEventListener('touchstart', handleInteraction);
+              })
+              .catch(playErr => {
+                console.error(`[Diagnostic] Explicit play failed even after user gesture:`, playErr);
+              });
+          };
+          document.addEventListener('click', handleInteraction);
+          document.addEventListener('touchstart', handleInteraction);
+        });
     }
   }, [stream]);
 
@@ -85,7 +109,11 @@ const VideoPlayer = ({
       autoPlay
       playsInline
       muted={isLocal}
-      className={cn("size-full object-cover", isVideoOff && "hidden", className)}
+      className={cn(
+        "size-full object-cover",
+        isVideoOff ? "absolute inset-0 size-px opacity-0 pointer-events-none" : "relative",
+        className
+      )}
     />
   );
 };
@@ -157,6 +185,14 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           }
         });
         if (!mounted) return;
+
+        // Step 0: Diagnostic logging of local tracks
+        const tracks = stream.getTracks();
+        console.log(`[Diagnostic] getUserMedia() obtained ${tracks.length} tracks:`);
+        tracks.forEach(track => {
+          console.log(`[Diagnostic] - Track kind: "${track.kind}", ID: "${track.id}", readyState: "${track.readyState}", enabled: ${track.enabled}`);
+        });
+
         setLocalStream(stream);
 
         const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
@@ -477,20 +513,24 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
               <motion.div 
                 animate={{ y: [0, -10, 0] }}
                 transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
-                className="size-40 md:size-56 rounded-[3rem] overflow-hidden border-4 border-white/10 p-2 bg-slate-900 shadow-2xl relative z-10"
+                className="size-40 md:size-56 rounded-[3rem] overflow-hidden border-4 border-white/10 p-2 bg-slate-900 shadow-2xl relative z-10 flex items-center justify-center"
               >
-                {participants[1] && !participants[1].isVideoOff ? (
-                  <VideoPlayer 
-                    stream={participants[1].streamId ? remoteStreams[participants[1].streamId] : null} 
-                    className="size-full rounded-[2.5rem] object-cover" 
-                    speakerMode={speakerMode}
-                  />
-                ) : (
-                  <img 
-                    src={participants[1]?.avatar || generateInitialsAvatar(participants[1]?.id || 'user', participants[1]?.name || 'User')} 
-                    className="size-full rounded-[2.5rem] object-cover" 
-                    referrerPolicy="no-referrer"
-                  />
+                {participants[1] && (
+                  <div className="size-full relative flex items-center justify-center">
+                    <VideoPlayer 
+                      stream={participants[1].streamId ? remoteStreams[participants[1].streamId] : null} 
+                      className="size-full rounded-[2.5rem] object-cover" 
+                      speakerMode={speakerMode}
+                      isVideoOff={participants[1].isVideoOff || type === 'voice'}
+                    />
+                    {(participants[1].isVideoOff || type === 'voice') && (
+                      <img 
+                        src={participants[1]?.avatar || generateInitialsAvatar(participants[1]?.id || 'user', participants[1]?.name || 'User')} 
+                        className="size-full rounded-[2.5rem] object-cover absolute inset-0" 
+                        referrerPolicy="no-referrer"
+                      />
+                    )}
+                  </div>
                 )}
               </motion.div>
               
@@ -518,17 +558,23 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                 dragConstraints={{ left: -200, right: 200, top: -200, bottom: 200 }}
                 className="absolute bottom-4 md:bottom-8 right-4 md:right-8 size-24 md:size-40 rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900 group cursor-move z-30"
               >
-                {!participants[0]?.isVideoOff ? (
+                <div className="size-full relative">
                   <VideoPlayer 
                     stream={localStream} 
                     isLocal={true} 
                     className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
+                    isVideoOff={participants[0]?.isVideoOff}
                   />
-                ) : (
-                  <img src={participants[0]?.avatar} className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" referrerPolicy="no-referrer" />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                <div className="absolute bottom-2 md:bottom-3 left-3 md:left-4 flex items-center gap-2">
+                  {participants[0]?.isVideoOff && (
+                    <img 
+                      src={participants[0]?.avatar} 
+                      className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity absolute inset-0" 
+                      referrerPolicy="no-referrer" 
+                    />
+                  )}
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+                <div className="absolute bottom-2 md:bottom-3 left-3 md:left-4 flex items-center gap-2 pointer-events-none">
                   <div className="size-1 md:size-1.5 rounded-full bg-primary" />
                   <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-70">You</span>
                 </div>
@@ -586,24 +632,27 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                     )}
                   </AnimatePresence>
 
-                  {!p.isVideoOff ? (
+                  <div className="size-full relative">
                     <VideoPlayer 
                       stream={p.id === 'me' ? localStream : (p.streamId ? remoteStreams[p.streamId] : null)} 
                       isLocal={p.id === 'me'}
                       className={cn(
-                        "size-full object-cover transition-transform duration-700 group-hover:scale-110"
+                        "size-full object-cover transition-transform duration-700 group-hover:scale-110",
+                        (p.isVideoOff || (p.id !== 'me' && type === 'voice')) && "absolute inset-0 size-px opacity-0 pointer-events-none"
                       )} 
                       speakerMode={speakerMode}
+                      isVideoOff={p.isVideoOff || (p.id !== 'me' && type === 'voice')}
                     />
-                  ) : (
-                    <img 
-                      src={p.avatar} 
-                      className={cn(
-                        "size-full object-cover transition-transform duration-700 group-hover:scale-110 blur-2xl opacity-30"
-                      )} 
-                      referrerPolicy="no-referrer"
-                    />
-                  )}
+                    {(p.isVideoOff || (p.id !== 'me' && type === 'voice')) && (
+                      <img 
+                        src={p.avatar} 
+                        className={cn(
+                          "size-full object-cover transition-transform duration-700 group-hover:scale-110 blur-2xl opacity-30 absolute inset-0"
+                        )} 
+                        referrerPolicy="no-referrer"
+                      />
+                    )}
+                  </div>
                   
                   {/* Video Off Overlay */}
                   {p.isVideoOff && (
