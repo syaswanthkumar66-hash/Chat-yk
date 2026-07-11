@@ -25,11 +25,25 @@ export class CryptoService {
     if (!email) {
       try {
         const storeUser = (await import('../store')).useAppStore.getState().user;
-        if (storeUser?.email) {
+        if (storeUser?.email && storeUser.id === activeUserId) {
           email = storeUser.email;
         }
       } catch (e) {
         console.warn("Could not import useAppStore to retrieve email:", e);
+      }
+    }
+    // Robust fallback to checking saved accounts switcher list in sessionIntegrityService:
+    if (!email) {
+      try {
+        const { sessionIntegrityService } = await import('./sessionIntegrityService');
+        const savedAccounts = sessionIntegrityService.getSavedAccounts();
+        const matched = savedAccounts.find(acc => acc.id === activeUserId);
+        if (matched && matched.email) {
+          email = matched.email;
+          console.log(`[cryptoService] Successfully restored active email from sessionIntegrityService saved switcher: ${email}`);
+        }
+      } catch (e) {
+        console.warn("Could not retrieve email from sessionIntegrityService:", e);
       }
     }
     if (!email) {
@@ -63,6 +77,7 @@ export class CryptoService {
         );
         this.keyPair = { publicKey, privateKey };
         this.currentUserId = activeUserId;
+        this.derivedKeys.clear(); // Clear cached secrets since keypair loaded
         return;
       } catch (err) {
         console.error("Failed to import E2E keys from localStorage, attempting Firestore PBKDF2 restoration...", err);
@@ -108,6 +123,7 @@ export class CryptoService {
 
           this.keyPair = { publicKey, privateKey };
           this.currentUserId = activeUserId;
+          this.derivedKeys.clear(); // Clear cached secrets since keypair restored
 
           if (typeof window !== 'undefined') {
             localStorage.setItem(storageKey, JSON.stringify({ publicJwk, privateJwk }));
@@ -130,6 +146,7 @@ export class CryptoService {
       ["deriveKey"]
     );
     this.currentUserId = activeUserId;
+    this.derivedKeys.clear(); // Clear cached secrets since brand new keypair generated
 
     try {
       const publicJwk = await crypto.subtle.exportKey("jwk", this.keyPair.publicKey);
@@ -150,13 +167,14 @@ export class CryptoService {
       const encryptedPrivateKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedPrivateBytes)));
       const ivBase64 = btoa(String.fromCharCode(...iv));
 
-      const { db, doc, updateDoc } = await import('../firebase');
-      await updateDoc(doc(db, 'users', activeUserId), {
+      // Use setDoc with merge: true so that first-time logins/onboarding without pre-created user doc don't throw updateDoc errors!
+      const { db, doc, setDoc } = await import('../firebase');
+      await setDoc(doc(db, 'users', activeUserId), {
         publicKeyJwk: publicJwk,
         encryptedPrivateKey: encryptedPrivateKeyBase64,
         privateKeyIv: ivBase64,
         publicKey: await this.getMyPublicKeyBase64(activeUserId)
-      });
+      }, { merge: true });
       console.log("Secure E2E key pair created and synced to Firestore (encrypted via user's Gmail/email key).");
     } catch (err) {
       console.error("Failed to save and back up E2E keys to Firestore:", err);
@@ -212,7 +230,8 @@ export class CryptoService {
 
   async deriveSharedSecret(remoteUserId: string, remotePublicKeyBase64: string, myUserId?: string): Promise<CryptoKey> {
     const activeUserId = myUserId || auth.currentUser?.uid || "default_user";
-    const cacheKey = `${activeUserId}_${remoteUserId}`;
+    // Key cache invalidation on remote public key change: include remotePublicKeyBase64 in cache key!
+    const cacheKey = `${activeUserId}_${remoteUserId}_${remotePublicKeyBase64}`;
     if (this.derivedKeys.has(cacheKey)) return this.derivedKeys.get(cacheKey)!;
     
     await this.initKeys(activeUserId);

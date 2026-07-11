@@ -52,8 +52,13 @@ export class SessionIntegrityService {
     const accounts = this.getSavedAccounts();
     const existingIndex = accounts.findIndex(acc => acc.id === account.id);
     
+    const existingEmail = existingIndex > -1 ? accounts[existingIndex].email : undefined;
+    const incomingEmail = account.email || (account as any).email;
+    const finalEmail = incomingEmail || existingEmail || `${account.id}@protocol.net`;
+
     const updatedAccount: SavedAccount = {
       ...account,
+      email: finalEmail,
       lastActive: Date.now()
     };
 

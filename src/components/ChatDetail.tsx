@@ -215,8 +215,10 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
 
         let decryptedBlob;
         try {
+          console.log(`[Decryption Debug] Preparing decryption for message: ${msg.id || 'unknown'}. Remote User ID: ${remoteId}. Public Key (b64 length: ${pubKeyBase64 ? pubKeyBase64.length : 0}, first 20: "${pubKeyBase64 ? pubKeyBase64.slice(0, 20) : 'none'}"). IV (length in bytes: ${msg.iv ? msg.iv.length : 0}, values: ${JSON.stringify(msg.iv)}). Ciphertext blob size: ${encryptedBlob.size} bytes. Expected file size in metadata: ${msg.fileSize || 'N/A'}`);
           decryptedBlob = await cryptoService.decryptFile(encryptedBlob, msg.iv, sharedSecret, msg.type === 'audio' ? 'audio/webm' : (msg.type === 'file' ? 'application/octet-stream' : 'image/jpeg'));
         } catch (decErr) {
+          console.error(`[Decryption Debug] Decryption failed with error:`, decErr);
           throw new Error("DECRYPT_FAILED");
         }
 
