@@ -14,6 +14,80 @@ export enum FileTransferError {
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
+export interface ErrorDetail {
+  code: FileTransferError;
+  message: string;
+  technicalDescription: string;
+}
+
+export const FileTransferErrorDetails: Record<FileTransferError, ErrorDetail> = {
+  [FileTransferError.UPLOAD_NETWORK_ERROR]: {
+    code: FileTransferError.UPLOAD_NETWORK_ERROR,
+    message: 'Check your connection — Upload request failed due to a network connection error or timeout.',
+    technicalDescription: 'XMLHttpRequest upload triggered error/timeout event.'
+  },
+  [FileTransferError.UPLOAD_SERVER_ERROR]: {
+    code: FileTransferError.UPLOAD_SERVER_ERROR,
+    message: 'Server error — The server encountered an error during upload.',
+    technicalDescription: 'Server returned non-2xx status code during POST upload.'
+  },
+  [FileTransferError.UPLOAD_QUOTA_EXCEEDED]: {
+    code: FileTransferError.UPLOAD_QUOTA_EXCEEDED,
+    message: 'Quota exceeded — Daily storage/bandwidth quota has been exceeded.',
+    technicalDescription: 'Server returned HTTP 429 quota exceeded.'
+  },
+  [FileTransferError.ENCRYPT_KEY_MISSING]: {
+    code: FileTransferError.ENCRYPT_KEY_MISSING,
+    message: 'E2EE error — Unable to resolve recipient public key for E2EE.',
+    technicalDescription: 'Recipient public key not available from socket or Firestore.'
+  },
+  [FileTransferError.ENCRYPT_FAILED]: {
+    code: FileTransferError.ENCRYPT_FAILED,
+    message: 'E2EE error — Failed to encrypt file data.',
+    technicalDescription: 'CryptoService.encryptFile threw an exception.'
+  },
+  [FileTransferError.DOWNLOAD_NETWORK_ERROR]: {
+    code: FileTransferError.DOWNLOAD_NETWORK_ERROR,
+    message: 'Download failed — Check your connection.',
+    technicalDescription: 'Fetch API call failed / network request aborted.'
+  },
+  [FileTransferError.DOWNLOAD_SERVER_ERROR]: {
+    code: FileTransferError.DOWNLOAD_SERVER_ERROR,
+    message: 'Download failed — Server returned an error when downloading the file.',
+    technicalDescription: 'Server returned non-2xx status code during GET download.'
+  },
+  [FileTransferError.DOWNLOAD_NOT_FOUND]: {
+    code: FileTransferError.DOWNLOAD_NOT_FOUND,
+    message: 'Download failed — The requested file could not be found or has expired.',
+    technicalDescription: 'Server returned HTTP 404 status code during GET download.'
+  },
+  [FileTransferError.DECRYPT_KEY_MISSING]: {
+    code: FileTransferError.DECRYPT_KEY_MISSING,
+    message: 'Decryption failed — Sender public key not found.',
+    technicalDescription: 'Sender public key not available from socket or Firestore.'
+  },
+  [FileTransferError.DECRYPT_FAILED]: {
+    code: FileTransferError.DECRYPT_FAILED,
+    message: 'Decryption failed — The file may be corrupted or the key is invalid.',
+    technicalDescription: 'CryptoService.decryptFile failed to decrypt ciphertext with derived shared secret.'
+  },
+  [FileTransferError.DECOMPRESS_FAILED]: {
+    code: FileTransferError.DECOMPRESS_FAILED,
+    message: 'Decompression failed after decryption.',
+    technicalDescription: 'CompressionService.decompressFile threw an exception.'
+  },
+  [FileTransferError.RENDER_FAILED]: {
+    code: FileTransferError.RENDER_FAILED,
+    message: 'Rendering failed — File loaded successfully but format is unsupported or corrupted.',
+    technicalDescription: 'Browser failed to render/decode or play the file format (img onError or audio error event).'
+  },
+  [FileTransferError.UNKNOWN_ERROR]: {
+    code: FileTransferError.UNKNOWN_ERROR,
+    message: 'An unknown error occurred during the file transfer.',
+    technicalDescription: 'Fallback error for uncaught exceptions in the pipeline.'
+  }
+};
+
 export interface User {
   id: string;
   name: string;

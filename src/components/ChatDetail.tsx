@@ -7,7 +7,7 @@ import { Icon, Avatar, Button, Card, cn } from './UI';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GroupInfo } from './GroupInfo';
 import { MediaGallery } from './MediaGallery';
-import { FileTransferError } from '../types';
+import { FileTransferError, FileTransferErrorDetails } from '../types';
 
 function formatLastSeen(lastSeen?: string | null): string {
   if (!lastSeen) return 'Offline';
@@ -79,7 +79,14 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
   const [retryKey, setRetryKey] = useState(0);
 
   const isFailed = msg.status === 'failed';
-  const displayError = (isOwn && isFailed) ? `Failed to send — ${msg.errorCode || FileTransferError.UNKNOWN_ERROR}` : loadError;
+  const displayError = (() => {
+    if (isOwn && isFailed) {
+      const code = msg.errorCode as FileTransferError || FileTransferError.UNKNOWN_ERROR;
+      const detail = FileTransferErrorDetails[code] || FileTransferErrorDetails[FileTransferError.UNKNOWN_ERROR];
+      return `Failed to send — ${code}: ${detail.message}`;
+    }
+    return loadError;
+  })();
 
   useEffect(() => {
     if (isOwn && isFailed) return; // Sender doesn't need to decrypt if upload failed
@@ -193,16 +200,26 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
         }
 
         if (!pubKeyBase64) {
-          throw new Error("Could not resolve remote public key for decryption");
+          throw new Error("DECRYPT_KEY_MISSING");
         }
 
         if (!msg.iv) {
-          throw new Error("Missing IV for decryption");
+          throw new Error("DECRYPT_FAILED");
         }
 
-        sharedSecret = await cryptoService.deriveSharedSecret(remoteId, pubKeyBase64);
+        try {
+          sharedSecret = await cryptoService.deriveSharedSecret(remoteId, pubKeyBase64);
+        } catch (deriveErr) {
+          throw new Error("DECRYPT_KEY_MISSING");
+        }
 
-        const decryptedBlob = await cryptoService.decryptFile(encryptedBlob, msg.iv, sharedSecret, msg.type === 'audio' ? 'audio/webm' : (msg.type === 'file' ? 'application/octet-stream' : 'image/jpeg'));
+        let decryptedBlob;
+        try {
+          decryptedBlob = await cryptoService.decryptFile(encryptedBlob, msg.iv, sharedSecret, msg.type === 'audio' ? 'audio/webm' : (msg.type === 'file' ? 'application/octet-stream' : 'image/jpeg'));
+        } catch (decErr) {
+          throw new Error("DECRYPT_FAILED");
+        }
+
         let decompressed;
         try {
           decompressed = await compressionService.decompressFile(decryptedBlob);
@@ -224,27 +241,29 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
 
         if (active) setUrl(URL.createObjectURL(decompressed));
       } catch (e: any) {
-        console.error("Decryption/Decompression failed", e);
         if (active) {
           setDownloadProgress(null);
           
           let errorCode = FileTransferError.UNKNOWN_ERROR;
-          if (e.message === 'Could not resolve remote public key for decryption') {
+          if (e.message === 'DECRYPT_KEY_MISSING') {
             errorCode = FileTransferError.DECRYPT_KEY_MISSING;
-          } else if (e.message === 'DECRYPT_FAILED' || e.message?.includes('decrypt')) {
+          } else if (e.message === 'DECRYPT_FAILED') {
             errorCode = FileTransferError.DECRYPT_FAILED;
-          } else if (e.message === 'DECOMPRESS_FAILED' || e.message?.includes('decompres')) {
+          } else if (e.message === 'DECOMPRESS_FAILED') {
             errorCode = FileTransferError.DECOMPRESS_FAILED;
-          } else if (e.message === 'Network error' || e.message === 'DOWNLOAD_NETWORK_ERROR') {
+          } else if (e.message === 'DOWNLOAD_NETWORK_ERROR') {
             errorCode = FileTransferError.DOWNLOAD_NETWORK_ERROR;
-          } else if (e.message === 'DOWNLOAD_NOT_FOUND' || e.message?.includes('404')) {
+          } else if (e.message === 'DOWNLOAD_NOT_FOUND') {
             errorCode = FileTransferError.DOWNLOAD_NOT_FOUND;
           } else if (e.message === 'DOWNLOAD_SERVER_ERROR') {
             errorCode = FileTransferError.DOWNLOAD_SERVER_ERROR;
           }
           
+          const detail = FileTransferErrorDetails[errorCode];
           const baseMsg = msg.type === 'audio' ? "Couldn't load voice note" : msg.type === 'image' ? "Couldn't load image" : "Couldn't load file";
+          
           setLoadError(`${baseMsg} — ${errorCode}`);
+          console.error(`[Receiver Media Load Failure] Message ID: ${msg.id}, Error Code: ${errorCode}, Technical details: ${detail?.technicalDescription || 'None'}, Exception:`, e);
         }
       }
     };
@@ -832,7 +851,7 @@ export const ChatDetail = () => {
           updateMessageFileUrl(messageId, url, fileSize);
         }
 
-        setToast("Voice message received directly via WebRTC!");
+        setToast("Media received directly via WebRTC!");
         setTimeout(() => setToast(null), 3000);
       }
     };
@@ -1110,6 +1129,14 @@ export const ChatDetail = () => {
           encryptedFileKey: sharedSecret ? [] : undefined
         };
 
+        // Cache original blob locally so we can retry even after page reload
+        try {
+          const { voiceNoteCache } = await import('../services/voiceNoteCache');
+          await voiceNoteCache.set(generatedMessageId, media.blob);
+        } catch (cacheErr) {
+          console.error("Failed to cache original media for potential retry:", cacheErr);
+        }
+
         useAppStore.getState().addPendingMessage(activeChatId, activeRecipientId, localMsg);
 
         if (!isGroup && targetId && !pubKeyBase64) {
@@ -1139,13 +1166,13 @@ export const ChatDetail = () => {
           }
         }
 
-        // WebRTC direct chunk-by-chunk P2P audio transmission
-        if (media.type === 'audio' && targetId && !isGroup) {
+        // WebRTC direct chunk-by-chunk P2P transmission
+        if (targetId && !isGroup) {
           try {
-            console.log(`WebRTC: Sending chunk-by-chunk audio message ${generatedMessageId} directly to peer ${targetId}...`);
+            console.log(`WebRTC: Sending chunk-by-chunk media ${generatedMessageId} directly to peer ${targetId}...`);
             webrtcService.sendAudioChunks(targetId, media.blob, media.blob.type, generatedMessageId);
           } catch (rtcErr) {
-            console.warn("Direct WebRTC audio chunk sending failed, relying on server backup", rtcErr);
+            console.warn("Direct WebRTC media chunk sending failed, relying on server backup", rtcErr);
           }
         }
 
@@ -1243,8 +1270,6 @@ export const ChatDetail = () => {
           if (uploadErr.message === 'QUOTA_EXCEEDED') {
             finalErrorCode = FileTransferError.UPLOAD_QUOTA_EXCEEDED;
             setToast("Daily 100MB quota exceeded!");
-            useAppStore.getState().updateMessageProgress(generatedMessageId, 0, 'failed', finalErrorCode);
-            break;
           } else if (uploadErr.message === 'Network error') {
             finalErrorCode = FileTransferError.UPLOAD_NETWORK_ERROR;
           } else if (uploadErr.message?.startsWith('Server error')) {
@@ -1252,29 +1277,10 @@ export const ChatDetail = () => {
           } else {
             finalErrorCode = FileTransferError.UNKNOWN_ERROR;
           }
-          console.warn(`Upload request failed (${finalErrorCode}), falling back to offline base64 storage:`, uploadErr);
-        }
-
-        if (!uploadSuccess) {
-          try {
-            console.log("Fallback to offline base64 storage in Firebase...");
-            const base64Url = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(uploadBlob);
-            });
-
-            const e2eData = sharedSecret ? {
-              encryptedText: encTextStr,
-              iv: e2eFileIv!
-            } : undefined;
-
-            sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData, undefined, generatedMessageId);
-          } catch(fallbackErr: any) {
-             console.error("Base64 fallback also failed:", fallbackErr);
-             useAppStore.getState().updateMessageProgress(generatedMessageId, 0, 'failed', finalErrorCode);
-          }
+          const detail = FileTransferErrorDetails[finalErrorCode];
+          console.error(`[Sender Media Send Failure] Message ID: ${generatedMessageId}, Error Code: ${finalErrorCode}, Technical details: ${detail?.technicalDescription || 'None'}, Exception:`, uploadErr);
+          useAppStore.getState().updateMessageProgress(generatedMessageId, 0, 'failed', finalErrorCode);
+          continue;
         }
       } catch (error) {
         console.error("Error uploading media:", error);
@@ -1400,31 +1406,46 @@ export const ChatDetail = () => {
   };
 
   const retrySendMedia = async (msg: any) => {
-    if (!msg.fileUrl) {
-      console.error("Cannot retry: Missing local file blob");
-      return;
-    }
     try {
-      useAppStore.getState().updateMessageProgress(msg.id, 0, 'uploading');
+      let file: File | null = null;
       
-      const response = await fetch(msg.fileUrl);
-      const blob = await response.blob();
-      const file = new File([blob], msg.text || 'file', { type: blob.type });
+      // Try to recover from the voiceNoteCache (IndexedDB) first, using msg.id
+      try {
+        const { voiceNoteCache } = await import('../services/voiceNoteCache');
+        const cachedBlob = await voiceNoteCache.get(msg.id);
+        if (cachedBlob) {
+          console.log("Successfully recovered original blob from IndexedDB cache for retry.");
+          file = new File([cachedBlob], msg.text || (msg.type === 'audio' ? 'Voice Message' : 'File'), { type: cachedBlob.type });
+        }
+      } catch (cacheErr) {
+        console.warn("Failed to get blob from IndexedDB cache:", cacheErr);
+      }
+
+      // Fallback to fetching the fileUrl
+      if (!file && msg.fileUrl) {
+        try {
+          const response = await fetch(msg.fileUrl);
+          const blob = await response.blob();
+          file = new File([blob], msg.text || (msg.type === 'audio' ? 'Voice Message' : 'File'), { type: blob.type });
+        } catch (fetchErr) {
+          console.error("Failed to fetch from blob URL:", fetchErr);
+        }
+      }
+
+      if (!file) {
+        console.error("Cannot retry: Could not recover local file blob from cache or URL");
+        setToast("Retry failed: Local file blob could not be recovered.");
+        return;
+      }
       
       const media = {
         type: msg.type,
         blob: file,
-        url: msg.fileUrl,
-        name: msg.text
+        url: URL.createObjectURL(file),
+        name: msg.text || (msg.type === 'audio' ? 'Voice Message' : 'File')
       };
       
-      // We set the captured media and call handleSend (Wait, handleSend uses current capturedMedia state, we can't directly call it here. Instead, we can just queue the media and trigger send).
-      // Since handleSend depends on state, and state updates are async, the easiest way is to set capturedMedia and then the user can click Send again.
-      // But prompt says "A 'Retry' action that re-attempts the full send pipeline".
-      // Let's just delete the local message and prepopulate the input field so they can hit send.
-      // Actually, we can extract the media sending block from handleSend into a function, but to avoid 200 lines of copy-paste, we can use a ref or effect to auto-send.
-      
-      setCapturedMedia(prev => [...prev, media]);
+      setCapturedMedia([media]); // Replace with just this media to prevent duplication
       useAppStore.getState().deleteMessageLocally(msg.id);
       
       // Auto-trigger send on next render
@@ -2048,8 +2069,10 @@ export const ChatDetail = () => {
                         className={cn(
                           "p-4 rounded-[1.5rem] shadow-sm relative touch-none transition-all",
                           isOwn 
-                             ? "bg-primary text-white rounded-tr-none shadow-primary/20" 
-                            : "bg-white text-slate-700 rounded-tl-none border border-slate-100",
+                             ? (msg.status === 'failed'
+                                 ? "bg-red-500/10 text-red-600 rounded-tr-none border border-red-500/20 shadow-none"
+                                 : "bg-primary text-white rounded-tr-none shadow-primary/20")
+                             : "bg-white text-slate-700 rounded-tl-none border border-slate-100",
                           selectedMessageIds.includes(msg.id) && (isOwn ? "bg-primary-dark ring-4 ring-primary/20" : "bg-primary/10 ring-2 ring-primary/20")
                         )}
                       >
@@ -2089,9 +2112,11 @@ export const ChatDetail = () => {
                       {isOwn && !isGloballyDeleted && (() => {
                         const status = msg.status || 'read';
                         const iconName = 
+                          status === 'failed' ? 'error_outline' :
                           status === 'pending' ? 'schedule' :
                           (status === 'read' || status === 'delivered') ? 'done_all' : 'check';
                         const iconColor = 
+                          status === 'failed' ? 'text-red-500 font-black' :
                           status === 'pending' ? 'text-amber-500 animate-pulse' :
                           status === 'read' ? 'text-blue-500' : 'text-slate-400';
                         return (

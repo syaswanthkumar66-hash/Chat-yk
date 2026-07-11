@@ -139,10 +139,6 @@ export const GlobalSearch = ({ onClose }: { onClose: () => void }) => {
                isOnline: userData.isOnline || false,
                lastSeen: userData.lastSeen || null,
              });
-             
-             if (!useAppStore.getState().removedFriendIds.includes(doc.id)) {
-               useAppStore.getState().removeFriend(doc.id);
-             }
           }
         });
 

@@ -208,9 +208,6 @@ export const SocialLayout = () => {
                     
                     // Add to local store so UserProfileView can see it
                     useAppStore.getState().addUser(newUser);
-                    if (!useAppStore.getState().removedFriendIds.includes(doc.id)) {
-                      useAppStore.getState().removeFriend(doc.id);
-                    }
                     setViewingUserId(doc.id);
                     return;
                   }
@@ -230,9 +227,6 @@ export const SocialLayout = () => {
                     };
                     
                     useAppStore.getState().addUser(newUser);
-                    if (!useAppStore.getState().removedFriendIds.includes(userDoc.id)) {
-                      useAppStore.getState().removeFriend(userDoc.id);
-                    }
                     setViewingUserId(userDoc.id);
                   }
                 } catch (e) {

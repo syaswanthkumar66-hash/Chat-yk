@@ -1032,7 +1032,7 @@ export default function App() {
       unsubscribeNotifications();
       unsubscribeCloudSync();
     };
-  }, [isLoggedIn, user?.id]);
+  }, [isLoggedIn, user?.id, auth.currentUser?.uid]);
 
   // Trigger Auto-Sync to Cloud when local database changes
   useEffect(() => {
