@@ -298,6 +298,52 @@ let heartbeatIntervalId: any = null;
 let isWakingUp = false;
 let lastSuccessfulWakeUpTime = 0;
 
+export function safeLocalStorageSetItem(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error: any) {
+    console.error(`[StorageError] Failed to write key "${key}" to localStorage:`, error);
+    if (
+      error.name === 'QuotaExceededError' ||
+      error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+      error.code === 22 ||
+      error.code === 1014
+    ) {
+      console.warn(`[StorageError] LocalStorage quota exceeded for key "${key}"! Attempting cache pruning/compaction to recover...`);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('storage_quota_exceeded', {
+          detail: { key, error: error.message }
+        }));
+      }
+      if (key.includes('chats')) {
+        try {
+          const chats = JSON.parse(value);
+          if (Array.isArray(chats)) {
+            const prunedChats = chats.map(c => {
+              if (c.messages && c.messages.length > 20) {
+                console.log(`[StorageError] Pruning chat "${c.id || c.name}" messages from ${c.messages.length} to 20`);
+                return {
+                  ...c,
+                  messages: c.messages.slice(-20)
+                };
+              }
+              return c;
+            });
+            const prunedValue = JSON.stringify(prunedChats);
+            localStorage.setItem(key, prunedValue);
+            console.log(`[StorageError] Successfully recovered from QuotaExceededError by pruning message history for key "${key}"`);
+            return true;
+          }
+        } catch (pruneErr) {
+          console.error(`[StorageError] Failed to prune chats for recovery:`, pruneErr);
+        }
+      }
+    }
+    return false;
+  }
+}
+
 const getLocalStorageItem = (key: string, defaultValue: string = ''): string => {
   if (typeof window !== 'undefined') {
     return localStorage.getItem(key) || defaultValue;
@@ -310,9 +356,33 @@ const getLocalStorageJSON = <T>(key: string, defaultValue: T): T => {
     const item = localStorage.getItem(key);
     if (item) {
       try {
-        return JSON.parse(item) as T;
-      } catch (e) {
-        console.error("Error parsing localStorage key", key, e);
+        const parsed = JSON.parse(item);
+        
+        // --- Structural Validation Self-Check ---
+        if (key.includes('chats')) {
+          if (!Array.isArray(parsed)) {
+            throw new Error(`Cached chats for "${key}" is not a valid array`);
+          }
+          for (const chat of parsed) {
+            if (!chat || typeof chat !== 'object' || (!chat.id && !chat.name)) {
+              throw new Error(`Corrupted chat object in cache key "${key}"`);
+            }
+          }
+        } else if (key.includes('users') || key.includes('friendRequests') || key.includes('blockedUserIds') || key.includes('removedFriendIds')) {
+          if (!Array.isArray(parsed)) {
+            throw new Error(`Cached array for "${key}" is not a valid array`);
+          }
+        }
+        
+        return parsed as T;
+      } catch (e: any) {
+        console.error(`[StorageSelfCheck] Cache corruption/integrity failure detected for key "${key}":`, e.message || e);
+        try {
+          localStorage.removeItem(key);
+          console.warn(`[StorageSelfCheck] Purged corrupted cache key "${key}" to avoid app crashes.`);
+        } catch (rmErr) {
+          console.error(`[StorageSelfCheck] Failed to remove corrupted key "${key}":`, rmErr);
+        }
       }
     }
   }
@@ -2603,18 +2673,18 @@ if (typeof window !== 'undefined') {
   useAppStore.subscribe((state) => {
     try {
       if (state.user?.id) {
-        localStorage.setItem(`proto_chats_${state.user.id}`, JSON.stringify(state.chats));
-        localStorage.setItem(`proto_users_${state.user.id}`, JSON.stringify(state.users));
-        localStorage.setItem(`proto_friendRequests_${state.user.id}`, JSON.stringify(state.friendRequests));
-        localStorage.setItem(`proto_sentFriendRequests_${state.user.id}`, JSON.stringify(state.sentFriendRequests));
-        localStorage.setItem(`proto_blockedUserIds_${state.user.id}`, JSON.stringify(state.blockedUserIds));
-        localStorage.setItem(`proto_removedFriendIds_${state.user.id}`, JSON.stringify(state.removedFriendIds));
+        safeLocalStorageSetItem(`proto_chats_${state.user.id}`, JSON.stringify(state.chats));
+        safeLocalStorageSetItem(`proto_users_${state.user.id}`, JSON.stringify(state.users));
+        safeLocalStorageSetItem(`proto_friendRequests_${state.user.id}`, JSON.stringify(state.friendRequests));
+        safeLocalStorageSetItem(`proto_sentFriendRequests_${state.user.id}`, JSON.stringify(state.sentFriendRequests));
+        safeLocalStorageSetItem(`proto_blockedUserIds_${state.user.id}`, JSON.stringify(state.blockedUserIds));
+        safeLocalStorageSetItem(`proto_removedFriendIds_${state.user.id}`, JSON.stringify(state.removedFriendIds));
       } else {
         // Fallback for non-logged-in session state if any, though normally empty on logout
-        localStorage.setItem('proto_users', JSON.stringify(state.users));
-        localStorage.setItem('proto_chats', JSON.stringify(state.chats));
-        localStorage.setItem('proto_friendRequests', JSON.stringify(state.friendRequests));
-        localStorage.setItem('proto_sentFriendRequests', JSON.stringify(state.sentFriendRequests));
+        safeLocalStorageSetItem('proto_users', JSON.stringify(state.users));
+        safeLocalStorageSetItem('proto_chats', JSON.stringify(state.chats));
+        safeLocalStorageSetItem('proto_friendRequests', JSON.stringify(state.friendRequests));
+        safeLocalStorageSetItem('proto_sentFriendRequests', JSON.stringify(state.sentFriendRequests));
       }
     } catch (e) {
       console.error("Error subscribing to persist state:", e);

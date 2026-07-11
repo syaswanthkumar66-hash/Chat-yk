@@ -2306,7 +2306,7 @@ export const ChatDetail = () => {
                         onPointerLeave={cancelLongPress}
                         onContextMenu={(e) => handleContextMenu(e, msg.id, msg.text || '', isOwn)}
                         className={cn(
-                          "p-4 rounded-[1.5rem] shadow-sm relative touch-none transition-all",
+                          "p-4 rounded-[1.5rem] shadow-sm relative touch-none transition-all max-w-full overflow-hidden break-words break-all",
                           isOwn 
                              ? (msg.status === 'failed'
                                  ? "bg-red-500/10 text-red-600 rounded-tr-none border border-red-500/20 shadow-none"
@@ -2322,7 +2322,7 @@ export const ChatDetail = () => {
                         ) : msg.type === 'image' || msg.type === 'audio' || msg.type === 'file' ? (
                           <DecryptedMedia msg={msg} isOwn={isOwn} peerId={otherParticipantId} onPreview={(data) => setPreviewMedia(data)} onRetrySend={retrySendMedia} />
                         ) : (
-                          <p className="text-sm whitespace-pre-wrap"><span>{msg.text}</span></p>
+                          <p className="text-sm whitespace-pre-wrap break-words break-all"><span>{msg.text}</span></p>
                         )}
 
                         {reactions[msg.id] && reactions[msg.id].length > 0 && !isGloballyDeleted && (

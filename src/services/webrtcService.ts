@@ -183,6 +183,11 @@ class WebRTCService {
 
     pc.oniceconnectionstatechange = () => {
       console.log(`ICE Connection State for peer ${peerId}:`, pc.iceConnectionState);
+      if (pc.iceConnectionState === 'failed') {
+        window.dispatchEvent(new CustomEvent('webrtc_connection_failed', {
+          detail: { peerId }
+        }));
+      }
       if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
         this.removePeer(peerId);
       }

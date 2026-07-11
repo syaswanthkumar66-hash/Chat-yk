@@ -15,7 +15,19 @@ interface Participant {
   streamId?: string;
 }
 
-const VideoPlayer = ({ stream, isLocal = false, isVideoOff = false, className }: { stream: MediaStream | null, isLocal?: boolean, isVideoOff?: boolean, className?: string }) => {
+const VideoPlayer = ({ 
+  stream, 
+  isLocal = false, 
+  isVideoOff = false, 
+  className,
+  speakerMode = 'speaker'
+}: { 
+  stream: MediaStream | null, 
+  isLocal?: boolean, 
+  isVideoOff?: boolean, 
+  className?: string,
+  speakerMode?: 'speaker' | 'earpiece'
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -23,6 +35,49 @@ const VideoPlayer = ({ stream, isLocal = false, isVideoOff = false, className }:
       videoRef.current.srcObject = stream;
     }
   }, [stream]);
+
+  useEffect(() => {
+    const applyAudioSink = async () => {
+      const el = videoRef.current;
+      if (!el || isLocal || !stream) return;
+
+      if (typeof (el as any).setSinkId === 'function') {
+        try {
+          if (speakerMode === 'earpiece') {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const outputs = devices.filter(d => d.kind === 'audiooutput');
+            
+            const earpiece = outputs.find(d => {
+              const label = d.label.toLowerCase();
+              return label.includes('earpiece') || 
+                     label.includes('receiver') || 
+                     label.includes('handset') || 
+                     label.includes('internal') || 
+                     label.includes('phone') || 
+                     label.includes('builtin') ||
+                     label.includes('built-in');
+            });
+            
+            if (earpiece) {
+              console.log(`[AudioRouting] Switching output to earpiece: ${earpiece.label} (${earpiece.deviceId})`);
+              await (el as any).setSinkId(earpiece.deviceId);
+            } else {
+              console.warn(`[AudioRouting] Earpiece mode selected, but no matching earpiece device found. Available outputs:`, outputs.map(o => o.label));
+            }
+          } else {
+            console.log(`[AudioRouting] Switching output to default speaker`);
+            await (el as any).setSinkId('');
+          }
+        } catch (err) {
+          console.error('[AudioRouting] Failed to set audio sink ID:', err);
+        }
+      } else {
+        console.warn('[AudioRouting] setSinkId() is not supported on this browser/platform.');
+      }
+    };
+
+    applyAudioSink();
+  }, [speakerMode, isLocal, stream]);
 
   return (
     <video
@@ -95,7 +150,11 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: type === 'video',
-          audio: true
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
         });
         if (!mounted) return;
         setLocalStream(stream);
@@ -135,7 +194,15 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       });
     };
 
+    const handleConnectionFailed = (e: any) => {
+      const { peerId } = e.detail;
+      setParticipants(prev => prev.map(p => 
+        p.id === peerId ? { ...p, status: 'offline' } : p
+      ));
+    };
+
     window.addEventListener('webrtc_stream', handleRemoteStream);
+    window.addEventListener('webrtc_connection_failed', handleConnectionFailed);
 
     return () => {
       mounted = false;
@@ -144,6 +211,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       }
       webrtcService.closeSession();
       window.removeEventListener('webrtc_stream', handleRemoteStream);
+      window.removeEventListener('webrtc_connection_failed', handleConnectionFailed);
       
       if (socket) {
         const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
@@ -307,6 +375,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
   const isPipMode = !!userId && participants.length === 2 && type === 'video';
   const isOneOnOne = !!userId && participants.length === 2;
+  const isSinkSupported = typeof window !== 'undefined' && typeof (HTMLMediaElement.prototype as any).setSinkId === 'function';
 
   const sortedParticipants = [...participants].sort((a, b) => {
     if (a.id === 'me') return 1;
@@ -367,6 +436,16 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
         </div>
       </header>
 
+      {/* Platform routing warning for Safari/iOS */}
+      {speakerMode === 'earpiece' && !isSinkSupported && (
+        <div className="bg-amber-500/10 border-y border-amber-500/20 px-4 py-2 flex items-center justify-center gap-2 z-40 text-amber-300">
+          <Icon name="warning" className="text-sm" />
+          <span className="text-[9px] md:text-[10px] font-mono uppercase tracking-wider font-bold">
+            Platform Note: iOS/Safari does not support direct audio earpiece routing. Uses system defaults.
+          </span>
+        </div>
+      )}
+
       {/* Main Video Area */}
       <main className="flex-1 relative overflow-y-auto no-scrollbar py-4 md:py-8 px-4 md:px-8">
         {isOneOnOne ? (
@@ -404,6 +483,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                   <VideoPlayer 
                     stream={participants[1].streamId ? remoteStreams[participants[1].streamId] : null} 
                     className="size-full rounded-[2.5rem] object-cover" 
+                    speakerMode={speakerMode}
                   />
                 ) : (
                   <img 
@@ -513,6 +593,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                       className={cn(
                         "size-full object-cover transition-transform duration-700 group-hover:scale-110"
                       )} 
+                      speakerMode={speakerMode}
                     />
                   ) : (
                     <img 

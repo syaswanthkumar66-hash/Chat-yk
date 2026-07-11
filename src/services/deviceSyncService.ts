@@ -1,4 +1,4 @@
-import { useAppStore } from '../store';
+import { useAppStore, safeLocalStorageSetItem } from '../store';
 import { BACKEND_URL } from '../config';
 
 export interface SyncProgress {
@@ -620,7 +620,7 @@ class DeviceSyncService {
       // Safe update keys
       const saveLocalJSON = (key: string, value: any) => {
         try {
-          localStorage.setItem(key, JSON.stringify(value));
+          safeLocalStorageSetItem(key, JSON.stringify(value));
         } catch (e) {
           console.error("Local storage error:", e);
         }
