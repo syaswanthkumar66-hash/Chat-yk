@@ -1449,11 +1449,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         const targetDevices = users.get(to);
         if (targetDevices) {
           for (const socketId of targetDevices.values()) {
-            io.to(socketId).emit("call_ended", { roomId });
+            io.to(socketId).emit("call_ended", data);
           }
         }
       } else {
-        socket.to(roomId).emit("call_ended", { roomId });
+        socket.to(roomId).emit("call_ended", data);
       }
     });
 

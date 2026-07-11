@@ -13,6 +13,7 @@ import { NotificationPanel } from './NotificationPanel';
 import { GroupCall } from './GroupCall';
 import { GroupInfo } from './GroupInfo';
 import { DeviceSyncFlow } from './DeviceSyncFlow';
+import { IncomingCallOverlay } from './IncomingCallOverlay';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, collection, query, where, getDocs, getDoc, doc } from '../firebase';
 
@@ -64,6 +65,8 @@ export const SocialLayout = () => {
     cancelFriendRequest,
     activeGroupCall,
     setActiveGroupCall,
+    incomingCall,
+    setIncomingCall,
     activeGroupInfoId,
     setActiveGroupInfoId,
     chats,
@@ -103,6 +106,8 @@ export const SocialLayout = () => {
     cancelFriendRequest: s.cancelFriendRequest,
     activeGroupCall: s.activeGroupCall,
     setActiveGroupCall: s.setActiveGroupCall,
+    incomingCall: s.incomingCall,
+    setIncomingCall: s.setIncomingCall,
     activeGroupInfoId: s.activeGroupInfoId,
     setActiveGroupInfoId: s.setActiveGroupInfoId,
     chats: s.chats,
@@ -1043,6 +1048,37 @@ export const SocialLayout = () => {
             userId={activeGroupCall.userId}
             type={activeGroupCall.type} 
             onClose={() => setActiveGroupCall(null)} 
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Incoming Call Ringing Overlay */}
+      <AnimatePresence>
+        {incomingCall && (
+          <IncomingCallOverlay
+            incomingCall={incomingCall}
+            onAccept={() => {
+              setActiveGroupCall({
+                type: incomingCall.type,
+                userId: incomingCall.from,
+                roomId: incomingCall.roomId
+              });
+              const socket = useAppStore.getState().socket;
+              if (socket && user?.id) {
+                socket.emit('end_call', { to: user.id, roomId: incomingCall.roomId, wasAnsweredElsewhere: true });
+              }
+              setIncomingCall(null);
+            }}
+            onDecline={() => {
+              const socket = useAppStore.getState().socket;
+              if (socket) {
+                socket.emit('end_call', { to: incomingCall.from, roomId: incomingCall.roomId });
+                if (user?.id) {
+                  socket.emit('end_call', { to: user.id, roomId: incomingCall.roomId });
+                }
+              }
+              setIncomingCall(null);
+            }}
           />
         )}
       </AnimatePresence>

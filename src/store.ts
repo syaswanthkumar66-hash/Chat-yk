@@ -152,8 +152,10 @@ interface AppState {
     messageId: string;
   }>;
   setIncomingMediaUpload: (senderId: string, data: { percent: number; mediaType: string; fileName?: string; messageId: string } | null) => void;
-  activeGroupCall: { type: 'voice' | 'video', groupId?: string, userId?: string } | null;
-  setActiveGroupCall: (call: { type: 'voice' | 'video', groupId?: string, userId?: string } | null) => void;
+  activeGroupCall: { type: 'voice' | 'video', groupId?: string, userId?: string, roomId?: string } | null;
+  setActiveGroupCall: (call: { type: 'voice' | 'video', groupId?: string, userId?: string, roomId?: string } | null) => void;
+  incomingCall: { type: 'voice' | 'video', roomId: string, from: string } | null;
+  setIncomingCall: (call: { type: 'voice' | 'video', roomId: string, from: string } | null) => void;
   blockedUserIds: string[];
   removedFriendIds: string[];
   removeFriend: (userId: string) => void;
@@ -1539,16 +1541,22 @@ export const useAppStore = create<AppState>((set) => ({
       // 9. incoming_call
       sock.off('incoming_call').on('incoming_call', (data: { roomId: string, type: 'voice' | 'video', from: string }) => {
         set((state) => {
-          if (!state.activeGroupCall) {
-            return { activeGroupCall: { type: data.type, userId: data.from } };
+          if (!state.activeGroupCall && !state.incomingCall) {
+            return { incomingCall: { type: data.type, roomId: data.roomId, from: data.from } };
           }
           return state;
         });
       });
 
       // 10. call_ended
-      sock.off('call_ended').on('call_ended', () => {
-        set({ activeGroupCall: null });
+      sock.off('call_ended').on('call_ended', (data?: { roomId?: string, wasAnsweredElsewhere?: boolean }) => {
+        set((state) => {
+          if (data?.wasAnsweredElsewhere) {
+            // Call answered on another device, dismiss ringing screen without ending call
+            return { incomingCall: null };
+          }
+          return { incomingCall: null, activeGroupCall: null };
+        });
       });
 
       // 11. typing
@@ -1940,6 +1948,8 @@ export const useAppStore = create<AppState>((set) => ({
   currentDeviceId: null,
   activeGroupCall: null,
   setActiveGroupCall: (call) => set({ activeGroupCall: call }),
+  incomingCall: null,
+  setIncomingCall: (call) => set({ incomingCall: call }),
   blockedUserIds: cachedBlockedUserIds,
   removedFriendIds: cachedRemovedFriendIds,
   removeFriend: async (userId) => {

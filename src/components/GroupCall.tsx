@@ -425,31 +425,35 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
             <div className="text-center space-y-4 md:space-y-6 relative z-10">
               <h1 className="text-4xl md:text-6xl font-black italic uppercase tracking-tighter leading-none">{participants[1]?.name}</h1>
               <div className="flex items-center justify-center gap-3">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-white/30">Voice & Video Stream Active</span>
+                <span className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-white/30">
+                  {type === 'voice' ? 'Encrypted Audio Connection Active' : 'Voice & Video Stream Active'}
+                </span>
               </div>
             </div>
             
             {/* Self View (PIP) */}
-            <motion.div 
-              drag
-              dragConstraints={{ left: -200, right: 200, top: -200, bottom: 200 }}
-              className="absolute bottom-4 md:bottom-8 right-4 md:right-8 size-24 md:size-40 rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900 group cursor-move z-30"
-            >
-              {!participants[0]?.isVideoOff ? (
-                <VideoPlayer 
-                  stream={localStream} 
-                  isLocal={true} 
-                  className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
-                />
-              ) : (
-                <img src={participants[0]?.avatar} className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" referrerPolicy="no-referrer" />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-              <div className="absolute bottom-2 md:bottom-3 left-3 md:left-4 flex items-center gap-2">
-                <div className="size-1 md:size-1.5 rounded-full bg-primary" />
-                <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-70">You</span>
-              </div>
-            </motion.div>
+            {type !== 'voice' && (
+              <motion.div 
+                drag
+                dragConstraints={{ left: -200, right: 200, top: -200, bottom: 200 }}
+                className="absolute bottom-4 md:bottom-8 right-4 md:right-8 size-24 md:size-40 rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900 group cursor-move z-30"
+              >
+                {!participants[0]?.isVideoOff ? (
+                  <VideoPlayer 
+                    stream={localStream} 
+                    isLocal={true} 
+                    className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
+                  />
+                ) : (
+                  <img src={participants[0]?.avatar} className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" referrerPolicy="no-referrer" />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                <div className="absolute bottom-2 md:bottom-3 left-3 md:left-4 flex items-center gap-2">
+                  <div className="size-1 md:size-1.5 rounded-full bg-primary" />
+                  <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-70">You</span>
+                </div>
+              </motion.div>
+            )}
           </div>
         ) : (
           /* Group View */
@@ -525,9 +529,11 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                     <div className="absolute inset-0 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
                       <div className="relative">
                         <Avatar src={p.avatar} className="size-20 md:size-28 border-4 border-white/10" />
-                        <div className="absolute -top-2 -right-2 size-10 rounded-2xl bg-slate-900/80 backdrop-blur-md flex items-center justify-center border-2 border-white/10 text-white/60">
-                          <Icon name="videocam_off" className="text-lg" />
-                        </div>
+                        {type !== 'voice' && (
+                          <div className="absolute -top-2 -right-2 size-10 rounded-2xl bg-slate-900/80 backdrop-blur-md flex items-center justify-center border-2 border-white/10 text-white/60">
+                            <Icon name="videocam_off" className="text-lg" />
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -544,7 +550,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                             <Icon name="mic_off" className="text-[14px] text-red-400" />
                           </div>
                         )}
-                        {p.isVideoOff && (
+                        {p.isVideoOff && type !== 'voice' && (
                           <div className="bg-white/10 p-1 rounded-lg border border-white/10">
                             <Icon name="videocam_off" className="text-[14px] text-white/60" />
                           </div>
