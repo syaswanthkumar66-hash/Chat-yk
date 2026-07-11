@@ -77,6 +77,8 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   const isFailed = msg.status === 'failed';
   const displayError = (() => {
@@ -365,7 +367,7 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
   if (msg.type === 'image') {
     if (displayError) {
       return (
-        <div className="flex flex-col items-center justify-center p-4 min-w-[150px] min-h-[100px] bg-black/5 rounded-xl border border-red-500/20 text-red-500">
+        <div className="flex flex-col items-center justify-center p-4 min-w-[150px] min-h-[100px] max-w-[min(380px,72%)] bg-black/5 rounded-xl border border-red-500/20 text-red-500">
           <Icon name="broken_image" className="text-2xl mb-2 opacity-80" />
           <span className="text-[10px] font-bold uppercase tracking-wider mb-2">{displayError}</span>
           <button 
@@ -381,29 +383,57 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
         </div>
       );
     }
+
+    const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+      const { naturalWidth, naturalHeight } = e.currentTarget;
+      if (naturalWidth && naturalHeight) {
+        setAspectRatio(naturalWidth / naturalHeight);
+      }
+      setImageLoaded(true);
+    };
+
+    const containerStyle: React.CSSProperties = {
+      aspectRatio: aspectRatio ? `${aspectRatio}` : '1.333',
+      maxWidth: 'min(400px, 72%)',
+      maxHeight: 'min(450px, 50vh)',
+      minWidth: '120px',
+      minHeight: '120px',
+      width: '100%',
+      transition: 'aspect-ratio 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
+    };
     
     return (
       <div 
-        className="space-y-2 cursor-pointer group/image relative min-w-[150px] min-h-[100px]" 
+        className="flex flex-col gap-2 cursor-pointer group/image relative max-w-full" 
         onClick={() => !showProgress && onPreview?.({ type: 'image', url, name: msg.text || 'Image', size: msg.fileSize })}
       >
-        <div className="relative rounded-xl overflow-hidden shadow-sm border border-slate-100 hover:border-primary/20 transition-all min-h-[100px] bg-black/5 flex items-center justify-center">
+        <div 
+          style={containerStyle}
+          className="relative rounded-xl overflow-hidden shadow-sm border border-slate-100 hover:border-primary/20 transition-all bg-black/5 flex items-center justify-center"
+        >
           {url ? (
             <img 
               src={url} 
+              onLoad={handleImageLoad}
               onError={() => setLoadError(`Couldn't load image — ${FileTransferError.RENDER_FAILED}`)} 
-              className="max-w-full rounded-xl hover:scale-[1.01] transition-transform duration-300" 
+              className={`w-full h-full object-contain rounded-xl hover:scale-[1.01] transition-all duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`} 
               referrerPolicy="no-referrer" 
             />
-          ) : (
-            !showProgress && <div className="text-slate-400 text-xs font-medium">Loading...</div>
+          ) : null}
+
+          {(!url || !imageLoaded) && !displayError && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100/50 dark:bg-slate-900/50 animate-pulse text-slate-400 p-3">
+              <Icon name="image" className="text-3xl mb-1.5 opacity-50 animate-bounce" />
+              <span className="text-[9px] font-bold tracking-wider uppercase opacity-60">Loading Secure Image...</span>
+            </div>
           )}
+
           {renderProgressOverlay()}
           <div className="absolute inset-0 bg-black/0 hover:bg-black/10 flex items-center justify-center transition-colors">
             <Icon name="zoom_in" className="text-white opacity-0 group-hover/image:opacity-100 transition-opacity text-2xl drop-shadow-md" />
           </div>
         </div>
-        {msg.text && <p className="text-sm font-medium leading-relaxed">{msg.text}</p>}
+        {msg.text && <p className="text-xs sm:text-sm font-medium leading-relaxed max-w-[min(400px,72%)] break-words">{msg.text}</p>}
       </div>
     );
   }
@@ -2647,7 +2677,7 @@ export const ChatDetail = () => {
                     <img 
                       src={previewMedia.url} 
                       alt={previewMedia.name} 
-                      className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-xl"
+                      className="max-w-[90vw] max-h-[85vh] md:max-w-[85vw] md:max-h-[80vh] object-contain rounded-lg shadow-2xl transition-all duration-300"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
