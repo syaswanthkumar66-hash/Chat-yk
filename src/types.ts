@@ -18,11 +18,113 @@ export enum FileTransferError {
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
+export enum CallError {
+  MIC_PERMISSION_DENIED = 'MIC_PERMISSION_DENIED',
+  MIC_NOT_FOUND = 'MIC_NOT_FOUND',
+  MIC_CAPTURE_FAILED = 'MIC_CAPTURE_FAILED',
+  SIGNALING_TIMEOUT = 'SIGNALING_TIMEOUT',
+  ICE_GATHERING_FAILED = 'ICE_GATHERING_FAILED',
+  CONNECTION_FAILED = 'CONNECTION_FAILED',
+  CONNECTION_DISCONNECTED = 'CONNECTION_DISCONNECTED',
+  CONNECTED_NO_MEDIA = 'CONNECTED_NO_MEDIA',
+  TRACK_NOT_RECEIVED = 'TRACK_NOT_RECEIVED',
+  PLAYBACK_BLOCKED = 'PLAYBACK_BLOCKED',
+  SINK_SWITCH_FAILED = 'SINK_SWITCH_FAILED',
+  RENEGOTIATION_FAILED = 'RENEGOTIATION_FAILED',
+  CALL_DECLINED = 'CALL_DECLINED',
+  CALL_TIMEOUT = 'CALL_TIMEOUT',
+  UNKNOWN_CALL_ERROR = 'UNKNOWN_CALL_ERROR',
+}
+
 export interface ErrorDetail {
   code: FileTransferError;
   message: string;
   technicalDescription: string;
 }
+
+export interface CallErrorDetail {
+  code: CallError;
+  message: string;
+  technicalDescription: string;
+}
+
+export const CallErrorDetails: Record<CallError, CallErrorDetail> = {
+  [CallError.MIC_PERMISSION_DENIED]: {
+    code: CallError.MIC_PERMISSION_DENIED,
+    message: 'Microphone permission denied — please enable mic access in your browser settings.',
+    technicalDescription: 'navigator.mediaDevices.getUserMedia threw NotAllowedError/PermissionDeniedError.'
+  },
+  [CallError.MIC_NOT_FOUND]: {
+    code: CallError.MIC_NOT_FOUND,
+    message: 'Microphone not found — please connect an audio input device.',
+    technicalDescription: 'navigator.mediaDevices.getUserMedia threw NotFoundError/DevicesNotFoundError.'
+  },
+  [CallError.MIC_CAPTURE_FAILED]: {
+    code: CallError.MIC_CAPTURE_FAILED,
+    message: 'Microphone capture failed — please check if your mic is in use by another application.',
+    technicalDescription: 'navigator.mediaDevices.getUserMedia threw an unexpected hardware error or DOMException.'
+  },
+  [CallError.SIGNALING_TIMEOUT]: {
+    code: CallError.SIGNALING_TIMEOUT,
+    message: 'Call setup timed out — could not complete connection handshake with the other party.',
+    technicalDescription: 'SDP offer/answer exchange or ICE candidates did not complete within the timeout window.'
+  },
+  [CallError.ICE_GATHERING_FAILED]: {
+    code: CallError.ICE_GATHERING_FAILED,
+    message: 'Network error — could not gather connection routing candidates (STUN/TURN offline or blocked).',
+    technicalDescription: 'RTCPeerConnection iceGatheringState completed with 0 valid remote candidates gathered.'
+  },
+  [CallError.CONNECTION_FAILED]: {
+    code: CallError.CONNECTION_FAILED,
+    message: 'Call connection failed — check your firewall or network connection.',
+    technicalDescription: 'RTCPeerConnection iceConnectionState or connectionState reached the failed state.'
+  },
+  [CallError.CONNECTION_DISCONNECTED]: {
+    code: CallError.CONNECTION_DISCONNECTED,
+    message: 'Call disconnected — temporarily lost connection, attempting auto-recovery.',
+    technicalDescription: 'RTCPeerConnection iceConnectionState transitioned to the disconnected state.'
+  },
+  [CallError.CONNECTED_NO_MEDIA]: {
+    code: CallError.CONNECTED_NO_MEDIA,
+    message: 'Audio transmission issue — connection established but voice data is not transmitting.',
+    technicalDescription: 'getStats() reports zero inbound/outbound audio bytes after the connected state grace period.'
+  },
+  [CallError.TRACK_NOT_RECEIVED]: {
+    code: CallError.TRACK_NOT_RECEIVED,
+    message: 'Media receiving failed — connected but remote audio tracks were not successfully attached.',
+    technicalDescription: 'Peer connection successfully established but the ontrack handler never fired for remote audio.'
+  },
+  [CallError.PLAYBACK_BLOCKED]: {
+    code: CallError.PLAYBACK_BLOCKED,
+    message: 'Audio playback blocked by browser — tap/click anywhere to unmute/play call audio.',
+    technicalDescription: 'HTMLMediaElement.play() threw an autoplay policy error or was rejected.'
+  },
+  [CallError.SINK_SWITCH_FAILED]: {
+    code: CallError.SINK_SWITCH_FAILED,
+    message: 'Speaker toggle failed — could not change your audio output device.',
+    technicalDescription: 'HTMLMediaElement.setSinkId() call rejected or unsupported on this browser/environment.'
+  },
+  [CallError.RENEGOTIATION_FAILED]: {
+    code: CallError.RENEGOTIATION_FAILED,
+    message: 'Failed to renegotiate call — could not update participants or media states.',
+    technicalDescription: 'SDP renegotiation or local track addition failed during mute/unmute or dynamic participant updates.'
+  },
+  [CallError.CALL_DECLINED]: {
+    code: CallError.CALL_DECLINED,
+    message: 'Call declined — the recipient declined your call request.',
+    technicalDescription: 'Received an explicit hangup/decline event from the target user during call ring.'
+  },
+  [CallError.CALL_TIMEOUT]: {
+    code: CallError.CALL_TIMEOUT,
+    message: 'No answer — the call request timed out because the recipient did not answer.',
+    technicalDescription: 'No answer or join-call received from recipient within the ringing duration.'
+  },
+  [CallError.UNKNOWN_CALL_ERROR]: {
+    code: CallError.UNKNOWN_CALL_ERROR,
+    message: 'An untraceable call error occurred.',
+    technicalDescription: 'Fallback call error for unclassified or uncaught exceptions.'
+  }
+};
 
 export const FileTransferErrorDetails: Record<FileTransferError, ErrorDetail> = {
   [FileTransferError.UPLOAD_NETWORK_ERROR]: {

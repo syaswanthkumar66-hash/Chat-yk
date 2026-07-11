@@ -1647,9 +1647,10 @@ export const ChatDetail = () => {
 
   const isAdmin = chat?.admins?.includes(user?.id || ''); 
   const canAdd = chat?.isGroup && (isAdmin || chat?.canAddMembers);
-  const chatName = chat ? (chat.isGroup ? chat.name : chat.participants[0].name) : recipient?.displayName;
-  const chatAvatar = chat ? (chat.isGroup ? chat.avatar! : chat.participants[0].avatar) : recipient?.avatar;
-  const otherParticipantId = chat ? (chat.isGroup ? null : chat.participants[0]?.id) : recipient?.id;
+  const partner = chat && !chat.isGroup ? (chat.participants.find(p => p.id !== user?.id) || chat.participants[0]) : null;
+  const chatName = chat ? (chat.isGroup ? chat.name : (partner?.name || '')) : recipient?.displayName;
+  const chatAvatar = chat ? (chat.isGroup ? chat.avatar! : (partner?.avatar || '')) : recipient?.avatar;
+  const otherParticipantId = chat ? (chat.isGroup ? null : (partner?.id || null)) : recipient?.id;
   const isOnline = chat 
     ? (!chat.isGroup && (users.find(u => u.id === otherParticipantId)?.isOnline || (otherParticipantId && onlineUserIds.includes(otherParticipantId))))
     : (recipient?.isOnline || (recipient?.id && onlineUserIds.includes(recipient.id)));
@@ -1902,8 +1903,9 @@ export const ChatDetail = () => {
               </header>
                   <div className="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar">
                 {chats.map(c => {
-                  const name = c.isGroup ? c.name : c.participants[0].name;
-                  const avatar = c.isGroup ? c.avatar! : c.participants[0].avatar;
+                  const partner = c.isGroup ? null : (c.participants.find(p => p.id !== user?.id) || c.participants[0]);
+                  const name = c.isGroup ? c.name : (partner?.name || '');
+                  const avatar = c.isGroup ? c.avatar! : (partner?.avatar || '');
                   return (
                     <button 
                       key={c.id}
@@ -2098,7 +2100,7 @@ export const ChatDetail = () => {
                         if (chat?.isGroup) {
                           setActiveGroupInfoId(chat.id);
                         } else {
-                          const userId = chat ? chat.participants[0].id : recipient?.id;
+                          const userId = otherParticipantId;
                           if (userId) useAppStore.getState().setViewingUserId(userId);
                         }
                       }}
@@ -2133,8 +2135,8 @@ export const ChatDetail = () => {
                         if (chat?.isGroup) {
                           setActiveGroupCall({ type: 'voice', groupId: chat.id });
                         } else {
-                          const userId = chat ? chat.participants[0].id : recipient?.id;
-                          setActiveGroupCall({ type: 'voice', userId });
+                          const userId = otherParticipantId;
+                          if (userId) setActiveGroupCall({ type: 'voice', userId });
                         }
                       }}
                       disabled={!canStartCalls}
@@ -2148,8 +2150,8 @@ export const ChatDetail = () => {
                         if (chat?.isGroup) {
                           setActiveGroupCall({ type: 'video', groupId: chat.id });
                         } else {
-                          const userId = chat ? chat.participants[0].id : recipient?.id;
-                          setActiveGroupCall({ type: 'video', userId });
+                          const userId = otherParticipantId;
+                          if (userId) setActiveGroupCall({ type: 'video', userId });
                         }
                       }}
                       disabled={!canStartCalls}
@@ -2181,7 +2183,7 @@ export const ChatDetail = () => {
                                   if (chat?.isGroup) {
                                     setActiveGroupInfoId(chat.id);
                                   } else {
-                                    const userId = chat ? chat.participants[0].id : recipient?.id;
+                                    const userId = otherParticipantId;
                                     if (userId) useAppStore.getState().setViewingUserId(userId);
                                   }
                                   setShowMenu(false);

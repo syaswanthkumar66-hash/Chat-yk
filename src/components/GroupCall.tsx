@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Avatar, Button, cn } from './UI';
 import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { webrtcService } from '../services/webrtcService';
+import { CallError, CallErrorDetails } from '../types';
 
 interface Participant {
   id: string;
@@ -43,6 +44,8 @@ const VideoPlayer = ({
         })
         .catch(err => {
           console.warn(`[Diagnostic] Autoplay prevented or failed for stream. Binding document-wide gesture listener as a fallback...`, err);
+          webrtcService.dispatchCallError(CallError.PLAYBACK_BLOCKED);
+          
           const handleInteraction = () => {
             el.play()
               .then(() => {
@@ -94,6 +97,7 @@ const VideoPlayer = ({
           }
         } catch (err) {
           console.error('[AudioRouting] Failed to set audio sink ID:', err);
+          webrtcService.dispatchCallError(CallError.SINK_SWITCH_FAILED);
         }
       } else {
         console.warn('[AudioRouting] setSinkId() is not supported on this browser/platform.');
@@ -124,6 +128,8 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   const [isVideoOff, setIsVideoOff] = useState(type === 'voice');
   const [duration, setDuration] = useState(0);
   const [isHold, setIsHold] = useState(false);
+  const [callError, setCallError] = useState<any | null>(null);
+  const [callAttempt, setCallAttempt] = useState(0);
   
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -168,7 +174,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
         socket.off('user_joined_call', handleUserJoined);
       };
     }
-  }, [socket, groupId, userId, user]);
+  }, [socket, groupId, userId, user, callAttempt]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -176,6 +182,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
     const startCall = async () => {
       try {
+        setCallError(null);
         stream = await navigator.mediaDevices.getUserMedia({
           video: type === 'video',
           audio: {
@@ -197,8 +204,21 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
         const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
         await webrtcService.publishLocalStream(stream, roomId);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to get local media or publish:', err);
+        let errorCode = 'MIC_CAPTURE_FAILED';
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          errorCode = 'MIC_PERMISSION_DENIED';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          errorCode = 'MIC_NOT_FOUND';
+        }
+        
+        const errorDetail = CallErrorDetails[errorCode as CallError] || {
+          code: errorCode,
+          message: 'Failed to access mic: ' + err.message,
+          technicalDescription: err.toString()
+        };
+        setCallError(errorDetail);
       }
     };
 
@@ -236,8 +256,20 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       ));
     };
 
+    const handleWebRTCCallError = (e: any) => {
+      console.log("[Diagnostic] Received call error event:", e.detail);
+      setCallError(e.detail);
+    };
+
+    const handleWebRTCCallErrorCleared = (e: any) => {
+      const { code } = e.detail;
+      setCallError(prev => (prev && prev.code === code) ? null : prev);
+    };
+
     window.addEventListener('webrtc_stream', handleRemoteStream);
     window.addEventListener('webrtc_connection_failed', handleConnectionFailed);
+    window.addEventListener('webrtc_call_error', handleWebRTCCallError);
+    window.addEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
 
     return () => {
       mounted = false;
@@ -247,13 +279,19 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       webrtcService.closeSession();
       window.removeEventListener('webrtc_stream', handleRemoteStream);
       window.removeEventListener('webrtc_connection_failed', handleConnectionFailed);
+      window.removeEventListener('webrtc_call_error', handleWebRTCCallError);
+      window.removeEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
+      
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+      }
       
       if (socket) {
         const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
         socket.emit('end_call', { to: userId, roomId });
       }
     };
-  }, [type, socket, groupId, userId, user]);
+  }, [type, socket, groupId, userId, user, callAttempt]);
 
   // Sync local mute/video state with participants list for "me"
   useEffect(() => {
@@ -331,6 +369,15 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     });
   };
 
+  const handleRetry = () => {
+    console.log('[Diagnostic] Performing full call re-attempt (Retry)...');
+    setCallError(null);
+    setRemoteStreams({});
+    setLocalStream(null);
+    setDuration(0);
+    setCallAttempt(prev => prev + 1);
+  };
+
   useEffect(() => {
     // Mock participants joining
     const initialParticipants: Participant[] = [
@@ -349,9 +396,11 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       });
 
       // Transition private call target to online
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setParticipants(prev => prev.map(p => p.id === targetUser.id ? { ...p, status: 'online' } : p));
       }, 3000);
+      
+      return () => clearTimeout(timeoutId);
     }
 
     // For group calls, add all participants as ringing/offline initially
@@ -400,7 +449,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       clearInterval(timer);
       joinTimers?.forEach(t => clearTimeout(t));
     };
-  }, [groupId, userId, type, targetUser, chat, isHold]);
+  }, [groupId, userId, type, targetUser, chat, isHold, callAttempt]);
 
   const formatDuration = (s: number) => {
     const mins = Math.floor(s / 60);
@@ -480,6 +529,68 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           </span>
         </div>
       )}
+
+      {/* Warning call error banner */}
+      {callError && (callError.code === 'SINK_SWITCH_FAILED' || callError.code === 'CONNECTION_DISCONNECTED') && (
+        <div className="bg-amber-500/10 border-y border-amber-500/20 px-4 py-2 flex items-center justify-center gap-2 z-40 text-amber-300">
+          <Icon name="warning" className="text-sm animate-pulse" />
+          <span className="text-[9px] md:text-[10px] font-mono uppercase tracking-wider font-bold">
+            {callError.code}: {callError.message}
+          </span>
+          <button 
+            onClick={() => setCallError(null)}
+            className="ml-2 text-[9px] md:text-[10px] font-mono font-bold uppercase underline text-amber-300/60 hover:text-amber-300"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Critical Call Error Centered Overlay */}
+      <AnimatePresence>
+        {callError && callError.code !== 'SINK_SWITCH_FAILED' && callError.code !== 'CONNECTION_DISCONNECTED' && (
+          <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-slate-900 border border-red-500/20 max-w-md w-full rounded-[2.5rem] p-8 md:p-10 shadow-2xl flex flex-col items-center text-center gap-6"
+            >
+              <div className="size-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500">
+                <Icon name="error_outline" className="text-3xl" />
+              </div>
+              
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-mono font-bold uppercase tracking-widest text-red-400">{callError.code}</span>
+                <h3 className="text-xl md:text-2xl font-black uppercase tracking-tighter italic text-white">Call Failure Detected</h3>
+                <p className="text-sm text-neutral-muted leading-relaxed mt-1">{callError.message}</p>
+              </div>
+
+              {callError.technicalDescription && (
+                <div className="bg-black/40 border border-white/5 rounded-2xl p-4 w-full text-left font-mono text-[10px] text-white/50 break-all leading-normal select-text">
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-white/30 mb-1">Diagnostic Log:</div>
+                  {callError.technicalDescription}
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 w-full mt-2">
+                <button 
+                  onClick={handleRetry}
+                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-black text-xs uppercase tracking-widest py-4 px-6 rounded-2xl shadow-lg shadow-red-500/20 active:scale-95 transition-all"
+                >
+                  Retry Call
+                </button>
+                <button 
+                  onClick={onClose}
+                  className="flex-1 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-black text-xs uppercase tracking-widest py-4 px-6 rounded-2xl active:scale-95 transition-all"
+                >
+                  End Call
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Main Video Area */}
       <main className="flex-1 relative overflow-y-auto no-scrollbar py-4 md:py-8 px-4 md:px-8">

@@ -554,52 +554,54 @@ export const SocialLayout = () => {
                   );
                 })()
               ) : (
-                filteredChats.map(chat => (
-                <motion.div
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  key={`chat-${chat.id}`}
-                  onClick={() => setActiveChatId(chat.id)}
-                  className={`flex items-center gap-4 p-4 cursor-pointer transition-all rounded-[2rem] relative group ${
-                    activeChatId === chat.id ? 'bg-white ring-2 ring-primary/20 shadow-xl shadow-primary/5' : 'hover:bg-white/50'
-                  }`}
-                >
-                  <div className="relative" onClick={(e) => {
-                    e.stopPropagation();
-                    if (chat.isGroup) {
-                      setActiveGroupInfoId(chat.id);
-                    } else {
-                      setViewingUserId(chat.participants[0].id);
-                    }
-                  }}>
-                    <Avatar 
-                      src={chat.isGroup ? chat.avatar! : chat.participants[0].avatar} 
-                      className="size-14" 
-                      status={!chat.isGroup ? (users.find(u => u.id === chat.participants[0].id)?.isOnline ? 'online' : 'offline') : undefined} 
-                    />
-                    {chat.isGroup && (
-                      <div className="absolute -bottom-1 -right-1 size-6 rounded-xl bg-primary text-white flex items-center justify-center border-2 border-white shadow-sm">
-                        <Icon name="group" className="text-[10px]" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-center mb-0.5">
-                      <h3 className="font-black text-slate-900 truncate tracking-tight">
-                        {chat.isGroup ? chat.name : chat.participants[0].name}
-                      </h3>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{chat.lastMessage?.timestamp}</span>
+                filteredChats.map(chat => {
+                  const partner = chat.isGroup ? null : (chat.participants.find(p => p.id !== user?.id) || chat.participants[0]);
+                  return (
+                  <motion.div
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    key={`chat-${chat.id}`}
+                    onClick={() => setActiveChatId(chat.id)}
+                    className={`flex items-center gap-4 p-4 cursor-pointer transition-all rounded-[2rem] relative group ${
+                      activeChatId === chat.id ? 'bg-white ring-2 ring-primary/20 shadow-xl shadow-primary/5' : 'hover:bg-white/50'
+                    }`}
+                  >
+                    <div className="relative" onClick={(e) => {
+                      e.stopPropagation();
+                      if (chat.isGroup) {
+                        setActiveGroupInfoId(chat.id);
+                      } else if (partner) {
+                        setViewingUserId(partner.id);
+                      }
+                    }}>
+                      <Avatar 
+                        src={chat.isGroup ? chat.avatar! : (partner?.avatar || '')} 
+                        className="size-14" 
+                        status={!chat.isGroup && partner ? (users.find(u => u.id === partner.id)?.isOnline ? 'online' : 'offline') : undefined} 
+                      />
+                      {chat.isGroup && (
+                        <div className="absolute -bottom-1 -right-1 size-6 rounded-xl bg-primary text-white flex items-center justify-center border-2 border-white shadow-sm">
+                          <Icon name="group" className="text-[10px]" />
+                        </div>
+                      )}
                     </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center mb-0.5">
+                        <h3 className="font-black text-slate-900 truncate tracking-tight">
+                          {chat.isGroup ? chat.name : (partner?.name || '')}
+                        </h3>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{chat.lastMessage?.timestamp}</span>
+                      </div>
                     <p className="text-sm text-slate-500 truncate leading-tight flex items-center min-h-[1.25rem]">
                       {(() => {
                         const typingParticipants = chat.isGroup
                           ? chat.participants.filter(p => p.id !== user?.id && typingUsers[p.id])
                           : [];
-                        const isDirectTyping = !chat.isGroup && typingUsers[chat.participants[0]?.id];
+                        const isDirectTyping = !chat.isGroup && partner && typingUsers[partner.id];
                         const isSelfTyping = chat.isGroup
                           ? selfTypingChats[chat.id]
-                          : (chat.participants[0]?.id && selfTypingChats[chat.participants[0].id]);
+                          : (partner && selfTypingChats[partner.id]);
                         
                         if (isSelfTyping) {
                           return (
@@ -636,13 +638,14 @@ export const SocialLayout = () => {
                       })()}
                     </p>
                   </div>
-                  {chat.unreadCount > 0 && (
-                    <div className="size-6 rounded-full bg-primary text-white text-[10px] font-black flex items-center justify-center shadow-lg shadow-primary/30">
-                      {chat.unreadCount}
-                    </div>
-                  )}
-                </motion.div>
-              )))}
+                    {chat.unreadCount > 0 && (
+                      <div className="size-6 rounded-full bg-primary text-white text-[10px] font-black flex items-center justify-center shadow-lg shadow-primary/30">
+                        {chat.unreadCount}
+                      </div>
+                    )}
+                  </motion.div>
+                )})
+              )}
             </div>
           )}
 

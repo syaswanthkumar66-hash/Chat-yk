@@ -1,5 +1,6 @@
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
+import { CallError, CallErrorDetails } from '../types';
 
 export interface RemoteTrackInfo {
   sessionId: string;
@@ -46,6 +47,11 @@ class WebRTCService {
   private isReadyForSignaling = false;
   private pendingSignals: { from: string; signal: any; roomId: string }[] = [];
   private statsIntervals: Map<string, any> = new Map();
+  
+  // Call diagnostics fields
+  private signalingTimeouts: Map<string, any> = new Map();
+  private trackReceived: Map<string, boolean> = new Map();
+  private candidatesGathered: Map<string, number> = new Map();
 
   private activeOutgoingTransfers = new Map<string, {
     arrayBuffer: ArrayBuffer;
@@ -131,6 +137,17 @@ class WebRTCService {
     }
   }
 
+  public dispatchCallError(code: CallError, peerId?: string) {
+    const errorDetail = CallErrorDetails[code];
+    console.error(`[WebRTCError][${code}] Peer: ${peerId || 'unknown'}. Message: ${errorDetail.message} (${errorDetail.technicalDescription})`);
+    window.dispatchEvent(new CustomEvent('webrtc_call_error', {
+      detail: {
+        ...errorDetail,
+        peerId
+      }
+    }));
+  }
+
   private createPeerConnection(peerId: string, roomId: string): RTCPeerConnection {
     if (this.pcs.has(peerId)) {
       return this.pcs.get(peerId)!;
@@ -143,6 +160,19 @@ class WebRTCService {
     });
 
     this.pcs.set(peerId, pc);
+    this.candidatesGathered.set(peerId, 0);
+    this.trackReceived.set(peerId, false);
+
+    // Setup 15-second signaling timeout
+    const signalingTimeoutId = setTimeout(() => {
+      const currentPc = this.pcs.get(peerId);
+      if (currentPc && currentPc.iceConnectionState !== 'connected') {
+        console.warn(`[Diagnostic] Signaling timeout reached for peer ${peerId}`);
+        this.dispatchCallError(CallError.SIGNALING_TIMEOUT, peerId);
+        this.removePeer(peerId);
+      }
+    }, 15000);
+    this.signalingTimeouts.set(peerId, signalingTimeoutId);
 
     // Track all WebRTC state changes meticulously (Step 0 logs with precise timestamping)
     pc.oniceconnectionstatechange = () => {
@@ -151,10 +181,61 @@ class WebRTCService {
       
       if (pc.iceConnectionState === 'connected') {
         console.log(`[Diagnostic][${ts}] Peer ${peerId} ICE Connected! Initiating active track stats monitoring (Step 0/Step 2).`);
+        
+        // Clear signaling timeout upon success
+        const timeoutId = this.signalingTimeouts.get(peerId);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          this.signalingTimeouts.delete(peerId);
+        }
+
         this.startStatsMonitoring(peerId);
+
+        // CONNECTED_NO_MEDIA check: 5-second grace period then confirm non-zero audio bytes flowing
+        setTimeout(async () => {
+          const currentPc = this.pcs.get(peerId);
+          if (currentPc && currentPc.iceConnectionState === 'connected') {
+            try {
+              const stats = await currentPc.getStats();
+              let audioBytesSent = 0;
+              let audioBytesReceived = 0;
+              stats.forEach(report => {
+                if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+                  audioBytesReceived = report.bytesReceived || 0;
+                }
+                if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+                  audioBytesSent = report.bytesSent || 0;
+                }
+              });
+              console.log(`[Diagnostic] 5-second media flow check for peer ${peerId}: Sent=${audioBytesSent}, Received=${audioBytesReceived}`);
+              if (audioBytesSent === 0 && audioBytesReceived === 0) {
+                console.warn(`[Diagnostic] Connected but silent! 0 media bytes flow detected.`);
+                this.dispatchCallError(CallError.CONNECTED_NO_MEDIA, peerId);
+              }
+            } catch (e) {
+              console.error('[Diagnostic] Error during 5-second stats check:', e);
+            }
+          }
+        }, 5000);
+
+        // TRACK_NOT_RECEIVED check: Confirm track received within 8 seconds of connection
+        setTimeout(() => {
+          const currentPc = this.pcs.get(peerId);
+          if (currentPc && currentPc.iceConnectionState === 'connected' && !this.trackReceived.get(peerId)) {
+            console.warn(`[Diagnostic] Connected but no track received for peer ${peerId} within 8s`);
+            this.dispatchCallError(CallError.TRACK_NOT_RECEIVED, peerId);
+          }
+        }, 8000);
       }
 
       if (pc.iceConnectionState === 'failed') {
+        const timeoutId = this.signalingTimeouts.get(peerId);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          this.signalingTimeouts.delete(peerId);
+        }
+
+        this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
         window.dispatchEvent(new CustomEvent('webrtc_connection_failed', {
           detail: { peerId }
         }));
@@ -165,10 +246,12 @@ class WebRTCService {
 
       if (pc.iceConnectionState === 'disconnected') {
         console.warn(`[Diagnostic][${ts}] Peer ${peerId} iceConnectionState is disconnected. Waiting 5 seconds for WebRTC auto-recovery...`);
+        this.dispatchCallError(CallError.CONNECTION_DISCONNECTED, peerId);
         setTimeout(() => {
           const currentPc = this.pcs.get(peerId);
           if (currentPc && (currentPc.iceConnectionState === 'disconnected' || currentPc.iceConnectionState === 'failed')) {
             console.warn(`[Diagnostic] WebRTC auto-recovery timed out for peer ${peerId}. Cleaning up connection.`);
+            this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
             this.removePeer(peerId);
           }
         }, 5000);
@@ -177,6 +260,9 @@ class WebRTCService {
 
     pc.onconnectionstatechange = () => {
       console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} connectionState: ${pc.connectionState}`);
+      if (pc.connectionState === 'failed') {
+        this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
+      }
     };
 
     pc.onsignalingstatechange = () => {
@@ -184,7 +270,12 @@ class WebRTCService {
     };
 
     pc.onicegatheringstatechange = () => {
-      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} iceGatheringState: ${pc.iceGatheringState}`);
+      const state = pc.iceGatheringState;
+      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} iceGatheringState: ${state}`);
+      if (state === 'complete' && (this.candidatesGathered.get(peerId) || 0) === 0) {
+        console.warn(`[Diagnostic] ICE gathering completed with 0 candidates for peer ${peerId}`);
+        this.dispatchCallError(CallError.ICE_GATHERING_FAILED, peerId);
+      }
     };
 
     // Setup DataChannel for Chat (if we are the deterministic initiator)
@@ -204,6 +295,7 @@ class WebRTCService {
     // Handle ICE candidates and transmit them via Socket.io
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        this.candidatesGathered.set(peerId, (this.candidatesGathered.get(peerId) || 0) + 1);
         // Step 1 point 5: Confirm candidates are sent ONLY after setLocalDescription has been called
         if (pc.localDescription) {
           const socket = useAppStore.getState().socket;
@@ -224,6 +316,7 @@ class WebRTCService {
 
     // Handle remote stream tracks being added
     pc.ontrack = (event) => {
+      this.trackReceived.set(peerId, true);
       const stream = event.streams[0];
       const track = event.track;
       const ts = new Date().toISOString();
@@ -935,6 +1028,7 @@ class WebRTCService {
           }
         } catch (err) {
           console.error(`Failed to create/send offer to peer ${peerId}:`, err);
+          this.dispatchCallError(CallError.RENEGOTIATION_FAILED, peerId);
         }
       }
     } else if (signal.type === 'offer') {
@@ -972,6 +1066,7 @@ class WebRTCService {
           }
         } catch (err) {
           console.error(`Failed to handle offer from peer ${from}:`, err);
+          this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
         }
       }
     } else if (signal.type === 'answer') {
@@ -984,6 +1079,7 @@ class WebRTCService {
             await this.applyPendingIceCandidates(from, pc);
           } catch (err) {
             console.error(`Failed to set remote description from peer ${from}:`, err);
+            this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
           }
         }
       }
@@ -1034,6 +1130,11 @@ class WebRTCService {
       dc.close();
     });
     this.dataChannels.clear();
+
+    this.signalingTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+    this.signalingTimeouts.clear();
+    this.trackReceived.clear();
+    this.candidatesGathered.clear();
 
     this.localStream = null;
     this.currentRoomId = null;
