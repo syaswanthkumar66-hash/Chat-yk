@@ -1894,7 +1894,7 @@ export const ChatDetail = () => {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-white rounded-3xl w-full max-max-sm max-h-[70vh] flex flex-col shadow-2xl overflow-hidden"
+              className="relative bg-white rounded-3xl w-full max-w-sm max-h-[70vh] flex flex-col shadow-2xl overflow-hidden"
             >
               <header className="p-6 border-b border-primary/5 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-slate-800">Forward to...</h3>
@@ -2038,8 +2038,8 @@ export const ChatDetail = () => {
         )}
       </AnimatePresence>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex flex-col flex-1 h-full relative">
+      <div className="flex flex-1 overflow-hidden h-full min-h-0 w-full">
+        <div className="flex flex-col flex-1 min-h-0 relative w-full">
           <header className="px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 sm:px-6 sm:py-4 bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 sticky top-0 z-40">
             <AnimatePresence mode="wait">
               {isSelectionMode ? (
