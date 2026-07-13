@@ -1453,6 +1453,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
     });
 
+    socket.on("webrtc_audit", (data) => {
+      const { roomId } = data;
+      if (roomId) {
+        socket.to(roomId).emit("webrtc_audit_broadcast", data);
+      }
+    });
+
     socket.on("call_user", (data) => {
       const { to, roomId, type, from } = data;
       const targetDevices = users.get(to);

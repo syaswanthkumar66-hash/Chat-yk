@@ -1,6 +1,7 @@
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
 import { CallError, CallErrorDetails } from '../types';
+import { diagnosticLogger } from './diagnosticLogService';
 
 export interface RemoteTrackInfo {
   sessionId: string;
@@ -105,23 +106,24 @@ class WebRTCService {
     this.localStream = stream;
     this.currentRoomId = roomId;
 
+    diagnosticLogger.log('media', 'local_media_ready', `Local MediaStream captured and published. Total audio tracks: ${stream.getAudioTracks().length}, video tracks: ${stream.getVideoTracks().length}`, undefined, roomId);
+
     // Fetch TURN server credentials quickly if we haven't already
     if (!this.isIceServersFetched) {
       await this.fetchIceConfig(2, 500);
     }
 
-    console.log(`[Diagnostic] Local stream published. Marking WebRTC signaling ready for room ${roomId}`);
-    
+    diagnosticLogger.log('media', 'signaling_ready', `Marking WebRTC signaling ready for room ${roomId}`, undefined, roomId);
 
     // Process any queued signals that arrived prior to stream publishing
     const signalsToProcess = [...this.pendingSignals];
     this.pendingSignals = [];
     for (const item of signalsToProcess) {
-      console.log(`[Diagnostic] Processing queued signal from ${item.from}: ${item.signal.type}`);
+      diagnosticLogger.log('signaling', 'process_queued_signal', `Processing queued signal of type '${item.signal.type}' from peer ${item.from}`, item.from, item.roomId);
       await this.handleSignal(item.from, item.signal, item.roomId);
     }
 
-    console.log(`Publishing local stream in room ${roomId}. Broadcasting presence...`);
+    diagnosticLogger.log('socket', 'emit_presence', `Broadcasting 'peer_joined' presence to room ${roomId}`, undefined, roomId);
 
     const socket = useAppStore.getState().socket;
     if (socket) {
@@ -139,7 +141,8 @@ class WebRTCService {
 
   public dispatchCallError(code: CallError, peerId?: string) {
     const errorDetail = CallErrorDetails[code];
-    console.error(`[WebRTCError][${code}] Peer: ${peerId || 'unknown'}. Message: ${errorDetail.message} (${errorDetail.technicalDescription})`);
+    diagnosticLogger.log('error', `call_error_${code}`, `WebRTC Error: ${errorDetail.message} (${errorDetail.technicalDescription})`, peerId, this.currentRoomId || undefined, { code, errorDetail });
+    
     window.dispatchEvent(new CustomEvent('webrtc_call_error', {
       detail: {
         ...errorDetail,
@@ -158,10 +161,11 @@ class WebRTCService {
       return this.pcs.get(mapKey)!;
     }
 
-    console.log(`[Diagnostic] Creating RTCPeerConnection for peer ${peerId} (room ${roomId}) using ICE servers:`, this.iceServers);
+    diagnosticLogger.log('webrtc', 'create_peer_connection', `Initiating RTCPeerConnection creation for peer ${peerId}. ICE servers configured count: ${this.iceServers.length}`, peerId, roomId, { iceServers: this.iceServers });
     const pc = new RTCPeerConnection({
       iceServers: this.iceServers,
-      bundlePolicy: 'max-bundle'
+      bundlePolicy: 'max-bundle',
+      iceTransportPolicy: 'all' // Ensure all connections (both STUN direct and TURN relayed) are fully allowed and utilized
     });
 
     this.pcs.set(mapKey, pc);
@@ -172,7 +176,7 @@ class WebRTCService {
     const signalingTimeoutId = setTimeout(() => {
       const currentPc = this.pcs.get(mapKey);
       if (currentPc && currentPc.iceConnectionState !== 'connected') {
-        console.warn(`[Diagnostic] Signaling timeout reached for peer ${peerId} (room ${roomId})`);
+        diagnosticLogger.log('error', 'signaling_timeout', `Signaling timeout reached (15s) without successful connection`, peerId, roomId);
         this.dispatchCallError(CallError.SIGNALING_TIMEOUT, peerId);
         this.removePeer(peerId, roomId);
       }
@@ -181,11 +185,11 @@ class WebRTCService {
 
     // Track all WebRTC state changes meticulously (Step 0 logs with precise timestamping)
     pc.oniceconnectionstatechange = () => {
-      const ts = new Date().toISOString();
-      console.log(`[Diagnostic][${ts}] Peer ${peerId} (room ${roomId}) iceConnectionState: ${pc.iceConnectionState}`);
+      const state = pc.iceConnectionState;
+      diagnosticLogger.log('webrtc', 'ice_connection_state_changed', `ICE Connection State changed to: ${state}`, peerId, roomId, { state });
       
-      if (pc.iceConnectionState === 'connected') {
-        console.log(`[Diagnostic][${ts}] Peer ${peerId} (room ${roomId}) ICE Connected! Initiating active track stats monitoring (Step 0/Step 2).`);
+      if (state === 'connected') {
+        diagnosticLogger.log('webrtc', 'ice_connected', `ICE Connection successfully established. Starting stats monitor & track audits.`, peerId, roomId);
         
         // Clear signaling timeout upon success
         const timeoutId = this.signalingTimeouts.get(mapKey);
@@ -212,13 +216,13 @@ class WebRTCService {
                   audioBytesSent = report.bytesSent || 0;
                 }
               });
-              console.log(`[Diagnostic] 5-second media flow check for peer ${peerId} (room ${roomId}): Sent=${audioBytesSent}, Received=${audioBytesReceived}`);
+              diagnosticLogger.log('media', 'media_flow_check', `5-second media flow check: Sent=${audioBytesSent} bytes, Received=${audioBytesReceived} bytes`, peerId, roomId, { audioBytesSent, audioBytesReceived });
               if (audioBytesSent === 0 && audioBytesReceived === 0) {
-                console.warn(`[Diagnostic] Connected but silent! 0 media bytes flow detected.`);
+                diagnosticLogger.log('error', 'media_flow_stalled', `ICE is connected but media bytes flow is at 0 (stalled/silent)`, peerId, roomId);
                 this.dispatchCallError(CallError.CONNECTED_NO_MEDIA, peerId);
               }
-            } catch (e) {
-              console.error('[Diagnostic] Error during 5-second stats check:', e);
+            } catch (e: any) {
+              diagnosticLogger.log('error', 'media_flow_check_failed', `Failed to execute 5-second media stats check: ${e.message}`, peerId, roomId);
             }
           }
         }, 5000);
@@ -227,19 +231,20 @@ class WebRTCService {
         setTimeout(() => {
           const currentPc = this.pcs.get(mapKey);
           if (currentPc && currentPc.iceConnectionState === 'connected' && !this.trackReceived.get(mapKey)) {
-            console.warn(`[Diagnostic] Connected but no track received for peer ${peerId} (room ${roomId}) within 8s`);
+            diagnosticLogger.log('error', 'track_not_received_timeout', `Connected but no remote track received within 8 seconds of ICE establishment`, peerId, roomId);
             this.dispatchCallError(CallError.TRACK_NOT_RECEIVED, peerId);
           }
         }, 8000);
       }
 
-      if (pc.iceConnectionState === 'failed') {
+      if (state === 'failed') {
         const timeoutId = this.signalingTimeouts.get(mapKey);
         if (timeoutId) {
           clearTimeout(timeoutId);
           this.signalingTimeouts.delete(mapKey);
         }
 
+        diagnosticLogger.log('error', 'ice_failed', `ICE Connection failed. Initiating ICE restart recovery.`, peerId, roomId);
         this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
         window.dispatchEvent(new CustomEvent('webrtc_connection_failed', {
           detail: { peerId }
@@ -249,13 +254,13 @@ class WebRTCService {
         this.handleIceFailure(peerId, roomId);
       }
 
-      if (pc.iceConnectionState === 'disconnected') {
-        console.warn(`[Diagnostic][${ts}] Peer ${peerId} (room ${roomId}) iceConnectionState is disconnected. Waiting 5 seconds for WebRTC auto-recovery...`);
+      if (state === 'disconnected') {
+        diagnosticLogger.log('error', 'ice_disconnected', `ICE Connection disconnected. Waiting 5 seconds for WebRTC auto-recovery/re-gathering...`, peerId, roomId);
         this.dispatchCallError(CallError.CONNECTION_DISCONNECTED, peerId);
         setTimeout(() => {
           const currentPc = this.pcs.get(mapKey);
           if (currentPc && (currentPc.iceConnectionState === 'disconnected' || currentPc.iceConnectionState === 'failed')) {
-            console.warn(`[Diagnostic] WebRTC auto-recovery timed out for peer ${peerId} (room ${roomId}). Cleaning up connection.`);
+            diagnosticLogger.log('error', 'ice_recovery_timeout', `WebRTC auto-recovery timed out for peer. Connection lost permanently.`, peerId, roomId);
             this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
             this.removePeer(peerId, roomId);
           }
@@ -264,21 +269,24 @@ class WebRTCService {
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}) connectionState: ${pc.connectionState}`);
-      if (pc.connectionState === 'failed') {
+      const state = pc.connectionState;
+      diagnosticLogger.log('webrtc', 'connection_state_changed', `PeerConnection State changed to: ${state}`, peerId, roomId, { state });
+      if (state === 'failed') {
+        diagnosticLogger.log('error', 'connection_failed', `PeerConnection reached Failed state`, peerId, roomId);
         this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
       }
     };
 
     pc.onsignalingstatechange = () => {
-      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}) signalingState: ${pc.signalingState}`);
+      const state = pc.signalingState;
+      diagnosticLogger.log('webrtc', 'signaling_state_changed', `Signaling State changed to: ${state}`, peerId, roomId, { state });
     };
 
     pc.onicegatheringstatechange = () => {
       const state = pc.iceGatheringState;
-      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}) iceGatheringState: ${state}`);
+      diagnosticLogger.log('webrtc', 'ice_gathering_state_changed', `ICE Gathering State changed to: ${state}`, peerId, roomId, { state });
       if (state === 'complete' && (this.candidatesGathered.get(mapKey) || 0) === 0) {
-        console.warn(`[Diagnostic] ICE gathering completed with 0 candidates for peer ${peerId} (room ${roomId})`);
+        diagnosticLogger.log('error', 'ice_gathering_completed_empty', `ICE gathering completed but 0 candidates were gathered! Connection unlikely to succeed.`, peerId, roomId);
         this.dispatchCallError(CallError.ICE_GATHERING_FAILED, peerId);
       }
     };
@@ -287,24 +295,29 @@ class WebRTCService {
     const myId = useAppStore.getState().user?.id;
     const isInitiator = myId && peerId && myId < peerId;
     if (roomId.startsWith('chat-webrtc-') && isInitiator) {
-      console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (initiator: true, room ${roomId})`);
+      diagnosticLogger.log('webrtc', 'create_datachannel', `Creating local RTCDataChannel 'audio_transfer' as initiator.`, peerId, roomId);
       const dc = pc.createDataChannel("audio_transfer", { ordered: true });
       this.setupDataChannel(peerId, roomId, dc);
     }
 
     pc.ondatachannel = (event) => {
-      console.log(`Received remote data channel from peer ${peerId} in room ${roomId}:`, event.channel.label);
+      diagnosticLogger.log('webrtc', 'datachannel_received', `Received remote RTCDataChannel of label '${event.channel.label}'`, peerId, roomId, { label: event.channel.label });
       this.setupDataChannel(peerId, roomId, event.channel);
     };
 
     // Handle ICE candidates and transmit them via Socket.io
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        this.candidatesGathered.set(mapKey, (this.candidatesGathered.get(mapKey) || 0) + 1);
+        const count = (this.candidatesGathered.get(mapKey) || 0) + 1;
+        this.candidatesGathered.set(mapKey, count);
+        
+        diagnosticLogger.log('webrtc', 'ice_candidate_gathered', `#${count} Local ICE Candidate gathered: ${event.candidate.candidateType || 'unknown'} (${event.candidate.protocol || 'udp'})`, peerId, roomId, { candidate: event.candidate });
+
         // Step 1 point 5: Confirm candidates are sent ONLY after setLocalDescription has been called
         if (pc.localDescription) {
           const socket = useAppStore.getState().socket;
           if (socket) {
+            diagnosticLogger.log('socket', 'send_ice_candidate', `Transmitting gathered ICE Candidate via socket to peer`, peerId, roomId);
             socket.emit('sfu_signal', {
               roomId,
               from: useAppStore.getState().user?.id,
@@ -315,6 +328,8 @@ class WebRTCService {
               }
             });
           }
+        } else {
+          diagnosticLogger.log('webrtc', 'ice_candidate_held', `ICE candidate held back - setLocalDescription not called yet`, peerId, roomId);
         }
       }
     };
@@ -324,10 +339,10 @@ class WebRTCService {
       this.trackReceived.set(mapKey, true);
       const stream = event.streams[0];
       const track = event.track;
-      const ts = new Date().toISOString();
-      console.log(`[Diagnostic][${ts}] ontrack event fired! Track kind: "${track?.kind}", ID: "${track?.id}", readyState: "${track?.readyState}" (room ${roomId})`);
+      
+      diagnosticLogger.log('media', 'track_received', `Remote media track received! Kind: '${track?.kind}', ID: '${track?.id}', State: '${track?.readyState}'`, peerId, roomId, { kind: track?.kind, id: track?.id });
       if (stream) {
-        console.log(`[Diagnostic][${ts}] Successfully received remote stream from peer ${peerId} (room ${roomId}), track count: ${stream.getTracks().length}`);
+        diagnosticLogger.log('media', 'stream_assigned', `Successfully assigned remote MediaStream to peer. Total track count: ${stream.getTracks().length}`, peerId, roomId);
         // Dispatch custom event to notify GroupCall component
         window.dispatchEvent(new CustomEvent('webrtc_stream', {
           detail: { from: peerId, stream }
@@ -872,11 +887,17 @@ class WebRTCService {
 
     let lastBytesSent = 0;
     let lastBytesReceived = 0;
+    let consecutiveSilentInbound = 0;
+    let consecutiveSilentOutbound = 0;
+    let lastOutboundStalled = false;
+    let lastInboundStalled = false;
+
+    diagnosticLogger.log('media', 'stats_monitoring_started', `Started active audio flow statistics monitoring for peer ${peerId}`, peerId, roomId);
 
     const intervalId = setInterval(async () => {
       const pc = this.pcs.get(mapKey);
       if (!pc || pc.iceConnectionState !== 'connected') {
-        console.log(`[StatsMonitor] Connection not active, stopping stats query for peer ${peerId} (room ${roomId})`);
+        diagnosticLogger.log('media', 'stats_monitoring_stopped', `ICE is no longer connected, stopping active stats query for peer ${peerId}`, peerId, roomId);
         clearInterval(intervalId);
         this.statsIntervals.delete(mapKey);
         return;
@@ -901,23 +922,96 @@ class WebRTCService {
         });
 
         let candidatePairStr = 'unknown';
+        let localCandidateType = 'unknown';
+        let remoteCandidateType = 'unknown';
+        let protocolType = 'udp';
+
         if (activeCandidatePair) {
           const localCandidate = stats.get(activeCandidatePair.localCandidateId);
           const remoteCandidate = stats.get(activeCandidatePair.remoteCandidateId);
-          candidatePairStr = `Local: ${localCandidate?.candidateType || 'unknown'} (${localCandidate?.protocol || 'udp'}), Remote: ${remoteCandidate?.candidateType || 'unknown'} (${remoteCandidate?.protocol || 'udp'})`;
+          localCandidateType = localCandidate?.candidateType || 'unknown';
+          remoteCandidateType = remoteCandidate?.candidateType || 'unknown';
+          protocolType = localCandidate?.protocol || 'udp';
+          candidatePairStr = `Local: ${localCandidateType} (${protocolType}), Remote: ${remoteCandidateType}`;
         }
 
         const sentDelta = audioBytesSent - lastBytesSent;
         const receivedDelta = audioBytesReceived - lastBytesReceived;
 
+        // Detect if media stopped flowing after connection was established
+        if (lastBytesSent > 0) {
+          if (sentDelta === 0) {
+            consecutiveSilentOutbound++;
+          } else {
+            consecutiveSilentOutbound = 0;
+          }
+        }
+        if (lastBytesReceived > 0) {
+          if (receivedDelta === 0) {
+            consecutiveSilentInbound++;
+          } else {
+            consecutiveSilentInbound = 0;
+          }
+        }
+
+        const outboundStalled = consecutiveSilentOutbound >= 2; // ~10 seconds of no outbound audio
+        const inboundStalled = consecutiveSilentInbound >= 2;   // ~10 seconds of no inbound audio
+
+        // Log transition statuses to diagnostic logger
+        if (outboundStalled !== lastOutboundStalled) {
+          diagnosticLogger.log(
+            outboundStalled ? 'error' : 'media', 
+            outboundStalled ? 'outbound_stalled' : 'outbound_recovered', 
+            outboundStalled ? `Outbound voice stream has stalled! No voice data transmitting.` : `Outbound voice stream has recovered! Sending voice data again.`, 
+            peerId, 
+            roomId
+          );
+          lastOutboundStalled = outboundStalled;
+        }
+        if (inboundStalled !== lastInboundStalled) {
+          diagnosticLogger.log(
+            inboundStalled ? 'error' : 'media', 
+            inboundStalled ? 'inbound_stalled' : 'inbound_recovered', 
+            inboundStalled ? `Inbound voice stream has stalled! No voice data received from remote peer.` : `Inbound voice stream has recovered! Receiving voice data again.`, 
+            peerId, 
+            roomId
+          );
+          lastInboundStalled = inboundStalled;
+        }
+
         console.log(`[Diagnostic][StatsMonitor][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}):
-          - Candidate Pair Type: ${candidatePairStr}
-          - Total Audio Bytes Sent: ${audioBytesSent} (Delta: +${sentDelta} bytes)
-          - Total Audio Bytes Received: ${audioBytesReceived} (Delta: +${receivedDelta} bytes)
+          - Candidate Pair: ${candidatePairStr}
+          - Local Candidate Type: ${localCandidateType} (TURN/Relay Active: ${localCandidateType === 'relay'})
+          - Total Audio Bytes Sent: ${audioBytesSent} (Delta: +${sentDelta} bytes, Stalled: ${outboundStalled})
+          - Total Audio Bytes Received: ${audioBytesReceived} (Delta: +${receivedDelta} bytes, Stalled: ${inboundStalled})
           - Audio Flow Status: ${sentDelta > 0 || receivedDelta > 0 ? "LIVE AUDIO TRANSMITTING ✅" : "STALLED / SILENT ⚠️"}
         `);
 
-        // Dispatch an event so the UI can display real-time metrics
+        // Emit continuous WebRTC connection audit event via Socket.io
+        const socket = useAppStore.getState().socket;
+        const myId = useAppStore.getState().user?.id;
+        if (socket && myId) {
+          socket.emit('webrtc_audit', {
+            roomId,
+            peerId: myId,
+            targetPeerId: peerId,
+            iceConnectionState: pc.iceConnectionState,
+            connectionState: pc.connectionState,
+            audioBytesSent,
+            audioBytesReceived,
+            sentDelta,
+            receivedDelta,
+            localCandidateType,
+            remoteCandidateType,
+            candidatePairStr,
+            outboundStalled,
+            inboundStalled,
+            isFlowing: sentDelta > 0 || receivedDelta > 0,
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        // Dispatch local event for the call UI to display metrics instantly
         window.dispatchEvent(new CustomEvent('webrtc_call_stats', {
           detail: {
             peerId,
@@ -926,14 +1020,18 @@ class WebRTCService {
             sentDelta,
             receivedDelta,
             candidatePairStr,
+            localCandidateType,
+            remoteCandidateType,
+            outboundStalled,
+            inboundStalled,
             isFlowing: sentDelta > 0 || receivedDelta > 0
           }
         }));
 
         lastBytesSent = audioBytesSent;
         lastBytesReceived = audioBytesReceived;
-      } catch (err) {
-        console.warn(`[StatsMonitor] Failed to query stats:`, err);
+      } catch (err: any) {
+        diagnosticLogger.log('error', 'stats_query_failed', `Failed to query connection stats: ${err.message}`, peerId, roomId);
       }
     }, 5000);
 
@@ -997,13 +1095,14 @@ class WebRTCService {
     const mapKey = this.getMapKey(peerId, roomId);
     const candidates = this.pendingCandidates.get(mapKey);
     if (candidates && candidates.length > 0) {
-      console.log(`Applying ${candidates.length} queued ICE candidates for peer ${peerId} (room ${roomId})`);
+      diagnosticLogger.log('webrtc', 'apply_queued_candidates', `Applying ${candidates.length} queued ICE candidates that arrived before remote SDP was ready.`, peerId, roomId);
       this.pendingCandidates.delete(mapKey);
       for (const candidate of candidates) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.warn(`Failed to add queued ICE candidate for peer ${peerId} (room ${roomId}):`, err);
+          diagnosticLogger.log('webrtc', 'ice_candidate_applied', `Successfully applied queued ICE candidate of type ${candidate.candidate ? (candidate.candidate.split(' ')[7] || 'unknown') : 'unknown'}`, peerId, roomId);
+        } catch (err: any) {
+          diagnosticLogger.log('error', 'ice_candidate_apply_failed', `Failed to apply queued ICE candidate: ${err.message}`, peerId, roomId, { candidate, error: err });
         }
       }
     }
@@ -1013,10 +1112,12 @@ class WebRTCService {
     const myId = useAppStore.getState().user?.id;
     if (from === myId) return; // Skip our own signals
 
+    diagnosticLogger.log('socket', 'incoming_signal', `Received incoming socket signal of type '${signal.type}' from peer ${from}`, from, roomId, { signalType: signal.type });
+
     // Queue incoming signals that trigger createPeerConnection until our local media is ready.
     // (Applies only to A/V calls, not data-channel chat rooms where localStream is intentionally null)
     if (!this.localStream && !roomId.startsWith('chat-webrtc-')) {
-      console.log(`[Diagnostic] Local media not ready yet. Queueing signal from ${from}: ${signal.type}`);
+      diagnosticLogger.log('signaling', 'queue_signal', `Local media stream is not ready yet. Queueing incoming signal of type '${signal.type}' from peer ${from}`, from, roomId);
       this.pendingSignals.push({ from, signal, roomId });
       return;
     }
@@ -1024,7 +1125,7 @@ class WebRTCService {
     if (signal.type === 'peer_joined') {
       const peerId = signal.peerId;
       if (peerId && peerId !== myId) {
-        console.log(`[Diagnostic] Peer ${peerId} joined. Creating Peer Connection for room ${roomId}.`);
+        diagnosticLogger.log('signaling', 'peer_joined_received', `Handling 'peer_joined' signal from ${peerId}. Initializing call negotiation...`, peerId, roomId);
         const pc = this.createPeerConnection(peerId, roomId);
 
         // Step 1 point 3: Add all local tracks BEFORE calling createOffer
@@ -1032,19 +1133,21 @@ class WebRTCService {
 
         // ALWAYS ensure that we create the DataChannel on the SDP offer creator side
         if (roomId.startsWith('chat-webrtc-') && !this.dataChannels.has(this.getMapKey(peerId, roomId))) {
-          console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (SDP Offer Initiator, room ${roomId})`);
+          diagnosticLogger.log('webrtc', 'create_datachannel_initiator', `Creating RTCDataChannel "audio_transfer" for SDP Offer Initiator`, peerId, roomId);
           const dc = pc.createDataChannel("audio_transfer", { ordered: true });
           this.setupDataChannel(peerId, roomId, dc);
         }
 
         try {
-          console.log(`[Diagnostic] Creating Offer for peer ${peerId} (room ${roomId})`);
+          diagnosticLogger.log('webrtc', 'create_offer', `Creating local SDP Offer for peer ${peerId}`, peerId, roomId);
           const offer = await pc.createOffer();
-          console.log(`[Diagnostic] Setting Local Description (Offer) for peer ${peerId} (room ${roomId})`);
+          
+          diagnosticLogger.log('webrtc', 'set_local_description', `Setting local description with newly created SDP Offer`, peerId, roomId);
           await pc.setLocalDescription(offer);
           
           const socket = useAppStore.getState().socket;
           if (socket) {
+            diagnosticLogger.log('socket', 'send_offer', `Transmitting local SDP Offer to peer ${peerId} via Socket.io`, peerId, roomId);
             socket.emit('sfu_signal', {
               roomId,
               from: myId,
@@ -1055,34 +1158,38 @@ class WebRTCService {
               }
             });
           }
-        } catch (err) {
-          console.error(`Failed to create/send offer to peer ${peerId} (room ${roomId}):`, err);
+        } catch (err: any) {
+          diagnosticLogger.log('error', 'offer_failed', `Failed to create/send offer to peer ${peerId}: ${err.message}`, peerId, roomId, { error: err });
           this.dispatchCallError(CallError.RENEGOTIATION_FAILED, peerId);
         }
       }
     } else if (signal.type === 'offer') {
       if (signal.to === myId) {
-        console.log(`[Diagnostic] Received offer from peer ${from} for room ${roomId}. Setting Remote Description FIRST (Step 1 point 6).`);
+        diagnosticLogger.log('signaling', 'offer_received', `Received remote SDP Offer from peer ${from}. Beginning answer generation.`, from, roomId);
         const pc = this.createPeerConnection(from, roomId);
 
         try {
           // Set remote description FIRST
+          diagnosticLogger.log('webrtc', 'set_remote_description_offer', `Setting remote description with received SDP Offer from peer ${from}`, from, roomId);
           await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
           
           // Apply any pending ICE candidates that arrived before SDP remote description was set (Step 1 point 7)
           await this.applyPendingIceCandidates(from, roomId, pc);
 
           // THEN attach local tracks to the connection
-          console.log(`[Diagnostic] Attaching local tracks for answering connection to ${from} (room ${roomId})`);
+          diagnosticLogger.log('webrtc', 'attach_tracks_answerer', `Attaching local media tracks to connection answering to peer ${from}`, from, roomId);
           this.attachLocalTracks(pc);
 
           // THEN create and set the answer
-          console.log(`[Diagnostic] Creating Answer for peer ${from} (room ${roomId})`);
+          diagnosticLogger.log('webrtc', 'create_answer', `Creating local SDP Answer for peer ${from}`, from, roomId);
           const answer = await pc.createAnswer();
+          
+          diagnosticLogger.log('webrtc', 'set_local_description_answer', `Setting local description with newly created SDP Answer`, from, roomId);
           await pc.setLocalDescription(answer);
 
           const socket = useAppStore.getState().socket;
           if (socket) {
+            diagnosticLogger.log('socket', 'send_answer', `Transmitting local SDP Answer to peer ${from} via Socket.io`, from, roomId);
             socket.emit('sfu_signal', {
               roomId,
               from: myId,
@@ -1093,22 +1200,23 @@ class WebRTCService {
               }
             });
           }
-        } catch (err) {
-          console.error(`Failed to handle offer from peer ${from} (room ${roomId}):`, err);
+        } catch (err: any) {
+          diagnosticLogger.log('error', 'answer_failed', `Failed to handle offer / generate answer for peer ${from}: ${err.message}`, from, roomId, { error: err });
           this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
         }
       }
     } else if (signal.type === 'answer') {
       if (signal.to === myId) {
-        console.log(`[Diagnostic] Received answer from peer ${from} for room ${roomId}`);
+        diagnosticLogger.log('signaling', 'answer_received', `Received remote SDP Answer from peer ${from}. Completing handshake.`, from, roomId);
         const mapKey = this.getMapKey(from, roomId);
         const pc = this.pcs.get(mapKey);
         if (pc) {
           try {
+            diagnosticLogger.log('webrtc', 'set_remote_description_answer', `Setting remote description with received SDP Answer from peer ${from}`, from, roomId);
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
             await this.applyPendingIceCandidates(from, roomId, pc);
-          } catch (err) {
-            console.error(`Failed to set remote description from peer ${from} (room ${roomId}):`, err);
+          } catch (err: any) {
+            diagnosticLogger.log('error', 'answer_apply_failed', `Failed to set remote description from peer ${from}: ${err.message}`, from, roomId, { error: err });
             this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
           }
         }
@@ -1117,15 +1225,20 @@ class WebRTCService {
       if (signal.to === myId) {
         const mapKey = this.getMapKey(from, roomId);
         const pc = this.pcs.get(mapKey);
+        const candidateInfo = signal.candidate ? `${signal.candidate.candidateType || 'unknown'} (${signal.candidate.protocol || 'udp'})` : 'null';
+        
+        diagnosticLogger.log('signaling', 'ice_candidate_received', `Received remote ICE Candidate candidateType: ${candidateInfo} from peer ${from}`, from, roomId);
+        
         // Step 1 point 7: Queue candidate if remote description is not set yet
         if (pc && pc.remoteDescription && pc.remoteDescription.type) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-          } catch (err) {
-            console.error(`Failed to add ICE candidate from peer ${from} (room ${roomId}):`, err);
+            diagnosticLogger.log('webrtc', 'ice_candidate_added_direct', `Directly applied remote ICE candidate from peer ${from}`, from, roomId);
+          } catch (err: any) {
+            diagnosticLogger.log('error', 'ice_candidate_add_failed', `Failed to add remote ICE candidate from peer ${from}: ${err.message}`, from, roomId, { candidate: signal.candidate, error: err });
           }
         } else {
-          console.log(`[Diagnostic] Queueing ICE candidate from peer ${from} (room ${roomId}) (no remote description set yet)`);
+          diagnosticLogger.log('webrtc', 'ice_candidate_queued', `Remote description is not set yet. Queueing ICE candidate from peer ${from}`, from, roomId);
           if (!this.pendingCandidates.has(mapKey)) {
             this.pendingCandidates.set(mapKey, []);
           }
@@ -1134,7 +1247,7 @@ class WebRTCService {
       }
     } else if (signal.type === 'request_tracks') {
       if (this.localStream) {
-        console.log(`Received track request for room ${roomId}. Re-broadcasting peer presence...`);
+        diagnosticLogger.log('signaling', 'request_tracks_received', `Received remote track request. Re-broadcasting local peer presence...`, from, roomId);
         const socket = useAppStore.getState().socket;
         if (socket) {
           socket.emit('sfu_signal', {

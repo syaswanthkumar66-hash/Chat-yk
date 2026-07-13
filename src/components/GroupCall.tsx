@@ -4,6 +4,7 @@ import { Icon, Avatar, Button, cn } from './UI';
 import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { webrtcService } from '../services/webrtcService';
 import { CallError, CallErrorDetails } from '../types';
+import { diagnosticLogger, DiagnosticEntry } from '../services/diagnosticLogService';
 
 interface Participant {
   id: string;
@@ -146,6 +147,50 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [peerStats, setPeerStats] = useState<Record<string, any>>({});
 
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnosticLogs, setDiagnosticLogs] = useState<DiagnosticEntry[]>([]);
+  const [diagFilter, setDiagFilter] = useState('');
+  const [diagCategory, setDiagCategory] = useState('all');
+  const [expandedLogs, setExpandedLogs] = useState<string[]>([]);
+
+  useEffect(() => {
+    setDiagnosticLogs(diagnosticLogger.getLogs());
+
+    const handleNewLog = (e: any) => {
+      setDiagnosticLogs(prev => {
+        const updated = [...prev, e.detail];
+        if (updated.length > 500) updated.shift();
+        return updated;
+      });
+    };
+
+    window.addEventListener('webrtc_diagnostic_log_added', handleNewLog);
+    return () => {
+      window.removeEventListener('webrtc_diagnostic_log_added', handleNewLog);
+    };
+  }, []);
+
+  const filteredDiagLogs = diagnosticLogs
+    .filter(log => {
+      if (diagCategory !== 'all' && log.category !== diagCategory) return false;
+      if (diagFilter.trim() !== '') {
+        const term = diagFilter.toLowerCase();
+        const msgMatch = log.message.toLowerCase().includes(term);
+        const eventMatch = log.event.toLowerCase().includes(term);
+        const peerMatch = log.peerId?.toLowerCase().includes(term);
+        const catMatch = log.category.toLowerCase().includes(term);
+        return msgMatch || eventMatch || peerMatch || catMatch;
+      }
+      return true;
+    })
+    .reverse();
+
+  const toggleLogExpanded = (id: string) => {
+    setExpandedLogs(prev => 
+      prev.includes(id) ? prev.filter(lid => lid !== id) : [...prev, id]
+    );
+  };
+
   const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
     removedFriendIds: s.removedFriendIds,
     socket: s.socket,
@@ -265,7 +310,31 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     const handleCallStats = (e: any) => {
       setPeerStats(prev => ({
         ...prev,
-        [e.detail.peerId]: e.detail
+        [e.detail.peerId]: {
+          ...prev[e.detail.peerId],
+          ...e.detail
+        }
+      }));
+    };
+
+    const handleRemoteAudit = (data: any) => {
+      console.log(`[Diagnostic] Received remote WebRTC audit broadcast from peer ${data.peerId}:`, data);
+      setPeerStats(prev => ({
+        ...prev,
+        [data.peerId]: {
+          ...prev[data.peerId],
+          remoteIceState: data.iceConnectionState,
+          remoteConnectionState: data.connectionState,
+          remoteOutboundStalled: data.outboundStalled,
+          remoteInboundStalled: data.inboundStalled,
+          remoteCandidatePair: data.candidatePairStr,
+          remoteLocalCandidateType: data.localCandidateType,
+          remoteRemoteCandidateType: data.remoteCandidateType,
+          isFlowing: !data.outboundStalled && data.isFlowing,
+          receivedDelta: data.sentDelta, 
+          sentDelta: data.receivedDelta,
+          lastAuditTimestamp: data.timestamp
+        }
       }));
     };
 
@@ -277,6 +346,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     
     if (socket) {
       socket.on('user_joined_call', handleUserJoined);
+      socket.on('webrtc_audit_broadcast', handleRemoteAudit);
     }
 
     return () => {
@@ -294,6 +364,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       
       if (socket) {
         socket.off('user_joined_call', handleUserJoined);
+        socket.off('webrtc_audit_broadcast', handleRemoteAudit);
       }
       
       if (localStream) {
@@ -658,19 +729,32 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
               </motion.div>
               
               <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 z-20">
-                <div className="bg-slate-900 border border-white/10 px-6 py-2 rounded-2xl shadow-2xl flex items-center gap-2">
-                  <div className="size-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                  <span className="text-[10px] font-black uppercase tracking-widest italic">Connected</span>
-                </div>
+                {participants[1] && (peerStats[participants[1].id]?.inboundStalled || peerStats[participants[1].id]?.remoteOutboundStalled) ? (
+                  <div className="bg-red-950/90 border border-red-500/30 px-6 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2 animate-bounce">
+                    <div className="size-2 rounded-full bg-red-500 animate-ping" />
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-red-400">🔇 VOICE STALLED (WS Audit)</span>
+                  </div>
+                ) : (
+                  <div className="bg-slate-900 border border-white/10 px-6 py-2 rounded-2xl shadow-2xl flex items-center gap-2">
+                    <div className="size-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                    <span className="text-[10px] font-black uppercase tracking-widest italic">Connected</span>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="text-center space-y-4 md:space-y-6 relative z-10">
               <h1 className="text-4xl md:text-6xl font-black italic uppercase tracking-tighter leading-none">{participants[1]?.name}</h1>
-              <div className="flex items-center justify-center gap-3">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-white/30">
-                  {type === 'voice' ? 'Encrypted Audio Connection Active' : 'Voice & Video Stream Active'}
-                </span>
+              <div className="flex flex-col items-center justify-center gap-2">
+                {participants[1] && (peerStats[participants[1].id]?.inboundStalled || peerStats[participants[1].id]?.remoteOutboundStalled) ? (
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-red-400 bg-red-500/10 px-4 py-1.5 rounded-xl border border-red-500/10">
+                    Warning: Audio stream has stalled. Local/Remote WebRTC state is active but no audio bytes are flowing.
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-white/30">
+                    {type === 'voice' ? 'Encrypted Audio Connection Active' : 'Voice & Video Stream Active'}
+                  </span>
+                )}
               </div>
             </div>
             
@@ -775,6 +859,19 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                         referrerPolicy="no-referrer"
                       />
                     )}
+
+                    {/* Stalled audio banner overlay */}
+                    {p.id !== 'me' && (peerStats[p.id]?.inboundStalled || peerStats[p.id]?.remoteOutboundStalled) && (
+                      <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-red-950/75 backdrop-blur-md p-4 text-center">
+                        <div className="size-11 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 animate-pulse mb-2.5">
+                          <Icon name="mic_off" className="text-lg" />
+                        </div>
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-red-400">Audio Stream Stalled</span>
+                        <p className="text-[8px] text-white/60 max-w-[160px] mt-1 leading-normal">
+                          The remote peer stopped sending voice data. Monitored via active continuous WebSocket socket connection audit.
+                        </p>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Video Off Overlay */}
@@ -811,12 +908,38 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                       </div>
                     </div>
                     {p.id !== 'me' && peerStats[p.id] && (
-                      <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 flex flex-col gap-0.5 text-[8px] font-mono text-white/60 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                        <span className={peerStats[p.id].isFlowing ? 'text-emerald-400' : 'text-amber-400'}>
-                          {peerStats[p.id].isFlowing ? 'LIVE' : 'SILENT'}
-                        </span>
-                        <span>TX: {Math.round((peerStats[p.id].sentDelta || 0) * 8 / 1000 / 5)} kbps</span>
-                        <span>RX: {Math.round((peerStats[p.id].receivedDelta || 0) * 8 / 1000 / 5)} kbps</span>
+                      <div className="bg-black/85 backdrop-blur-md px-3 py-2 rounded-2xl border border-white/15 flex flex-col gap-1 text-[8px] font-mono text-white/70 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap min-w-[140px] z-30 shadow-2xl">
+                        <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1 mb-1">
+                          <span className="text-[7px] text-white/40 uppercase font-bold">WS Audit:</span>
+                          <div className="flex items-center gap-1">
+                            <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="text-[7px] text-emerald-400 uppercase font-black">ACTIVE</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-white/40">STATUS:</span>
+                          <span className={peerStats[p.id].isFlowing ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                            {peerStats[p.id].isFlowing ? 'LIVE AUDIO' : 'SILENT'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-white/40">ROUTING:</span>
+                          <span className={(peerStats[p.id].localCandidateType === 'relay' || peerStats[p.id].remoteLocalCandidateType === 'relay') ? 'text-amber-300 font-bold' : 'text-sky-400 font-bold'}>
+                            {(peerStats[p.id].localCandidateType === 'relay' || peerStats[p.id].remoteLocalCandidateType === 'relay') ? 'TURN RELAY 🌐' : 'STUN DIRECT ⚡'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-white/40">TX RATE:</span>
+                          <span>{Math.round((peerStats[p.id].sentDelta || 0) * 8 / 1000 / 5)} kbps</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-white/40">RX RATE:</span>
+                          <span>{Math.round((peerStats[p.id].receivedDelta || 0) * 8 / 1000 / 5)} kbps</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-white/40">CANDIDATE:</span>
+                          <span className="text-[7px] text-white/50 truncate max-w-[80px]">{peerStats[p.id].localCandidateType || 'STUN'}</span>
+                        </div>
                       </div>
                     )}
                     {p.id !== 'me' && !peerStats[p.id] && (
@@ -931,6 +1054,17 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           >
             <Icon name={speakerMode === 'speaker' ? 'volume_up' : 'hearing'} className="text-lg md:text-2xl" />
           </button>
+
+          <button 
+            onClick={() => setShowDiagnostics(!showDiagnostics)}
+            className={cn(
+              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
+              showDiagnostics ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-white/5 text-white hover:bg-white/10'
+            )}
+            title="Toggle Diagnostics Log"
+          >
+            <Icon name="terminal" className="text-lg md:text-2xl" />
+          </button>
         </div>
       </footer>
 
@@ -1037,6 +1171,170 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                   </button>
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* WebRTC Diagnostics Drawer */}
+      <AnimatePresence>
+        {showDiagnostics && (
+          <div className="fixed inset-y-0 right-0 z-[220] flex justify-end">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDiagnostics(false)}
+              className="fixed inset-0 bg-black backdrop-blur-sm"
+            />
+            
+            {/* Drawer Body */}
+            <motion.div 
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="relative w-full max-w-[460px] h-full bg-slate-900 border-l border-white/10 shadow-2xl flex flex-col overflow-hidden text-white font-sans"
+            >
+              {/* Drawer Header */}
+              <div className="p-6 border-b border-white/5 flex flex-col gap-4 bg-slate-950/60 backdrop-blur-xl shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="size-8 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary">
+                      <Icon name="terminal" className="text-base" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black uppercase tracking-tighter italic leading-none">RTC Diagnostics Log</h3>
+                      <p className="text-[9px] font-mono font-bold tracking-widest text-white/30 uppercase mt-1">Real-time Call Auditing</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        diagnosticLogger.clearLogs();
+                        setDiagnosticLogs([]);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all text-[8px] font-mono uppercase tracking-widest font-bold"
+                      title="Clear Diagnostics Log Buffer"
+                    >
+                      Clear
+                    </button>
+                    <button 
+                      onClick={() => setShowDiagnostics(false)} 
+                      className="size-8 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all text-white/40 hover:text-white"
+                    >
+                      <Icon name="close" className="text-sm" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Search Log Field */}
+                <div className="relative">
+                  <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 text-xs" />
+                  <input 
+                    type="text"
+                    placeholder="Filter keyword, event or peer..."
+                    className="w-full bg-white/5 border border-white/5 rounded-xl py-2 pl-9 pr-3 text-[10px] font-mono uppercase tracking-widest focus:outline-none focus:border-primary/50 focus:bg-white/10 transition-all"
+                    value={diagFilter}
+                    onChange={(e) => setDiagFilter(e.target.value)}
+                  />
+                </div>
+
+                {/* Tabs */}
+                <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
+                  {['all', 'signaling', 'socket', 'webrtc', 'media', 'error'].map(cat => {
+                    const count = diagnosticLogs.filter(l => cat === 'all' ? true : l.category === cat).length;
+                    const isActive = diagCategory === cat;
+                    return (
+                      <button
+                        key={cat}
+                        onClick={() => setDiagCategory(cat)}
+                        className={cn(
+                          "px-2.5 py-1.5 rounded-lg border text-[8px] font-mono uppercase tracking-wider font-bold transition-all shrink-0 flex items-center gap-1.5",
+                          isActive 
+                            ? "bg-primary border-primary text-white" 
+                            : "bg-white/5 border-white/5 text-white/60 hover:text-white hover:bg-white/10"
+                        )}
+                      >
+                        <span>{cat}</span>
+                        <span className={cn(
+                          "px-1 py-0.5 rounded-md text-[7px]",
+                          isActive ? "bg-white/25 text-white" : "bg-white/10 text-white/40"
+                        )}>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Log List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-950/20 font-mono">
+                {filteredDiagLogs.length === 0 ? (
+                  <div className="py-16 text-center space-y-4">
+                    <div className="size-12 rounded-2xl bg-white/5 flex items-center justify-center mx-auto text-white/20">
+                      <Icon name="history_edu" className="text-2xl" />
+                    </div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">No matching logs captured</p>
+                  </div>
+                ) : (
+                  filteredDiagLogs.map((log) => {
+                    const isExpanded = expandedLogs.includes(log.id);
+                    return (
+                      <div 
+                        key={log.id} 
+                        className={cn(
+                          "border rounded-xl p-3 transition-all",
+                          log.category === 'error' ? "bg-red-500/5 border-red-500/10" :
+                          log.category === 'webrtc' ? "bg-blue-500/5 border-blue-500/10" :
+                          log.category === 'signaling' ? "bg-amber-500/5 border-amber-500/10" :
+                          log.category === 'socket' ? "bg-purple-500/5 border-purple-500/10" :
+                          "bg-white/5 border-white/5"
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex flex-col gap-1 flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[8px] font-bold text-white/30 shrink-0">{log.timeStr}</span>
+                              <span className={cn(
+                                "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-wider shrink-0",
+                                log.category === 'error' ? "bg-red-500/25 text-red-300" :
+                                log.category === 'webrtc' ? "bg-blue-500/25 text-blue-300" :
+                                log.category === 'signaling' ? "bg-amber-500/25 text-amber-300" :
+                                log.category === 'socket' ? "bg-purple-500/25 text-purple-300" :
+                                "bg-slate-500/25 text-slate-300"
+                              )}>
+                                {log.category}
+                              </span>
+                              <span className="text-[9px] font-black text-white/80 uppercase tracking-tight truncate">{log.event}</span>
+                            </div>
+                            <p className="text-[9px] text-white/60 leading-relaxed break-words mt-1">{log.message}</p>
+                          </div>
+                          {log.metadata && (
+                            <button 
+                              onClick={() => toggleLogExpanded(log.id)}
+                              className="size-5 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all text-white/40 hover:text-white shrink-0"
+                            >
+                              <Icon name={isExpanded ? 'expand_less' : 'expand_more'} className="text-[10px]" />
+                            </button>
+                          )}
+                        </div>
+                        {isExpanded && log.metadata && (
+                          <div className="mt-2.5 p-2 bg-black/50 border border-white/5 rounded-lg text-[7px] text-emerald-400 overflow-x-auto select-all leading-tight max-h-[160px] whitespace-pre-wrap font-mono">
+                            {JSON.stringify(log.metadata, null, 2)}
+                          </div>
+                        )}
+                        {(log.peerId || log.roomId) && (
+                          <div className="flex gap-2 items-center text-[7px] text-white/30 uppercase mt-2 pt-1 border-t border-white/5 font-bold tracking-wider">
+                            {log.peerId && <span>PEER: {log.peerId.substring(0, 8)}</span>}
+                            {log.roomId && <span>ROOM: {log.roomId}</span>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </motion.div>
           </div>
         )}
