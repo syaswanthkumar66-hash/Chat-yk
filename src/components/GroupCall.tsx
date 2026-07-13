@@ -34,13 +34,17 @@ const VideoPlayer = ({
   useEffect(() => {
     const el = videoRef.current;
     if (el && stream) {
-      console.log(`[Diagnostic] Setting stream on media element. Track count: ${stream.getTracks().length}`);
+      console.log(`[Diagnostic] Setting stream on media element (isLocal: ${isLocal}). Track count: ${stream.getTracks().length}`);
+      stream.getTracks().forEach(t => console.log(`[Diagnostic] Track in VideoPlayer: kind=${t.kind}, enabled=${t.enabled}, muted=${t.muted}`));
       el.srcObject = stream;
+      
+      // Force volume to 1.0
+      el.volume = 1.0;
       
       // Attempt explicit play (Step 2)
       el.play()
         .then(() => {
-          console.log(`[Diagnostic] Media element successfully playing stream!`);
+          console.log(`[Diagnostic] Media element successfully playing stream! (isLocal: ${isLocal}, muted property: ${el.muted})`);
         })
         .catch(err => {
           console.warn(`[Diagnostic] Autoplay prevented or failed for stream. Binding document-wide gesture listener as a fallback...`, err);
@@ -61,7 +65,7 @@ const VideoPlayer = ({
           document.addEventListener('touchstart', handleInteraction);
         });
     }
-  }, [stream]);
+  }, [stream, isLocal]);
 
   useEffect(() => {
     const applyAudioSink = async () => {

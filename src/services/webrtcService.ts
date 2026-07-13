@@ -1001,11 +1001,9 @@ class WebRTCService {
     // Queue incoming signals that trigger createPeerConnection until our local media is ready.
     // (Applies only to A/V calls, not data-channel chat rooms where localStream is intentionally null)
     if (!this.localStream && !roomId.startsWith('chat-webrtc-')) {
-      if (signal.type === 'peer_joined' || signal.type === 'offer') {
-        console.log(`[Diagnostic] Local media not ready yet. Queueing signal from ${from}: ${signal.type}`);
-        this.pendingSignals.push({ from, signal, roomId });
-        return;
-      }
+      console.log(`[Diagnostic] Local media not ready yet. Queueing signal from ${from}: ${signal.type}`);
+      this.pendingSignals.push({ from, signal, roomId });
+      return;
     }
 
     if (signal.type === 'peer_joined') {
