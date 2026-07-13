@@ -148,52 +148,57 @@ class WebRTCService {
     }));
   }
 
+  private getMapKey(peerId: string, roomId: string): string {
+    return `${roomId}_${peerId}`;
+  }
+
   private createPeerConnection(peerId: string, roomId: string): RTCPeerConnection {
-    if (this.pcs.has(peerId)) {
-      return this.pcs.get(peerId)!;
+    const mapKey = this.getMapKey(peerId, roomId);
+    if (this.pcs.has(mapKey)) {
+      return this.pcs.get(mapKey)!;
     }
 
-    console.log(`[Diagnostic] Creating RTCPeerConnection for peer ${peerId} using ICE servers:`, this.iceServers);
+    console.log(`[Diagnostic] Creating RTCPeerConnection for peer ${peerId} (room ${roomId}) using ICE servers:`, this.iceServers);
     const pc = new RTCPeerConnection({
       iceServers: this.iceServers,
       bundlePolicy: 'max-bundle'
     });
 
-    this.pcs.set(peerId, pc);
-    this.candidatesGathered.set(peerId, 0);
-    this.trackReceived.set(peerId, false);
+    this.pcs.set(mapKey, pc);
+    this.candidatesGathered.set(mapKey, 0);
+    this.trackReceived.set(mapKey, false);
 
     // Setup 15-second signaling timeout
     const signalingTimeoutId = setTimeout(() => {
-      const currentPc = this.pcs.get(peerId);
+      const currentPc = this.pcs.get(mapKey);
       if (currentPc && currentPc.iceConnectionState !== 'connected') {
-        console.warn(`[Diagnostic] Signaling timeout reached for peer ${peerId}`);
+        console.warn(`[Diagnostic] Signaling timeout reached for peer ${peerId} (room ${roomId})`);
         this.dispatchCallError(CallError.SIGNALING_TIMEOUT, peerId);
-        this.removePeer(peerId);
+        this.removePeer(peerId, roomId);
       }
     }, 15000);
-    this.signalingTimeouts.set(peerId, signalingTimeoutId);
+    this.signalingTimeouts.set(mapKey, signalingTimeoutId);
 
     // Track all WebRTC state changes meticulously (Step 0 logs with precise timestamping)
     pc.oniceconnectionstatechange = () => {
       const ts = new Date().toISOString();
-      console.log(`[Diagnostic][${ts}] Peer ${peerId} iceConnectionState: ${pc.iceConnectionState}`);
+      console.log(`[Diagnostic][${ts}] Peer ${peerId} (room ${roomId}) iceConnectionState: ${pc.iceConnectionState}`);
       
       if (pc.iceConnectionState === 'connected') {
-        console.log(`[Diagnostic][${ts}] Peer ${peerId} ICE Connected! Initiating active track stats monitoring (Step 0/Step 2).`);
+        console.log(`[Diagnostic][${ts}] Peer ${peerId} (room ${roomId}) ICE Connected! Initiating active track stats monitoring (Step 0/Step 2).`);
         
         // Clear signaling timeout upon success
-        const timeoutId = this.signalingTimeouts.get(peerId);
+        const timeoutId = this.signalingTimeouts.get(mapKey);
         if (timeoutId) {
           clearTimeout(timeoutId);
-          this.signalingTimeouts.delete(peerId);
+          this.signalingTimeouts.delete(mapKey);
         }
 
-        this.startStatsMonitoring(peerId);
+        this.startStatsMonitoring(peerId, roomId);
 
         // CONNECTED_NO_MEDIA check: 5-second grace period then confirm non-zero audio bytes flowing
         setTimeout(async () => {
-          const currentPc = this.pcs.get(peerId);
+          const currentPc = this.pcs.get(mapKey);
           if (currentPc && currentPc.iceConnectionState === 'connected') {
             try {
               const stats = await currentPc.getStats();
@@ -207,7 +212,7 @@ class WebRTCService {
                   audioBytesSent = report.bytesSent || 0;
                 }
               });
-              console.log(`[Diagnostic] 5-second media flow check for peer ${peerId}: Sent=${audioBytesSent}, Received=${audioBytesReceived}`);
+              console.log(`[Diagnostic] 5-second media flow check for peer ${peerId} (room ${roomId}): Sent=${audioBytesSent}, Received=${audioBytesReceived}`);
               if (audioBytesSent === 0 && audioBytesReceived === 0) {
                 console.warn(`[Diagnostic] Connected but silent! 0 media bytes flow detected.`);
                 this.dispatchCallError(CallError.CONNECTED_NO_MEDIA, peerId);
@@ -220,19 +225,19 @@ class WebRTCService {
 
         // TRACK_NOT_RECEIVED check: Confirm track received within 8 seconds of connection
         setTimeout(() => {
-          const currentPc = this.pcs.get(peerId);
-          if (currentPc && currentPc.iceConnectionState === 'connected' && !this.trackReceived.get(peerId)) {
-            console.warn(`[Diagnostic] Connected but no track received for peer ${peerId} within 8s`);
+          const currentPc = this.pcs.get(mapKey);
+          if (currentPc && currentPc.iceConnectionState === 'connected' && !this.trackReceived.get(mapKey)) {
+            console.warn(`[Diagnostic] Connected but no track received for peer ${peerId} (room ${roomId}) within 8s`);
             this.dispatchCallError(CallError.TRACK_NOT_RECEIVED, peerId);
           }
         }, 8000);
       }
 
       if (pc.iceConnectionState === 'failed') {
-        const timeoutId = this.signalingTimeouts.get(peerId);
+        const timeoutId = this.signalingTimeouts.get(mapKey);
         if (timeoutId) {
           clearTimeout(timeoutId);
-          this.signalingTimeouts.delete(peerId);
+          this.signalingTimeouts.delete(mapKey);
         }
 
         this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
@@ -245,35 +250,35 @@ class WebRTCService {
       }
 
       if (pc.iceConnectionState === 'disconnected') {
-        console.warn(`[Diagnostic][${ts}] Peer ${peerId} iceConnectionState is disconnected. Waiting 5 seconds for WebRTC auto-recovery...`);
+        console.warn(`[Diagnostic][${ts}] Peer ${peerId} (room ${roomId}) iceConnectionState is disconnected. Waiting 5 seconds for WebRTC auto-recovery...`);
         this.dispatchCallError(CallError.CONNECTION_DISCONNECTED, peerId);
         setTimeout(() => {
-          const currentPc = this.pcs.get(peerId);
+          const currentPc = this.pcs.get(mapKey);
           if (currentPc && (currentPc.iceConnectionState === 'disconnected' || currentPc.iceConnectionState === 'failed')) {
-            console.warn(`[Diagnostic] WebRTC auto-recovery timed out for peer ${peerId}. Cleaning up connection.`);
+            console.warn(`[Diagnostic] WebRTC auto-recovery timed out for peer ${peerId} (room ${roomId}). Cleaning up connection.`);
             this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
-            this.removePeer(peerId);
+            this.removePeer(peerId, roomId);
           }
         }, 5000);
       }
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} connectionState: ${pc.connectionState}`);
+      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}) connectionState: ${pc.connectionState}`);
       if (pc.connectionState === 'failed') {
         this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
       }
     };
 
     pc.onsignalingstatechange = () => {
-      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} signalingState: ${pc.signalingState}`);
+      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}) signalingState: ${pc.signalingState}`);
     };
 
     pc.onicegatheringstatechange = () => {
       const state = pc.iceGatheringState;
-      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} iceGatheringState: ${state}`);
-      if (state === 'complete' && (this.candidatesGathered.get(peerId) || 0) === 0) {
-        console.warn(`[Diagnostic] ICE gathering completed with 0 candidates for peer ${peerId}`);
+      console.log(`[Diagnostic][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}) iceGatheringState: ${state}`);
+      if (state === 'complete' && (this.candidatesGathered.get(mapKey) || 0) === 0) {
+        console.warn(`[Diagnostic] ICE gathering completed with 0 candidates for peer ${peerId} (room ${roomId})`);
         this.dispatchCallError(CallError.ICE_GATHERING_FAILED, peerId);
       }
     };
@@ -282,20 +287,20 @@ class WebRTCService {
     const myId = useAppStore.getState().user?.id;
     const isInitiator = myId && peerId && myId < peerId;
     if (roomId.startsWith('chat-webrtc-') && isInitiator) {
-      console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (initiator: true)`);
+      console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (initiator: true, room ${roomId})`);
       const dc = pc.createDataChannel("audio_transfer", { ordered: true });
-      this.setupDataChannel(peerId, dc);
+      this.setupDataChannel(peerId, roomId, dc);
     }
 
     pc.ondatachannel = (event) => {
-      console.log(`Received remote data channel from peer ${peerId}:`, event.channel.label);
-      this.setupDataChannel(peerId, event.channel);
+      console.log(`Received remote data channel from peer ${peerId} in room ${roomId}:`, event.channel.label);
+      this.setupDataChannel(peerId, roomId, event.channel);
     };
 
     // Handle ICE candidates and transmit them via Socket.io
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        this.candidatesGathered.set(peerId, (this.candidatesGathered.get(peerId) || 0) + 1);
+        this.candidatesGathered.set(mapKey, (this.candidatesGathered.get(mapKey) || 0) + 1);
         // Step 1 point 5: Confirm candidates are sent ONLY after setLocalDescription has been called
         if (pc.localDescription) {
           const socket = useAppStore.getState().socket;
@@ -316,13 +321,13 @@ class WebRTCService {
 
     // Handle remote stream tracks being added
     pc.ontrack = (event) => {
-      this.trackReceived.set(peerId, true);
+      this.trackReceived.set(mapKey, true);
       const stream = event.streams[0];
       const track = event.track;
       const ts = new Date().toISOString();
-      console.log(`[Diagnostic][${ts}] ontrack event fired! Track kind: "${track?.kind}", ID: "${track?.id}", readyState: "${track?.readyState}"`);
+      console.log(`[Diagnostic][${ts}] ontrack event fired! Track kind: "${track?.kind}", ID: "${track?.id}", readyState: "${track?.readyState}" (room ${roomId})`);
       if (stream) {
-        console.log(`[Diagnostic][${ts}] Successfully received remote stream from peer ${peerId}, track count: ${stream.getTracks().length}`);
+        console.log(`[Diagnostic][${ts}] Successfully received remote stream from peer ${peerId} (room ${roomId}), track count: ${stream.getTracks().length}`);
         // Dispatch custom event to notify GroupCall component
         window.dispatchEvent(new CustomEvent('webrtc_stream', {
           detail: { from: peerId, stream }
@@ -333,16 +338,17 @@ class WebRTCService {
     return pc;
   }
 
-  private setupDataChannel(peerId: string, channel: RTCDataChannel) {
-    this.dataChannels.set(peerId, channel);
+  private setupDataChannel(peerId: string, roomId: string, channel: RTCDataChannel) {
+    const mapKey = this.getMapKey(peerId, roomId);
+    this.dataChannels.set(mapKey, channel);
 
     channel.onopen = () => {
-      console.log(`Data channel with peer ${peerId} is OPEN`);
+      console.log(`Data channel with peer ${peerId} (room ${roomId}) is OPEN`);
     };
 
     channel.onclose = () => {
-      console.log(`Data channel with peer ${peerId} is CLOSED`);
-      this.dataChannels.delete(peerId);
+      console.log(`Data channel with peer ${peerId} (room ${roomId}) is CLOSED`);
+      this.dataChannels.delete(mapKey);
     };
 
     channel.onmessage = async (event) => {
@@ -627,16 +633,20 @@ class WebRTCService {
     if (socket) {
       socket.emit('end_call', { roomId });
     }
-    this.removePeer(peerId);
+    this.removePeer(peerId, roomId);
     if (this.currentRoomId === roomId) {
       this.currentRoomId = null;
     }
   }
 
   async sendAudioChunks(peerId: string, blob: Blob, mimeType: string, messageId?: string): Promise<boolean> {
-    const channel = this.dataChannels.get(peerId);
+    const myId = useAppStore.getState().user?.id;
+    const sortedIds = [myId, peerId].sort();
+    const roomId = `chat-webrtc-${sortedIds[0]}-${sortedIds[1]}`;
+    const mapKey = this.getMapKey(peerId, roomId);
+    const channel = this.dataChannels.get(mapKey);
     if (!channel || channel.readyState !== 'open') {
-      console.warn(`Data channel with peer ${peerId} is not open or available.`);
+      console.warn(`Data channel with peer ${peerId} (mapKey ${mapKey}) is not open or available.`);
       return false;
     }
 
@@ -669,7 +679,7 @@ class WebRTCService {
           rtts: []
         });
 
-        console.log(`Sending audio over data channel to ${peerId}. Size: ${totalBytes} bytes. Transfer ID: ${transferId}`);
+        console.log(`Sending audio over data channel to ${peerId} (room ${roomId}). Size: ${totalBytes} bytes. Transfer ID: ${transferId}`);
 
         try {
           // 1. Send transfer_start
@@ -703,7 +713,7 @@ class WebRTCService {
             if (!activeTx) break; // Transfer canceled
 
             // Monitor RTCDataChannel performance using getStats and bufferedAmount to dynamically adjust chunk sizes
-            const peerStats = await this.getPeerStats(peerId);
+            const peerStats = await this.getPeerStats(peerId, roomId);
             if (peerStats.rtt !== undefined) {
               activeTx.rtts.push(peerStats.rtt);
               if (activeTx.rtts.length > 20) activeTx.rtts.shift();
@@ -817,10 +827,11 @@ class WebRTCService {
   }
 
   private async handleIceFailure(peerId: string, roomId: string) {
-    const pc = this.pcs.get(peerId);
+    const mapKey = this.getMapKey(peerId, roomId);
+    const pc = this.pcs.get(mapKey);
     if (!pc) return;
 
-    console.warn(`[Diagnostic] ICE Connection Failed with peer ${peerId}. Initiating WhatsApp-grade ICE restart sequence (Step 4).`);
+    console.warn(`[Diagnostic] ICE Connection Failed with peer ${peerId} (room ${roomId}). Initiating WhatsApp-grade ICE restart sequence (Step 4).`);
     try {
       if (typeof pc.restartIce === 'function') {
         pc.restartIce();
@@ -846,27 +857,28 @@ class WebRTCService {
           }
         });
       }
-      console.log(`[Diagnostic] Sent ICE Restart offer to peer ${peerId}`);
+      console.log(`[Diagnostic] Sent ICE Restart offer to peer ${peerId} (room ${roomId})`);
     } catch (err) {
-      console.error(`[Diagnostic] ICE Restart request failed for peer ${peerId}:`, err);
-      this.removePeer(peerId);
+      console.error(`[Diagnostic] ICE Restart request failed for peer ${peerId} (room ${roomId}):`, err);
+      this.removePeer(peerId, roomId);
     }
   }
 
-  private startStatsMonitoring(peerId: string) {
-    if (this.statsIntervals.has(peerId)) {
-      clearInterval(this.statsIntervals.get(peerId));
+  private startStatsMonitoring(peerId: string, roomId: string) {
+    const mapKey = this.getMapKey(peerId, roomId);
+    if (this.statsIntervals.has(mapKey)) {
+      clearInterval(this.statsIntervals.get(mapKey));
     }
 
     let lastBytesSent = 0;
     let lastBytesReceived = 0;
 
     const intervalId = setInterval(async () => {
-      const pc = this.pcs.get(peerId);
+      const pc = this.pcs.get(mapKey);
       if (!pc || pc.iceConnectionState !== 'connected') {
-        console.log(`[StatsMonitor] Connection not active, stopping stats query for peer ${peerId}`);
+        console.log(`[StatsMonitor] Connection not active, stopping stats query for peer ${peerId} (room ${roomId})`);
         clearInterval(intervalId);
-        this.statsIntervals.delete(peerId);
+        this.statsIntervals.delete(mapKey);
         return;
       }
 
@@ -898,7 +910,7 @@ class WebRTCService {
         const sentDelta = audioBytesSent - lastBytesSent;
         const receivedDelta = audioBytesReceived - lastBytesReceived;
 
-        console.log(`[Diagnostic][StatsMonitor][${new Date().toISOString()}] Peer ${peerId}:
+        console.log(`[Diagnostic][StatsMonitor][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}):
           - Candidate Pair Type: ${candidatePairStr}
           - Total Audio Bytes Sent: ${audioBytesSent} (Delta: +${sentDelta} bytes)
           - Total Audio Bytes Received: ${audioBytesReceived} (Delta: +${receivedDelta} bytes)
@@ -925,31 +937,33 @@ class WebRTCService {
       }
     }, 5000);
 
-    this.statsIntervals.set(peerId, intervalId);
+    this.statsIntervals.set(mapKey, intervalId);
   }
 
-  private removePeer(peerId: string) {
-    const pc = this.pcs.get(peerId);
+  private removePeer(peerId: string, roomId: string) {
+    const mapKey = this.getMapKey(peerId, roomId);
+    const pc = this.pcs.get(mapKey);
     if (pc) {
-      console.log(`Cleaning up connection for peer ${peerId}`);
+      console.log(`Cleaning up connection for peer ${peerId} (room ${roomId})`);
       pc.close();
-      this.pcs.delete(peerId);
+      this.pcs.delete(mapKey);
     }
-    const dc = this.dataChannels.get(peerId);
+    const dc = this.dataChannels.get(mapKey);
     if (dc) {
       dc.close();
-      this.dataChannels.delete(peerId);
+      this.dataChannels.delete(mapKey);
     }
-    this.pendingCandidates.delete(peerId);
+    this.pendingCandidates.delete(mapKey);
 
-    if (this.statsIntervals.has(peerId)) {
-      clearInterval(this.statsIntervals.get(peerId));
-      this.statsIntervals.delete(peerId);
+    if (this.statsIntervals.has(mapKey)) {
+      clearInterval(this.statsIntervals.get(mapKey));
+      this.statsIntervals.delete(mapKey);
     }
   }
 
-  private async getPeerStats(peerId: string): Promise<{ rtt?: number, packetLoss?: number, jitter?: number }> {
-    const pc = this.pcs.get(peerId);
+  private async getPeerStats(peerId: string, roomId: string): Promise<{ rtt?: number, packetLoss?: number, jitter?: number }> {
+    const mapKey = this.getMapKey(peerId, roomId);
+    const pc = this.pcs.get(mapKey);
     if (!pc) return {};
     try {
       const stats = await pc.getStats();
@@ -979,16 +993,17 @@ class WebRTCService {
     }
   }
 
-  private async applyPendingIceCandidates(peerId: string, pc: RTCPeerConnection) {
-    const candidates = this.pendingCandidates.get(peerId);
+  private async applyPendingIceCandidates(peerId: string, roomId: string, pc: RTCPeerConnection) {
+    const mapKey = this.getMapKey(peerId, roomId);
+    const candidates = this.pendingCandidates.get(mapKey);
     if (candidates && candidates.length > 0) {
-      console.log(`Applying ${candidates.length} queued ICE candidates for peer ${peerId}`);
-      this.pendingCandidates.delete(peerId);
+      console.log(`Applying ${candidates.length} queued ICE candidates for peer ${peerId} (room ${roomId})`);
+      this.pendingCandidates.delete(mapKey);
       for (const candidate of candidates) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (err) {
-          console.warn(`Failed to add queued ICE candidate for peer ${peerId}:`, err);
+          console.warn(`Failed to add queued ICE candidate for peer ${peerId} (room ${roomId}):`, err);
         }
       }
     }
@@ -1009,23 +1024,23 @@ class WebRTCService {
     if (signal.type === 'peer_joined') {
       const peerId = signal.peerId;
       if (peerId && peerId !== myId) {
-        console.log(`[Diagnostic] Peer ${peerId} joined. Creating Peer Connection.`);
+        console.log(`[Diagnostic] Peer ${peerId} joined. Creating Peer Connection for room ${roomId}.`);
         const pc = this.createPeerConnection(peerId, roomId);
 
         // Step 1 point 3: Add all local tracks BEFORE calling createOffer
         this.attachLocalTracks(pc);
 
         // ALWAYS ensure that we create the DataChannel on the SDP offer creator side
-        if (roomId.startsWith('chat-webrtc-') && !this.dataChannels.has(peerId)) {
-          console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (SDP Offer Initiator)`);
+        if (roomId.startsWith('chat-webrtc-') && !this.dataChannels.has(this.getMapKey(peerId, roomId))) {
+          console.log(`Creating RTCDataChannel "audio_transfer" for peer ${peerId} (SDP Offer Initiator, room ${roomId})`);
           const dc = pc.createDataChannel("audio_transfer", { ordered: true });
-          this.setupDataChannel(peerId, dc);
+          this.setupDataChannel(peerId, roomId, dc);
         }
 
         try {
-          console.log(`[Diagnostic] Creating Offer for peer ${peerId}`);
+          console.log(`[Diagnostic] Creating Offer for peer ${peerId} (room ${roomId})`);
           const offer = await pc.createOffer();
-          console.log(`[Diagnostic] Setting Local Description (Offer) for peer ${peerId}`);
+          console.log(`[Diagnostic] Setting Local Description (Offer) for peer ${peerId} (room ${roomId})`);
           await pc.setLocalDescription(offer);
           
           const socket = useAppStore.getState().socket;
@@ -1041,13 +1056,13 @@ class WebRTCService {
             });
           }
         } catch (err) {
-          console.error(`Failed to create/send offer to peer ${peerId}:`, err);
+          console.error(`Failed to create/send offer to peer ${peerId} (room ${roomId}):`, err);
           this.dispatchCallError(CallError.RENEGOTIATION_FAILED, peerId);
         }
       }
     } else if (signal.type === 'offer') {
       if (signal.to === myId) {
-        console.log(`[Diagnostic] Received offer from peer ${from}. Setting Remote Description FIRST (Step 1 point 6).`);
+        console.log(`[Diagnostic] Received offer from peer ${from} for room ${roomId}. Setting Remote Description FIRST (Step 1 point 6).`);
         const pc = this.createPeerConnection(from, roomId);
 
         try {
@@ -1055,14 +1070,14 @@ class WebRTCService {
           await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
           
           // Apply any pending ICE candidates that arrived before SDP remote description was set (Step 1 point 7)
-          await this.applyPendingIceCandidates(from, pc);
+          await this.applyPendingIceCandidates(from, roomId, pc);
 
           // THEN attach local tracks to the connection
-          console.log(`[Diagnostic] Attaching local tracks for answering connection to ${from}`);
+          console.log(`[Diagnostic] Attaching local tracks for answering connection to ${from} (room ${roomId})`);
           this.attachLocalTracks(pc);
 
           // THEN create and set the answer
-          console.log(`[Diagnostic] Creating Answer for peer ${from}`);
+          console.log(`[Diagnostic] Creating Answer for peer ${from} (room ${roomId})`);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
@@ -1079,45 +1094,47 @@ class WebRTCService {
             });
           }
         } catch (err) {
-          console.error(`Failed to handle offer from peer ${from}:`, err);
+          console.error(`Failed to handle offer from peer ${from} (room ${roomId}):`, err);
           this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
         }
       }
     } else if (signal.type === 'answer') {
       if (signal.to === myId) {
-        console.log(`[Diagnostic] Received answer from peer ${from}`);
-        const pc = this.pcs.get(from);
+        console.log(`[Diagnostic] Received answer from peer ${from} for room ${roomId}`);
+        const mapKey = this.getMapKey(from, roomId);
+        const pc = this.pcs.get(mapKey);
         if (pc) {
           try {
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
-            await this.applyPendingIceCandidates(from, pc);
+            await this.applyPendingIceCandidates(from, roomId, pc);
           } catch (err) {
-            console.error(`Failed to set remote description from peer ${from}:`, err);
+            console.error(`Failed to set remote description from peer ${from} (room ${roomId}):`, err);
             this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
           }
         }
       }
     } else if (signal.type === 'ice_candidate') {
       if (signal.to === myId) {
-        const pc = this.pcs.get(from);
+        const mapKey = this.getMapKey(from, roomId);
+        const pc = this.pcs.get(mapKey);
         // Step 1 point 7: Queue candidate if remote description is not set yet
         if (pc && pc.remoteDescription && pc.remoteDescription.type) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
           } catch (err) {
-            console.error(`Failed to add ICE candidate from peer ${from}:`, err);
+            console.error(`Failed to add ICE candidate from peer ${from} (room ${roomId}):`, err);
           }
         } else {
-          console.log(`[Diagnostic] Queueing ICE candidate from peer ${from} (no remote description set yet)`);
-          if (!this.pendingCandidates.has(from)) {
-            this.pendingCandidates.set(from, []);
+          console.log(`[Diagnostic] Queueing ICE candidate from peer ${from} (room ${roomId}) (no remote description set yet)`);
+          if (!this.pendingCandidates.has(mapKey)) {
+            this.pendingCandidates.set(mapKey, []);
           }
-          this.pendingCandidates.get(from)!.push(signal.candidate);
+          this.pendingCandidates.get(mapKey)!.push(signal.candidate);
         }
       }
     } else if (signal.type === 'request_tracks') {
       if (this.localStream) {
-        console.log(`Received track request. Re-broadcasting peer presence...`);
+        console.log(`Received track request for room ${roomId}. Re-broadcasting peer presence...`);
         const socket = useAppStore.getState().socket;
         if (socket) {
           socket.emit('sfu_signal', {
@@ -1133,31 +1150,79 @@ class WebRTCService {
     }
   }
 
-  closeSession() {
-    console.log("Closing WebRTC session, cleaning up all peer connections.");
-    this.pcs.forEach((pc, peerId) => {
-      pc.close();
-    });
-    this.pcs.clear();
-    
-    this.dataChannels.forEach((dc, peerId) => {
-      dc.close();
-    });
-    this.dataChannels.clear();
+  closeSession(roomId?: string) {
+    if (roomId) {
+      console.log(`Closing WebRTC session for room: ${roomId}`);
+      this.pcs.forEach((pc, key) => {
+        if (key.startsWith(`${roomId}_`)) {
+          pc.close();
+          this.pcs.delete(key);
+        }
+      });
+      this.dataChannels.forEach((dc, key) => {
+        if (key.startsWith(`${roomId}_`)) {
+          dc.close();
+          this.dataChannels.delete(key);
+        }
+      });
+      this.signalingTimeouts.forEach((timeoutId, key) => {
+        if (key.startsWith(`${roomId}_`)) {
+          clearTimeout(timeoutId);
+          this.signalingTimeouts.delete(key);
+        }
+      });
+      this.statsIntervals.forEach((intervalId, key) => {
+        if (key.startsWith(`${roomId}_`)) {
+          clearInterval(intervalId);
+          this.statsIntervals.delete(key);
+        }
+      });
+      // Clear pending candidates, trackReceived, candidatesGathered
+      this.pendingCandidates.forEach((_, key) => {
+        if (key.startsWith(`${roomId}_`)) {
+          this.pendingCandidates.delete(key);
+        }
+      });
+      this.trackReceived.forEach((_, key) => {
+        if (key.startsWith(`${roomId}_`)) {
+          this.trackReceived.delete(key);
+        }
+      });
+      this.candidatesGathered.forEach((_, key) => {
+        if (key.startsWith(`${roomId}_`)) {
+          this.candidatesGathered.delete(key);
+        }
+      });
 
-    this.signalingTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
-    this.signalingTimeouts.clear();
-    this.trackReceived.clear();
-    this.candidatesGathered.clear();
+      if (this.currentRoomId === roomId) {
+        this.currentRoomId = null;
+      }
+    } else {
+      console.log("Closing WebRTC session, cleaning up all peer connections.");
+      this.pcs.forEach((pc, key) => {
+        pc.close();
+      });
+      this.pcs.clear();
+      
+      this.dataChannels.forEach((dc, key) => {
+        dc.close();
+      });
+      this.dataChannels.clear();
 
-    this.localStream = null;
-    this.currentRoomId = null;
-    this.pendingCandidates.clear();
-    
-    this.pendingSignals = [];
+      this.signalingTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+      this.signalingTimeouts.clear();
+      this.trackReceived.clear();
+      this.candidatesGathered.clear();
 
-    this.statsIntervals.forEach(interval => clearInterval(interval));
-    this.statsIntervals.clear();
+      this.localStream = null;
+      this.currentRoomId = null;
+      this.pendingCandidates.clear();
+      
+      this.pendingSignals = [];
+
+      this.statsIntervals.forEach(interval => clearInterval(interval));
+      this.statsIntervals.clear();
+    }
   }
 }
 

@@ -284,7 +284,8 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
       }
-      webrtcService.closeSession();
+      const computedRoomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+      webrtcService.closeSession(computedRoomId);
       window.removeEventListener('webrtc_stream', handleRemoteStream);
       window.removeEventListener('webrtc_connection_failed', handleConnectionFailed);
       window.removeEventListener('webrtc_call_error', handleWebRTCCallError);
@@ -300,8 +301,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       }
       
       if (socket) {
-        const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
-        socket.emit('end_call', { to: userId, roomId });
+        socket.emit('end_call', { to: userId, roomId: computedRoomId });
       }
     };
   }, [type, socket, groupId, userId, user, callAttempt]);
