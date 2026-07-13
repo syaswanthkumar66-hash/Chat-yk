@@ -44,7 +44,7 @@ class WebRTCService {
   private dataChannels: Map<string, RTCDataChannel> = new Map();
   private isIceServersFetched = false;
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
-  private isReadyForSignaling = false;
+  
   private pendingSignals: { from: string; signal: any; roomId: string }[] = [];
   private statsIntervals: Map<string, any> = new Map();
   
@@ -111,7 +111,7 @@ class WebRTCService {
     }
 
     console.log(`[Diagnostic] Local stream published. Marking WebRTC signaling ready for room ${roomId}`);
-    this.isReadyForSignaling = true;
+    
 
     // Process any queued signals that arrived prior to stream publishing
     const signalsToProcess = [...this.pendingSignals];
@@ -905,6 +905,19 @@ class WebRTCService {
           - Audio Flow Status: ${sentDelta > 0 || receivedDelta > 0 ? "LIVE AUDIO TRANSMITTING ✅" : "STALLED / SILENT ⚠️"}
         `);
 
+        // Dispatch an event so the UI can display real-time metrics
+        window.dispatchEvent(new CustomEvent('webrtc_call_stats', {
+          detail: {
+            peerId,
+            audioBytesSent,
+            audioBytesReceived,
+            sentDelta,
+            receivedDelta,
+            candidatePairStr,
+            isFlowing: sentDelta > 0 || receivedDelta > 0
+          }
+        }));
+
         lastBytesSent = audioBytesSent;
         lastBytesReceived = audioBytesReceived;
       } catch (err) {
@@ -985,11 +998,14 @@ class WebRTCService {
     const myId = useAppStore.getState().user?.id;
     if (from === myId) return; // Skip our own signals
 
-    // Queue signal processing until localStream is published and ready (Step 1)
-    if (!this.isReadyForSignaling) {
-      console.log(`[Diagnostic] WebRTC service not ready yet. Queueing signal from ${from}: ${signal.type}`);
-      this.pendingSignals.push({ from, signal, roomId });
-      return;
+    // Queue incoming signals that trigger createPeerConnection until our local media is ready.
+    // (Applies only to A/V calls, not data-channel chat rooms where localStream is intentionally null)
+    if (!this.localStream && !roomId.startsWith('chat-webrtc-')) {
+      if (signal.type === 'peer_joined' || signal.type === 'offer') {
+        console.log(`[Diagnostic] Local media not ready yet. Queueing signal from ${from}: ${signal.type}`);
+        this.pendingSignals.push({ from, signal, roomId });
+        return;
+      }
     }
 
     if (signal.type === 'peer_joined') {
@@ -1139,7 +1155,7 @@ class WebRTCService {
     this.localStream = null;
     this.currentRoomId = null;
     this.pendingCandidates.clear();
-    this.isReadyForSignaling = false;
+    
     this.pendingSignals = [];
 
     this.statsIntervals.forEach(interval => clearInterval(interval));

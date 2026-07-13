@@ -140,6 +140,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [peerStats, setPeerStats] = useState<Record<string, any>>({});
 
   const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
     removedFriendIds: s.removedFriendIds,
@@ -149,33 +150,6 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     users: s.users
   }), shallowEqual);
   
-  useEffect(() => {
-    if (socket && (groupId || userId)) {
-      const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
-      socket.emit('join_call', { roomId, userId: user?.id });
-      
-      if (userId) {
-        socket.emit('call_user', { to: userId, roomId, type, from: user?.id });
-      }
-
-      socket.emit('sfu_signal', {
-        roomId,
-        from: user?.id,
-        signal: { type: 'request_tracks' }
-      });
-
-      const handleUserJoined = (data: { userId: string }) => {
-        console.log('User joined call:', data.userId);
-      };
-
-      socket.on('user_joined_call', handleUserJoined);
-      
-      return () => {
-        socket.off('user_joined_call', handleUserJoined);
-      };
-    }
-  }, [socket, groupId, userId, user, callAttempt]);
-
   useEffect(() => {
     let stream: MediaStream | null = null;
     let mounted = true;
@@ -204,6 +178,20 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
         const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
         await webrtcService.publishLocalStream(stream, roomId);
+
+        if (socket && mounted) {
+          socket.emit('join_call', { roomId, userId: user?.id });
+          
+          if (userId) {
+            socket.emit('call_user', { to: userId, roomId, type, from: user?.id });
+          }
+
+          socket.emit('sfu_signal', {
+            roomId,
+            from: user?.id,
+            signal: { type: 'request_tracks' }
+          });
+        }
       } catch (err: any) {
         console.error('Failed to get local media or publish:', err);
         let errorCode = 'MIC_CAPTURE_FAILED';
@@ -266,10 +254,26 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       setCallError(prev => (prev && prev.code === code) ? null : prev);
     };
 
+    const handleUserJoined = (data: { userId: string }) => {
+      console.log('User joined call:', data.userId);
+    };
+
+    const handleCallStats = (e: any) => {
+      setPeerStats(prev => ({
+        ...prev,
+        [e.detail.peerId]: e.detail
+      }));
+    };
+
     window.addEventListener('webrtc_stream', handleRemoteStream);
     window.addEventListener('webrtc_connection_failed', handleConnectionFailed);
     window.addEventListener('webrtc_call_error', handleWebRTCCallError);
     window.addEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
+    window.addEventListener('webrtc_call_stats', handleCallStats);
+    
+    if (socket) {
+      socket.on('user_joined_call', handleUserJoined);
+    }
 
     return () => {
       mounted = false;
@@ -281,6 +285,11 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       window.removeEventListener('webrtc_connection_failed', handleConnectionFailed);
       window.removeEventListener('webrtc_call_error', handleWebRTCCallError);
       window.removeEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
+      window.removeEventListener('webrtc_call_stats', handleCallStats);
+      
+      if (socket) {
+        socket.off('user_joined_call', handleUserJoined);
+      }
       
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
@@ -797,7 +806,16 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                         )}
                       </div>
                     </div>
-                    {p.id !== 'me' && (
+                    {p.id !== 'me' && peerStats[p.id] && (
+                      <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 flex flex-col gap-0.5 text-[8px] font-mono text-white/60 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                        <span className={peerStats[p.id].isFlowing ? 'text-emerald-400' : 'text-amber-400'}>
+                          {peerStats[p.id].isFlowing ? 'LIVE' : 'SILENT'}
+                        </span>
+                        <span>TX: {Math.round((peerStats[p.id].sentDelta || 0) * 8 / 1000 / 5)} kbps</span>
+                        <span>RX: {Math.round((peerStats[p.id].receivedDelta || 0) * 8 / 1000 / 5)} kbps</span>
+                      </div>
+                    )}
+                    {p.id !== 'me' && !peerStats[p.id] && (
                       <button className="size-8 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <Icon name="more_horiz" className="text-xs" />
                       </button>
