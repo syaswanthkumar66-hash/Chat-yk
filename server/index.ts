@@ -18,6 +18,23 @@ import { getAuth } from 'firebase-admin/auth';
 let db: any = null;
 let firebaseApp: any = null;
 
+async function updateFirestorePresence(userId: string, isOnline: boolean) {
+  if (!db) {
+    console.warn("[Presence] Firestore db not available for presence sync");
+    return;
+  }
+  try {
+    const payload: any = {
+      isOnline,
+      lastSeen: new Date().toISOString()
+    };
+    await db.collection('users').doc(userId).set(payload, { merge: true });
+    console.log(`[Presence] Successfully synchronized user ${userId} presence in Firestore: isOnline = ${isOnline}`);
+  } catch (err: any) {
+    console.warn(`[Presence] Failed to synchronize user ${userId} presence in Firestore:`, err.message);
+  }
+}
+
 // Read firebase-applet-config.json for projectId and databaseId
 let appletConfig: any = null;
 try {
@@ -829,7 +846,10 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       
       // Broadcast online status
       io.emit("user_status", { userId, isOnline: true });
-      socket.emit("online_users", Array.from(users.keys()));
+      io.emit("online_users", Array.from(users.keys()));
+
+      // Sync with Firestore
+      updateFirestorePresence(userId, true);
 
       // Broadcast devices list to all sockets of this user
       const activeDeviceIds = Array.from(deviceMap.keys());
@@ -1505,6 +1525,10 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             users.delete(senderId);
             clearTypingTimeout(`user-${senderId}`);
             io.emit("user_status", { userId: senderId, isOnline: false });
+            io.emit("online_users", Array.from(users.keys()));
+
+            // Sync with Firestore
+            updateFirestorePresence(senderId, false);
             console.log(`User ${senderId} has disconnected all devices. Broadcasted offline.`);
           } else {
             console.log(`User ${senderId} disconnected device ${deviceId}. ${deviceMap.size} devices still active.`);
