@@ -119,15 +119,23 @@ const VideoPlayer = ({
       playsInline
       muted={isLocal}
       className={cn(
-        "size-full object-cover",
-        isVideoOff ? "absolute inset-0 size-px opacity-0 pointer-events-none" : "relative",
-        className
+        isVideoOff 
+          ? "absolute opacity-0 pointer-events-none w-px h-px overflow-hidden" 
+          : cn("relative size-full object-cover", className)
       )}
     />
   );
 };
 
 export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string, userId?: string, type: 'voice' | 'video', onClose: () => void }) => {
+  const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
+    removedFriendIds: s.removedFriendIds,
+    socket: s.socket,
+    user: s.user,
+    chats: s.chats,
+    users: s.users
+  }), shallowEqual);
+
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(type === 'voice');
@@ -146,6 +154,105 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [peerStats, setPeerStats] = useState<Record<string, any>>({});
+
+  const [isRecordingPTT, setIsRecordingPTT] = useState(false);
+  const [incomingPTT, setIncomingPTT] = useState<{ url: string, fromName: string, fromId: string } | null>(null);
+  const pttMediaRecorder = useRef<MediaRecorder | null>(null);
+  const pttChunks = useRef<Blob[]>([]);
+  
+  const participantsRef = useRef<Participant[]>([]);
+  const usersRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users]);
+
+  const startPTT = async () => {
+    try {
+      const stream = localStream || await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options = { mimeType: 'audio/webm' };
+      const recorder = new MediaRecorder(stream, options);
+      pttMediaRecorder.current = recorder;
+      pttChunks.current = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          pttChunks.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        if (pttChunks.current.length === 0) return;
+        const blob = new Blob(pttChunks.current, { type: 'audio/webm' });
+        const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+        console.log(`[PTT] Finished recording live PTT voice note. Size: ${blob.size} bytes. Broadcasting to room: ${roomId}`);
+        
+        // Broadcast over WebRTC Data Channel
+        await webrtcService.broadcastAudioChunks(roomId, blob, 'audio/webm');
+        
+        diagnosticLogger.log('webrtc', 'ptt_broadcast_done', `Finished broadcasting live P2P voice note (${(blob.size / 1024).toFixed(1)} KB) to all connected peers.`, undefined, roomId);
+      };
+
+      recorder.start();
+      setIsRecordingPTT(true);
+      
+      const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+      diagnosticLogger.log('webrtc', 'ptt_started', `Started recording live voice note via P2P data channels. Speak now...`, undefined, roomId);
+    } catch (err: any) {
+      console.error("Failed to start PTT voice recording:", err);
+    }
+  };
+
+  const stopPTT = () => {
+    if (pttMediaRecorder.current && pttMediaRecorder.current.state !== 'inactive') {
+      pttMediaRecorder.current.stop();
+    }
+    setIsRecordingPTT(false);
+  };
+
+  const togglePTT = () => {
+    if (isRecordingPTT) {
+      stopPTT();
+    } else {
+      startPTT();
+    }
+  };
+
+  useEffect(() => {
+    const handleAudioReceived = (e: any) => {
+      const { from, url } = e.detail;
+      const sender = participantsRef.current.find(p => p.id === from) || usersRef.current.find(u => u.id === from);
+      const senderName = sender?.displayName || sender?.name || `User ${from.substring(0, 4)}`;
+      
+      setIncomingPTT({
+        url,
+        fromName: senderName,
+        fromId: from
+      });
+
+      const audio = new Audio(url);
+      audio.onended = () => {
+        setIncomingPTT(null);
+      };
+      audio.onerror = () => {
+        setIncomingPTT(null);
+      };
+      audio.play().catch(playErr => {
+        console.warn("Auto-play failed (blocked by browser autoplay policy):", playErr);
+        // Still clear after a brief duration
+        setTimeout(() => setIncomingPTT(null), 3500);
+      });
+    };
+
+    window.addEventListener('webrtc_audio_received', handleAudioReceived);
+    return () => {
+      window.removeEventListener('webrtc_audio_received', handleAudioReceived);
+    };
+  }, []);
 
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnosticLogs, setDiagnosticLogs] = useState<DiagnosticEntry[]>([]);
@@ -191,14 +298,6 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     );
   };
 
-  const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
-    removedFriendIds: s.removedFriendIds,
-    socket: s.socket,
-    user: s.user,
-    chats: s.chats,
-    users: s.users
-  }), shallowEqual);
-  
   useEffect(() => {
     let stream: MediaStream | null = null;
     let mounted = true;
@@ -468,6 +567,8 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       { id: 'me', name: 'You', avatar: user?.avatar || generateInitialsAvatar(user?.id || 'me', user?.displayName || 'You'), isMuted: false, isVideoOff: type === 'voice', isSpeaking: false, status: 'online' },
     ];
     
+    let privateCallTimeoutId: any = null;
+    
     if (targetUser) {
       initialParticipants.push({
         id: targetUser.id,
@@ -480,15 +581,11 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       });
 
       // Transition private call target to online
-      const timeoutId = setTimeout(() => {
+      privateCallTimeoutId = setTimeout(() => {
         setParticipants(prev => prev.map(p => p.id === targetUser.id ? { ...p, status: 'online' } : p));
       }, 3000);
-      
-      return () => clearTimeout(timeoutId);
-    }
-
-    // For group calls, add all participants as ringing/offline initially
-    if (chat && !userId) {
+    } else if (chat && !userId) {
+      // For group calls, add all participants as ringing/offline initially
       chat.participants.filter(p => p.id !== 'me').forEach(u => {
         initialParticipants.push({
           id: u.id,
@@ -531,6 +628,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
     return () => {
       clearInterval(timer);
+      if (privateCallTimeoutId) clearTimeout(privateCallTimeoutId);
       joinTimers?.forEach(t => clearTimeout(t));
     };
   }, [groupId, userId, type, targetUser, chat, isHold, callAttempt]);
@@ -554,6 +652,20 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   const onlineParticipants = sortedParticipants.filter(p => p.status === 'online');
   const waitingParticipants = sortedParticipants.filter(p => p.status !== 'online');
 
+  // Compute remote participants that are visible in the layout vs those that need a background audio player
+  const visibleRemoteIds = isOneOnOne 
+    ? [participants[1]?.id].filter(Boolean)
+    : onlineParticipants
+        .filter(p => viewMode === 'grid' || p.isSpeaking || p.id === 'me')
+        .slice(0, viewMode === 'speaker' ? 1 : undefined)
+        .map(p => p.id)
+        .filter(id => id !== 'me');
+
+  const backgroundRemoteParticipants = onlineParticipants.filter(p => 
+    p.id !== 'me' && 
+    !visibleRemoteIds.includes(p.id)
+  );
+
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -561,6 +673,33 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[200] bg-slate-950 flex flex-col text-white overflow-hidden font-sans"
     >
+      {/* PTT Broadcast Overlay */}
+      {isRecordingPTT && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[250] bg-emerald-500/90 backdrop-blur-md px-6 py-3 rounded-full border border-emerald-400/30 flex items-center gap-3 shadow-2xl animate-bounce">
+          <Icon name="graphic_eq" className="text-xl animate-pulse" />
+          <span className="text-xs font-black uppercase tracking-widest">Broadcasting Voice Live...</span>
+          <div className="flex gap-1 items-center">
+            <span className="h-2 w-0.5 bg-white animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="h-3 w-0.5 bg-white animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="h-4 w-0.5 bg-white animate-bounce" style={{ animationDelay: '300ms' }} />
+            <span className="h-2 w-0.5 bg-white animate-bounce" style={{ animationDelay: '450ms' }} />
+          </div>
+        </div>
+      )}
+
+      {/* PTT Incoming Playback Overlay */}
+      {incomingPTT && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[250] bg-primary/95 backdrop-blur-md px-6 py-3 rounded-full border border-primary/30 flex items-center gap-3 shadow-2xl animate-pulse">
+          <Icon name="volume_up" className="text-xl animate-bounce" />
+          <span className="text-xs font-black uppercase tracking-widest text-white">Playing P2P Voice from {incomingPTT.fromName}...</span>
+          <div className="flex gap-1 items-center">
+            <span className="h-2 w-0.5 bg-white animate-pulse" style={{ animationDelay: '0ms' }} />
+            <span className="h-4 w-0.5 bg-white animate-pulse" style={{ animationDelay: '200ms' }} />
+            <span className="h-3 w-0.5 bg-white animate-pulse" style={{ animationDelay: '400ms' }} />
+          </div>
+        </div>
+      )}
+
       {/* Background Atmosphere */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 blur-[120px] rounded-full" />
@@ -759,34 +898,32 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
             </div>
             
             {/* Self View (PIP) */}
-            {type !== 'voice' && (
-              <motion.div 
-                drag
-                dragConstraints={{ left: -200, right: 200, top: -200, bottom: 200 }}
-                className="absolute bottom-4 md:bottom-8 right-4 md:right-8 size-24 md:size-40 rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900 group cursor-move z-30"
-              >
-                <div className="size-full relative">
-                  <VideoPlayer 
-                    stream={localStream} 
-                    isLocal={true} 
-                    className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
-                    isVideoOff={participants[0]?.isVideoOff}
+            <motion.div 
+              drag
+              dragConstraints={{ left: -200, right: 200, top: -200, bottom: 200 }}
+              className="absolute bottom-4 md:bottom-8 right-4 md:right-8 size-24 md:size-40 rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900 group cursor-move z-30"
+            >
+              <div className="size-full relative">
+                <VideoPlayer 
+                  stream={localStream} 
+                  isLocal={true} 
+                  className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
+                  isVideoOff={participants[0]?.isVideoOff || type === 'voice'}
+                />
+                {(participants[0]?.isVideoOff || type === 'voice') && (
+                  <img 
+                    src={participants[0]?.avatar || generateInitialsAvatar(user?.id || 'me', user?.displayName || 'You')} 
+                    className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity absolute inset-0 bg-slate-900" 
+                    referrerPolicy="no-referrer" 
                   />
-                  {participants[0]?.isVideoOff && (
-                    <img 
-                      src={participants[0]?.avatar} 
-                      className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity absolute inset-0" 
-                      referrerPolicy="no-referrer" 
-                    />
-                  )}
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
-                <div className="absolute bottom-2 md:bottom-3 left-3 md:left-4 flex items-center gap-2 pointer-events-none">
-                  <div className="size-1 md:size-1.5 rounded-full bg-primary" />
-                  <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-70">You</span>
-                </div>
-              </motion.div>
-            )}
+                )}
+              </div>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+              <div className="absolute bottom-2 md:bottom-3 left-3 md:left-4 flex items-center gap-2 pointer-events-none">
+                <div className="size-1 md:size-1.5 rounded-full bg-primary" />
+                <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-70">You</span>
+              </div>
+            </motion.div>
           </div>
         ) : (
           /* Group View */
@@ -843,19 +980,14 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                     <VideoPlayer 
                       stream={p.id === 'me' ? localStream : (p.streamId ? remoteStreams[p.streamId] : null)} 
                       isLocal={p.id === 'me'}
-                      className={cn(
-                        "size-full object-cover transition-transform duration-700 group-hover:scale-110",
-                        (p.isVideoOff || (p.id !== 'me' && type === 'voice')) && "absolute inset-0 size-px opacity-0 pointer-events-none"
-                      )} 
+                      className="size-full object-cover transition-transform duration-700 group-hover:scale-110" 
                       speakerMode={speakerMode}
-                      isVideoOff={p.isVideoOff || (p.id !== 'me' && type === 'voice')}
+                      isVideoOff={p.isVideoOff || type === 'voice'}
                     />
-                    {(p.isVideoOff || (p.id !== 'me' && type === 'voice')) && (
+                    {(p.isVideoOff || type === 'voice') && (
                       <img 
                         src={p.avatar} 
-                        className={cn(
-                          "size-full object-cover transition-transform duration-700 group-hover:scale-110 blur-2xl opacity-30 absolute inset-0"
-                        )} 
+                        className="size-full object-cover transition-transform duration-700 group-hover:scale-110 blur-2xl opacity-30 absolute inset-0 bg-slate-900" 
                         referrerPolicy="no-referrer"
                       />
                     )}
@@ -875,7 +1007,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                   </div>
                   
                   {/* Video Off Overlay */}
-                  {p.isVideoOff && (
+                  {(p.isVideoOff || type === 'voice') && (
                     <div className="absolute inset-0 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
                       <div className="relative">
                         <Avatar src={p.avatar} className="size-20 md:size-28 border-4 border-white/10" />
@@ -1005,8 +1137,28 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
               "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
               isMuted ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-white/5 text-white hover:bg-white/10'
             )}
+            title="Mute/Unmute Mic"
           >
             <Icon name={isMuted ? 'mic_off' : 'mic'} className="text-lg md:text-2xl" />
+          </button>
+
+          <button 
+            onClick={togglePTT}
+            className={cn(
+              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all relative select-none",
+              isRecordingPTT 
+                ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 ring-4 ring-emerald-500/20 animate-pulse' 
+                : 'bg-white/5 text-white hover:bg-white/10'
+            )}
+            title="Send Live Voice over P2P Data Channel (Walkie-Talkie)"
+          >
+            <Icon name="graphic_eq" className={cn("text-lg md:text-2xl", isRecordingPTT && "animate-bounce")} />
+            {isRecordingPTT && (
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+            )}
           </button>
 
           {type === 'video' && (
@@ -1067,6 +1219,19 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           </button>
         </div>
       </footer>
+
+      {/* Background Audio Players for hidden/filtered participants to guarantee audio is never lost */}
+      <div className="absolute opacity-0 pointer-events-none w-px h-px overflow-hidden" aria-hidden="true">
+        {backgroundRemoteParticipants.map(p => (
+          <VideoPlayer 
+            key={`bg-audio-${p.id}`}
+            stream={p.streamId ? remoteStreams[p.streamId] : null}
+            isLocal={false}
+            isVideoOff={true}
+            speakerMode={speakerMode}
+          />
+        ))}
+      </div>
 
       {/* Add Friend Modal */}
       <AnimatePresence>

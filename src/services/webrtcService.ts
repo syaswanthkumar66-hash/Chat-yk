@@ -291,10 +291,10 @@ class WebRTCService {
       }
     };
 
-    // Setup DataChannel for Chat (if we are the deterministic initiator)
+    // Setup DataChannel (if we are the deterministic initiator)
     const myId = useAppStore.getState().user?.id;
     const isInitiator = myId && peerId && myId < peerId;
-    if (roomId.startsWith('chat-webrtc-') && isInitiator) {
+    if (isInitiator) {
       diagnosticLogger.log('webrtc', 'create_datachannel', `Creating local RTCDataChannel 'audio_transfer' as initiator.`, peerId, roomId);
       const dc = pc.createDataChannel("audio_transfer", { ordered: true });
       this.setupDataChannel(peerId, roomId, dc);
@@ -311,7 +311,7 @@ class WebRTCService {
         const count = (this.candidatesGathered.get(mapKey) || 0) + 1;
         this.candidatesGathered.set(mapKey, count);
         
-        diagnosticLogger.log('webrtc', 'ice_candidate_gathered', `#${count} Local ICE Candidate gathered: ${event.candidate.candidateType || 'unknown'} (${event.candidate.protocol || 'udp'})`, peerId, roomId, { candidate: event.candidate });
+        diagnosticLogger.log('webrtc', 'ice_candidate_gathered', `#${count} Local ICE Candidate gathered: ${(event.candidate as any).type || (event.candidate as any).candidateType || 'unknown'} (${event.candidate.protocol || 'udp'})`, peerId, roomId, { candidate: event.candidate });
 
         // Step 1 point 5: Confirm candidates are sent ONLY after setLocalDescription has been called
         if (pc.localDescription) {
@@ -654,10 +654,12 @@ class WebRTCService {
     }
   }
 
-  async sendAudioChunks(peerId: string, blob: Blob, mimeType: string, messageId?: string): Promise<boolean> {
+  async sendAudioChunks(peerId: string, blob: Blob, mimeType: string, messageId?: string, customRoomId?: string): Promise<boolean> {
     const myId = useAppStore.getState().user?.id;
-    const sortedIds = [myId, peerId].sort();
-    const roomId = `chat-webrtc-${sortedIds[0]}-${sortedIds[1]}`;
+    const roomId = customRoomId || (() => {
+      const sortedIds = [myId, peerId].sort();
+      return `chat-webrtc-${sortedIds[0]}-${sortedIds[1]}`;
+    })();
     const mapKey = this.getMapKey(peerId, roomId);
     const channel = this.dataChannels.get(mapKey);
     if (!channel || channel.readyState !== 'open') {
@@ -820,6 +822,25 @@ class WebRTCService {
 
       reader.readAsArrayBuffer(blob);
     });
+  }
+
+  async broadcastAudioChunks(roomId: string, blob: Blob, mimeType: string, messageId?: string): Promise<boolean[]> {
+    const results: boolean[] = [];
+    diagnosticLogger.log('webrtc', 'ptt_broadcast_start', `Broadcasting P2P voice data chunks to room ${roomId}`, undefined, roomId);
+    for (const [mapKey, channel] of this.dataChannels.entries()) {
+      if (mapKey.startsWith(`${roomId}_`) && channel.readyState === 'open') {
+        const peerId = mapKey.replace(`${roomId}_`, '');
+        try {
+          diagnosticLogger.log('webrtc', 'ptt_broadcast_peer', `Sending P2P voice chunks to peer ${peerId}`, peerId, roomId);
+          const success = await this.sendAudioChunks(peerId, blob, mimeType, messageId, roomId);
+          results.push(success);
+        } catch (e) {
+          console.error(`Failed to broadcast audio chunks to peer ${peerId} in room ${roomId}:`, e);
+          results.push(false);
+        }
+      }
+    }
+    return results;
   }
 
   private attachLocalTracks(pc: RTCPeerConnection) {
@@ -1132,7 +1153,7 @@ class WebRTCService {
         this.attachLocalTracks(pc);
 
         // ALWAYS ensure that we create the DataChannel on the SDP offer creator side
-        if (roomId.startsWith('chat-webrtc-') && !this.dataChannels.has(this.getMapKey(peerId, roomId))) {
+        if (!this.dataChannels.has(this.getMapKey(peerId, roomId))) {
           diagnosticLogger.log('webrtc', 'create_datachannel_initiator', `Creating RTCDataChannel "audio_transfer" for SDP Offer Initiator`, peerId, roomId);
           const dc = pc.createDataChannel("audio_transfer", { ordered: true });
           this.setupDataChannel(peerId, roomId, dc);
