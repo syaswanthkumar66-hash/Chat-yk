@@ -967,8 +967,14 @@ export const ChatDetail = () => {
 
   const startRecording = async () => {
     try {
-      setShowMicError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+       setShowMicError(null);
+       const stream = await navigator.mediaDevices.getUserMedia({
+         audio: {
+           echoCancellation: true,
+           noiseSuppression: true,
+           autoGainControl: true
+         }
+       });
       
       // If user released the hold and we are not in toggle mode, discard immediately
       if (!isHoldingRef.current && !isToggleModeRef.current) {

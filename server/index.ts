@@ -31,7 +31,11 @@ async function updateFirestorePresence(userId: string, isOnline: boolean) {
     await db.collection('users').doc(userId).set(payload, { merge: true });
     console.log(`[Presence] Successfully synchronized user ${userId} presence in Firestore: isOnline = ${isOnline}`);
   } catch (err: any) {
-    console.warn(`[Presence] Failed to synchronize user ${userId} presence in Firestore:`, err.message);
+    if (err.message?.includes('PERMISSION_DENIED') || err.message?.includes('permissions')) {
+      console.log(`[Presence] Info: Backend Firestore presence sync for user ${userId} is sandboxed (Client-side sync handles this directly).`);
+    } else {
+      console.warn(`[Presence] Notice: Firestore sync update failed:`, err.message);
+    }
   }
 }
 

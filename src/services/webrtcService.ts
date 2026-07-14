@@ -108,6 +108,39 @@ class WebRTCService {
 
     diagnosticLogger.log('media', 'local_media_ready', `Local MediaStream captured and published. Total audio tracks: ${stream.getAudioTracks().length}, video tracks: ${stream.getVideoTracks().length}`, undefined, roomId);
 
+    // Attach local tracks to all existing peer connections for this room to ensure media flow
+    for (const [mapKey, pc] of this.pcs.entries()) {
+      if (mapKey.startsWith(`${roomId}_`)) {
+        const peerId = mapKey.substring(roomId.length + 1);
+        console.log(`[Diagnostic] Attaching newly published local stream tracks to existing peer connection for peer ${peerId}`);
+        this.attachLocalTracks(pc);
+        
+        // If the peer connection is active and not closed, trigger renegotiation so the remote peer receives our audio/video tracks
+        if (pc.signalingState !== 'closed') {
+          try {
+            console.log(`[Diagnostic] Renegotiating: creating and sending new SDP Offer to peer ${peerId} (room ${roomId})`);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            
+            const socket = useAppStore.getState().socket;
+            if (socket) {
+              socket.emit('sfu_signal', {
+                roomId,
+                from: useAppStore.getState().user?.id,
+                signal: {
+                  type: 'offer',
+                  sdp: offer.sdp,
+                  to: peerId
+                }
+              });
+            }
+          } catch (err: any) {
+            console.warn(`[Diagnostic] Failed to renegotiate on new local stream publish for peer ${peerId}:`, err);
+          }
+        }
+      }
+    }
+
     // Fetch TURN server credentials quickly if we haven't already
     if (!this.isIceServersFetched) {
       await this.fetchIceConfig(2, 500);
@@ -164,6 +197,7 @@ class WebRTCService {
     diagnosticLogger.log('webrtc', 'create_peer_connection', `Initiating RTCPeerConnection creation for peer ${peerId}. ICE servers configured count: ${this.iceServers.length}`, peerId, roomId, { iceServers: this.iceServers });
     const pc = new RTCPeerConnection({
       iceServers: this.iceServers,
+      rtcpMuxPolicy: 'require',
       bundlePolicy: 'max-bundle',
       iceTransportPolicy: 'all' // Ensure all connections (both STUN direct and TURN relayed) are fully allowed and utilized
     });
@@ -893,11 +927,60 @@ class WebRTCService {
         // Step 0 & 1: Confirm state of local track before adding
         console.log(`[Diagnostic] Checking local track state: kind=${track.kind}, ID=${track.id}, readyState=${track.readyState}, enabled=${track.enabled}`);
         const exists = currentSenders.some(sender => sender.track === track);
+        let sender: RTCRtpSender | undefined = currentSenders.find(s => s.track === track);
+        
         if (!exists) {
           console.log(`[Diagnostic] Attaching local track "${track.kind}" to peer connection`);
-          pc.addTrack(track, this.localStream!);
+          sender = pc.addTrack(track, this.localStream!);
         } else {
           console.log(`[Diagnostic] Local track "${track.kind}" is already attached to this peer connection`);
+        }
+
+        // Apply transport and audio codec hardening for the audio transceiver (Step 3 & Step 4)
+        if (track.kind === 'audio' && sender) {
+          const transceiver = pc.getTransceivers().find(t => t.sender === sender);
+          if (transceiver) {
+            // STEP 3: Explicitly set direction to 'sendrecv' to prevent unexpected states (inactive, sendonly, etc.)
+            // across renegotiation events when peers join or leave group calls.
+            console.log(`[Diagnostic] Explicitly setting audio transceiver direction to 'sendrecv'`);
+            transceiver.direction = 'sendrecv';
+
+            // STEP 4: Prioritize Opus codec
+            // Code comment on why Opus is preferred:
+            // -----------------------------------------------------------------------------------------
+            // Opus is the standard of choice for high-quality, network-resilient, real-time calling.
+            // 1. Low Bitrate & High Quality: Excels at lower bandwidth ranges, scaling beautifully.
+            // 2. Built-in Forward Error Correction (FEC): Enables the decoder to recover lost packets
+            //    using slightly delayed redundant data embedded in subsequent packets, maintaining voice
+            //    intelligibility even during severe 20-30% packet loss.
+            // 3. Discontinuous Transmission (DTX): Pauses transmission of packets during silence,
+            //    significantly conserving network bandwidth and reducing device battery drainage.
+            // This is how raw analog microphone input is successfully transformed into robust, internet-suitable RTP packets.
+            // -----------------------------------------------------------------------------------------
+            if ('setCodecPreferences' in transceiver && typeof RTCRtpSender.getCapabilities === 'function') {
+              try {
+                const capabilities = RTCRtpSender.getCapabilities('audio');
+                if (capabilities && capabilities.codecs) {
+                  const opusCodecs = capabilities.codecs.filter(
+                    codec => codec.mimeType.toLowerCase() === 'audio/opus'
+                  );
+                  const otherCodecs = capabilities.codecs.filter(
+                    codec => codec.mimeType.toLowerCase() !== 'audio/opus'
+                  );
+
+                  if (opusCodecs.length > 0) {
+                    const reorderedCodecs = [...opusCodecs, ...otherCodecs];
+                    (transceiver as any).setCodecPreferences(reorderedCodecs);
+                    console.log(`[Diagnostic] Successfully prioritized Opus codec on audio transceiver (Total codecs: ${reorderedCodecs.length})`);
+                  }
+                }
+              } catch (codecErr) {
+                console.warn(`[Diagnostic] setCodecPreferences on audio transceiver failed:`, codecErr);
+              }
+            } else {
+              console.log(`[Diagnostic] setCodecPreferences API is not supported in this browser.`);
+            }
+          }
         }
       });
     } else {

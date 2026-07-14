@@ -30,7 +30,7 @@ const VideoPlayer = ({
   className?: string,
   speakerMode?: 'speaker' | 'earpiece'
 }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLMediaElement>(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -112,17 +112,21 @@ const VideoPlayer = ({
     applyAudioSink();
   }, [speakerMode, isLocal, stream]);
 
-  return (
+  return isVideoOff ? (
+    <audio
+      ref={videoRef as any}
+      autoPlay
+      controls={false}
+      muted={isLocal}
+      className="absolute opacity-0 pointer-events-none w-px h-px overflow-hidden"
+    />
+  ) : (
     <video
-      ref={videoRef}
+      ref={videoRef as any}
       autoPlay
       playsInline
       muted={isLocal}
-      className={cn(
-        isVideoOff 
-          ? "absolute opacity-0 pointer-events-none w-px h-px overflow-hidden" 
-          : cn("relative size-full object-cover", className)
-      )}
+      className={cn("relative size-full object-cover", className)}
     />
   );
 };
@@ -173,7 +177,13 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
   const startPTT = async () => {
     try {
-      const stream = localStream || await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = localStream || await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
       const options = { mimeType: 'audio/webm' };
       const recorder = new MediaRecorder(stream, options);
       pttMediaRecorder.current = recorder;
