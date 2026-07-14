@@ -315,6 +315,17 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
         });
         if (!mounted) return;
 
+        // Step 1: getUserMedia logging
+        console.log(`[Diagnostic][Step 1] getUserMedia SUCCESS. Obtained stream with ${stream.getTracks().length} tracks.`);
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          audioTracks.forEach(track => {
+            console.log(`[Diagnostic][Step 1] Audio Track Details - ID: "${track.id}", readyState: "${track.readyState}", enabled: ${track.enabled}`);
+          });
+        } else {
+          console.log(`[Diagnostic][Step 1] WARNING: No audio tracks found in the obtained stream.`);
+        }
+
         // Step 0: Diagnostic logging of local tracks
         const tracks = stream.getTracks();
         console.log(`[Diagnostic] getUserMedia() obtained ${tracks.length} tracks:`);
@@ -341,6 +352,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           });
         }
       } catch (err: any) {
+        console.log(`[Diagnostic][Step 1] getUserMedia FAILED. Error Name: "${err?.name || 'Unknown'}", Message: "${err?.message || 'No message'}"`);
         console.error('Failed to get local media or publish:', err);
         let errorCode = 'MIC_CAPTURE_FAILED';
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {

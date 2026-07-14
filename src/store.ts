@@ -564,6 +564,11 @@ export const useAppStore = create<AppState>((set) => ({
       import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, updateDoc }) => {
         updateDoc(doc(db, 'users', state.user!.id), data).catch(err => {
           console.error("Failed to sync user profile update to Firestore:", err);
+          try {
+            handleFirestoreError(err, OperationType.WRITE, `users/${state.user!.id}`);
+          } catch (e) {
+            console.error("Gracefully caught user profile sync write error:", e);
+          }
         });
       });
     }
@@ -886,6 +891,9 @@ export const useAppStore = create<AppState>((set) => ({
 
     try {
       console.log('[Catch-Up Sync] Starting catch-up sync for user:', userId);
+
+      // Sync any pushed messages from service worker cache first
+      await syncPushedMessagesFromCache().catch((err) => console.error('[Catch-Up Sync] Error syncing pushed messages:', err));
 
       // 1. Re-emit register to socket and re-join group rooms
       const socket = state.socket;
@@ -1850,8 +1858,10 @@ export const useAppStore = create<AppState>((set) => ({
     });
     
     try {
-      const { db, updateDoc, doc } = await import('./firebase');
-      await updateDoc(doc(db, 'friendRequests', requestId), { status: 'accepted' });
+      const { db, updateDoc, doc, handleFirestoreError, OperationType } = await import('./firebase');
+      await updateDoc(doc(db, 'friendRequests', requestId), { status: 'accepted' }).catch((err) => {
+        handleFirestoreError(err, OperationType.UPDATE, `friendRequests/${requestId}`);
+      });
     } catch (err) {
       console.error("Error accepting request in db:", err);
     }
@@ -1862,8 +1872,10 @@ export const useAppStore = create<AppState>((set) => ({
     }));
     
     try {
-      const { db, deleteDoc, doc } = await import('./firebase');
-      await deleteDoc(doc(db, 'friendRequests', requestId));
+      const { db, deleteDoc, doc, handleFirestoreError, OperationType } = await import('./firebase');
+      await deleteDoc(doc(db, 'friendRequests', requestId)).catch((err) => {
+        handleFirestoreError(err, OperationType.DELETE, `friendRequests/${requestId}`);
+      });
     } catch (err) {
       console.error("Error rejecting request in db:", err);
     }
@@ -1877,7 +1889,7 @@ export const useAppStore = create<AppState>((set) => ({
     
     if (state.user) {
       try {
-        const { db, addDoc, collection, serverTimestamp, query, where, getDocs, doc, setDoc } = await import('./firebase');
+        const { db, addDoc, collection, serverTimestamp, query, where, getDocs, doc, setDoc, handleFirestoreError, OperationType } = await import('./firebase');
         const requestsRef = collection(db, 'friendRequests');
         
         // Prevent dupes
@@ -1891,6 +1903,9 @@ export const useAppStore = create<AppState>((set) => ({
             toUserId: userId,
             createdAt: serverTimestamp(),
             status: 'pending'
+          }).catch((err) => {
+            handleFirestoreError(err, OperationType.CREATE, 'friendRequests');
+            throw err;
           });
 
           // Create persistent notification record
@@ -1908,6 +1923,8 @@ export const useAppStore = create<AppState>((set) => ({
             requestId: docRef.id,
             status: 'created',
             createdAt: new Date().toISOString()
+          }).catch((err) => {
+            handleFirestoreError(err, OperationType.CREATE, `notifications/${notifId}`);
           });
         }
       } catch (err) {
@@ -1923,13 +1940,15 @@ export const useAppStore = create<AppState>((set) => ({
     const state = useAppStore.getState();
     if (state.user) {
       try {
-        const { db, deleteDoc, doc, collection, query, where, getDocs } = await import('./firebase');
+        const { db, deleteDoc, doc, collection, query, where, getDocs, handleFirestoreError, OperationType } = await import('./firebase');
         const requestsRef = collection(db, 'friendRequests');
         const q = query(requestsRef, where('fromUserId', '==', state.user.id));
         const existing = await getDocs(q);
         existing.forEach(async (d) => {
            if (d.data().toUserId === userId) {
-             await deleteDoc(doc(db, 'friendRequests', d.id));
+             await deleteDoc(doc(db, 'friendRequests', d.id)).catch((err) => {
+               handleFirestoreError(err, OperationType.DELETE, `friendRequests/${d.id}`);
+             });
            }
         });
       } catch (err) {
@@ -1950,10 +1969,12 @@ export const useAppStore = create<AppState>((set) => ({
       notifications: state.notifications.map(n => n.id === id ? { ...n, status: 'read' as const, readAt: new Date().toISOString() } : n)
     }));
     try {
-      const { db, updateDoc, doc } = await import('./firebase');
+      const { db, updateDoc, doc, handleFirestoreError, OperationType } = await import('./firebase');
       await updateDoc(doc(db, 'notifications', id), { 
         status: 'read',
         readAt: new Date().toISOString()
+      }).catch((err) => {
+        handleFirestoreError(err, OperationType.UPDATE, `notifications/${id}`);
       });
     } catch (err) {
       console.error("Error marking notification as read in db:", err);
@@ -1969,11 +1990,13 @@ export const useAppStore = create<AppState>((set) => ({
     }));
 
     try {
-      const { db, updateDoc, doc } = await import('./firebase');
+      const { db, updateDoc, doc, handleFirestoreError, OperationType } = await import('./firebase');
       await Promise.all(unread.map(async (n) => {
         await updateDoc(doc(db, 'notifications', n.id), { 
           status: 'read',
           readAt: new Date().toISOString()
+        }).catch((err) => {
+          handleFirestoreError(err, OperationType.UPDATE, `notifications/${n.id}`);
         });
       }));
     } catch (err) {
@@ -1987,9 +2010,11 @@ export const useAppStore = create<AppState>((set) => ({
     set({ notifications: [] });
 
     try {
-      const { db, deleteDoc, doc } = await import('./firebase');
+      const { db, deleteDoc, doc, handleFirestoreError, OperationType } = await import('./firebase');
       await Promise.all(ids.map(async (id) => {
-        await deleteDoc(doc(db, 'notifications', id));
+        await deleteDoc(doc(db, 'notifications', id)).catch((err) => {
+          handleFirestoreError(err, OperationType.DELETE, `notifications/${id}`);
+        });
       }));
     } catch (err) {
       console.error("Error clearing notifications in db:", err);
@@ -2045,7 +2070,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db, collection, query, where, getDocs, deleteDoc, doc, updateDoc } = await import('./firebase');
+        const { db, collection, query, where, getDocs, deleteDoc, doc, updateDoc, handleFirestoreError, OperationType } = await import('./firebase');
         
         // Find and delete the accepted friend requests where this user and userId are participants
         const requestsRef = collection(db, 'friendRequests');
@@ -2054,7 +2079,9 @@ export const useAppStore = create<AppState>((set) => ({
         const s1 = await getDocs(q1);
         s1.forEach(async (d) => {
           if (d.data().toUserId === userId) {
-            await deleteDoc(doc(db, 'friendRequests', d.id));
+            await deleteDoc(doc(db, 'friendRequests', d.id)).catch((err) => {
+              handleFirestoreError(err, OperationType.DELETE, `friendRequests/${d.id}`);
+            });
           }
         });
 
@@ -2062,13 +2089,17 @@ export const useAppStore = create<AppState>((set) => ({
         const s2 = await getDocs(q2);
         s2.forEach(async (d) => {
           if (d.data().fromUserId === userId) {
-            await deleteDoc(doc(db, 'friendRequests', d.id));
+            await deleteDoc(doc(db, 'friendRequests', d.id)).catch((err) => {
+              handleFirestoreError(err, OperationType.DELETE, `friendRequests/${d.id}`);
+            });
           }
         });
 
         // Save removedFriendIds to users profile in Firestore
         const nextRemoved = useAppStore.getState().removedFriendIds;
-        await updateDoc(doc(db, 'users', currentUserId), { removedFriendIds: nextRemoved });
+        await updateDoc(doc(db, 'users', currentUserId), { removedFriendIds: nextRemoved }).catch((err) => {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${currentUserId}`);
+        });
       } catch (err) {
         console.error("Error removing friend in Firestore:", err);
       }
@@ -2091,9 +2122,11 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db, doc, updateDoc } = await import('./firebase');
+        const { db, doc, updateDoc, handleFirestoreError, OperationType } = await import('./firebase');
         const nextRemoved = useAppStore.getState().removedFriendIds;
-        await updateDoc(doc(db, 'users', currentUserId), { removedFriendIds: nextRemoved });
+        await updateDoc(doc(db, 'users', currentUserId), { removedFriendIds: nextRemoved }).catch((err) => {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${currentUserId}`);
+        });
       } catch (err) {
         console.error("Error restoring friend in Firestore:", err);
       }
@@ -2124,9 +2157,11 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db, doc, updateDoc } = await import('./firebase');
+        const { db, doc, updateDoc, handleFirestoreError, OperationType } = await import('./firebase');
         const nextBlocked = useAppStore.getState().blockedUserIds;
-        await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked });
+        await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked }).catch((err) => {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${currentUserId}`);
+        });
       } catch (err) {
         console.error("Error blocking user in Firestore:", err);
       }
@@ -2149,9 +2184,11 @@ export const useAppStore = create<AppState>((set) => ({
 
     if (currentUserId) {
       try {
-        const { db, doc, updateDoc } = await import('./firebase');
+        const { db, doc, updateDoc, handleFirestoreError, OperationType } = await import('./firebase');
         const nextBlocked = useAppStore.getState().blockedUserIds;
-        await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked });
+        await updateDoc(doc(db, 'users', currentUserId), { blockedUserIds: nextBlocked }).catch((err) => {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${currentUserId}`);
+        });
       } catch (err) {
         console.error("Error unblocking user in Firestore:", err);
       }
@@ -2736,6 +2773,56 @@ export function useStore<T>(selector: (state: AppState) => T, equalityFn?: (a: T
 
 let syncDebounceTimeout: any = null;
 
+export const flushCloudAutoSync = async () => {
+  if (!syncDebounceTimeout) return;
+  clearTimeout(syncDebounceTimeout);
+  syncDebounceTimeout = null;
+  
+  const store = useAppStore.getState();
+  const userId = store.user?.id;
+  if (!userId || store.authMethod === 'local' || !store.autoSyncEnabled) return;
+  if ((window as any).__isMergingCloudSync) {
+    console.log("[Auto-Sync-Flush] Skipping sync flush because we are currently merging remote state.");
+    return;
+  }
+
+  try {
+    const { db, doc, setDoc, auth, handleFirestoreError, OperationType } = await import('./firebase');
+    if (auth.currentUser?.uid !== userId) return;
+
+    const payload = {
+      chats: store.chats,
+      users: getLocalStorageJSON(`proto_users_${userId}`, []),
+      friendRequests: getLocalStorageJSON(`proto_friendRequests_${userId}`, []),
+      sentFriendRequests: getLocalStorageJSON(`proto_sentFriendRequests_${userId}`, []),
+      blockedUserIds: store.blockedUserIds,
+      removedFriendIds: store.removedFriendIds,
+      lastUpdated: new Date().toISOString(),
+      deviceInfo: {
+        name: navigator.userAgent.includes('Mobile') ? 'Mobile Web' : 'Desktop Web',
+        userId: userId
+      }
+    };
+
+    await setDoc(doc(db, 'cloud_syncs', userId), payload);
+    console.log("[Auto-Sync-Flush] Successfully flushed database to Firestore.");
+    (window as any).__lastUploadedSyncTime = payload.lastUpdated;
+    
+    if (store.socket && store.socket.connected) {
+      store.socket.emit('notify_cloud_sync');
+      store.reportFingerprint();
+    }
+  } catch (err) {
+    console.error("[Auto-Sync-Flush] Failed to flush update to Firestore:", err);
+    try {
+      const { handleFirestoreError, OperationType } = await import('./firebase');
+      handleFirestoreError(err, OperationType.WRITE, `cloud_syncs/${userId}`);
+    } catch (e) {
+      console.error("Gracefully caught cloud sync flush write error:", e);
+    }
+  }
+};
+
 export const triggerCloudAutoSync = (userId: string) => {
   if (!userId) return;
   const store = useAppStore.getState();
@@ -2752,8 +2839,9 @@ export const triggerCloudAutoSync = (userId: string) => {
   }
 
   syncDebounceTimeout = setTimeout(async () => {
+    syncDebounceTimeout = null;
     try {
-      const { db, doc, setDoc, auth } = await import('./firebase');
+      const { db, doc, setDoc, auth, handleFirestoreError, OperationType } = await import('./firebase');
       if (auth.currentUser?.uid !== userId) return;
 
       const payload = {
@@ -2781,7 +2869,13 @@ export const triggerCloudAutoSync = (userId: string) => {
         store.reportFingerprint();
       }
     } catch (err) {
-      console.warn("[Auto-Sync] Failed to push update to Firestore:", err);
+      console.error("[Auto-Sync] Failed to push update to Firestore:", err);
+      try {
+        const { handleFirestoreError, OperationType } = await import('./firebase');
+        handleFirestoreError(err, OperationType.WRITE, `cloud_syncs/${userId}`);
+      } catch (e) {
+        console.error("Gracefully caught cloud sync write error:", e);
+      }
     }
   }, 3000); // Debounce by 3 seconds
 };
@@ -2905,5 +2999,101 @@ export function mergeCloudSyncPayload(payload: any, userId: string) {
   (window as any).__mergeTimeout = setTimeout(() => {
     (window as any).__isMergingCloudSync = false;
   }, 500);
+}
+
+export async function syncPushedMessagesFromCache() {
+  if (typeof window === 'undefined' || !('caches' in window)) return;
+  try {
+    const cache = await caches.open('chat-pushed-messages');
+    const requests = await cache.keys();
+    if (requests.length === 0) return;
+
+    console.log(`[Pushed Messages Sync] Found ${requests.length} cached push messages to merge.`);
+    const store = useAppStore.getState();
+    const userId = store.user?.id;
+    if (!userId) return;
+
+    let chatsUpdated = false;
+    const chats = [...store.chats];
+
+    for (const req of requests) {
+      try {
+        const res = await cache.match(req);
+        if (res) {
+          const msgData = await res.json();
+          const messageId = msgData.messageId || msgData.id;
+          if (!messageId) continue;
+
+          const isGrp = !!msgData.groupId;
+          const chat = isGrp 
+            ? chats.find(c => c.id === msgData.groupId)
+            : chats.find(c => !c.isGroup && c.participants.some(p => p.id === (msgData.senderId === userId ? msgData.recipientId : msgData.senderId)));
+
+          if (chat && chat.messages?.some(m => m.id === messageId)) {
+            await cache.delete(req);
+            continue;
+          }
+
+          const newMessage: Message = {
+            id: messageId,
+            senderId: msgData.senderId,
+            text: msgData.text,
+            timestamp: msgData.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: (msgData.type as any) || 'text',
+            fileUrl: msgData.fileUrl,
+            fileSize: msgData.fileSize,
+            encryptedFileKey: msgData.encryptedFileKey,
+            iv: msgData.iv,
+            isE2E: !!(msgData.iv || msgData.encryptedFileKey),
+            isOwn: msgData.senderId === userId
+          };
+
+          if (chat) {
+            const updatedMessages = [...(chat.messages || []), newMessage];
+            const chatIdx = chats.findIndex(c => c.id === chat.id);
+            chats[chatIdx] = {
+              ...chat,
+              messages: updatedMessages,
+              lastMessage: newMessage,
+              unreadCount: newMessage.isOwn ? 0 : (chat.unreadCount || 0) + 1
+            };
+            chatsUpdated = true;
+          } else if (!isGrp) {
+            const peerId = msgData.senderId === userId ? msgData.recipientId : msgData.senderId;
+            if (peerId) {
+              const peer = store.users.find(u => u.id === peerId) || {
+                id: peerId,
+                displayName: 'Unknown User',
+                username: peerId,
+                avatar: generateInitialsAvatar(peerId, 'Unknown User')
+              };
+              const newChat: Chat = {
+                id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                participants: [
+                  { id: peer.id, name: (peer as any).displayName || (peer as any).name || 'Unknown User', username: peer.username, avatar: peer.avatar, status: 'offline' },
+                  { id: userId, name: store.user!.displayName, username: store.user!.username, avatar: store.user!.avatar, status: 'online' }
+                ],
+                unreadCount: newMessage.isOwn ? 0 : 1,
+                messages: [newMessage],
+                lastMessage: newMessage
+              };
+              chats.push(newChat);
+              chatsUpdated = true;
+            }
+          }
+          await cache.delete(req);
+        }
+      } catch (err) {
+        console.error('[Pushed Messages Sync] Error parsing/merging cached push message:', err);
+      }
+    }
+
+    if (chatsUpdated) {
+      useAppStore.setState({ chats });
+      console.log('[Pushed Messages Sync] Successfully merged cached push messages into local chats.');
+    }
+  } catch (e) {
+    console.error('[Pushed Messages Sync] Failed to check/sync pushed messages from cache:', e);
+  }
 }
 

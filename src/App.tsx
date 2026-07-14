@@ -459,6 +459,11 @@ export default function App() {
     if (isLoggedIn && user?.id) {
       console.log("[Global Socket] Initializing socket on startup for logged-in user:", user.id);
       useAppStore.getState().initSocket(user.id);
+
+      // Also sync any cached push messages on login/startup
+      import('./store').then(({ syncPushedMessagesFromCache }) => {
+        syncPushedMessagesFromCache().catch(console.error);
+      });
     }
   }, [isLoggedIn, user?.id]);
 
@@ -487,13 +492,28 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         handleRefocusSync();
+        import('./store').then(({ syncPushedMessagesFromCache }) => {
+          syncPushedMessagesFromCache().catch(console.error);
+        });
+      } else if (document.visibilityState === 'hidden') {
+        import('./store').then(({ flushCloudAutoSync }) => {
+          flushCloudAutoSync().catch(console.error);
+        });
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    const handlePageHide = () => {
+      import('./store').then(({ flushCloudAutoSync }) => {
+        flushCloudAutoSync().catch(console.error);
+      });
+    };
+    window.addEventListener('pagehide', handlePageHide);
+
     return () => {
       window.removeEventListener('focus', handleRefocusSync);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
     };
   }, [isLoggedIn, user?.id]);
 

@@ -26,12 +26,12 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   console.log('Service Worker activating...');
-  // Delete old caches
+  // Delete old caches, but preserve chat-pushed-messages
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
+          if (cacheName !== CACHE_NAME && cacheName !== 'chat-pushed-messages') {
             console.log('Deleting old Service Worker cache:', cacheName);
             return caches.delete(cacheName);
           }
@@ -113,6 +113,24 @@ self.addEventListener('push', (event) => {
   };
 
   console.log('Showing notification:', title, options);
+
+  // Capture and cache chat data from push payload for offline/reliable delivery to the app state
+  if (data.data && (data.data.messageId || data.data.id)) {
+    const msgId = data.data.messageId || data.data.id;
+    event.waitUntil(
+      caches.open('chat-pushed-messages').then((cache) => {
+        const messageUrl = `/cached-message/${msgId}`;
+        const response = new Response(JSON.stringify(data.data), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+        return cache.put(messageUrl, response).then(() => {
+          console.log('[SW Cache] Saved push message data for offline retrieval:', msgId);
+        });
+      }).catch((err) => {
+        console.error('[SW Cache] Failed to cache push message data:', err);
+      })
+    );
+  }
 
   event.waitUntil(
     self.registration.showNotification(title, options)

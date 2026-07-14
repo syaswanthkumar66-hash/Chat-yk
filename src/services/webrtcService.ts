@@ -186,6 +186,7 @@ class WebRTCService {
     // Track all WebRTC state changes meticulously (Step 0 logs with precise timestamping)
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
+      console.log(`[Diagnostic][Step 3][${new Date().toISOString()}] ICE Connection State changed to: ${state} (peer: ${peerId}, room: ${roomId})`);
       diagnosticLogger.log('webrtc', 'ice_connection_state_changed', `ICE Connection State changed to: ${state}`, peerId, roomId, { state });
       
       if (state === 'connected') {
@@ -206,22 +207,46 @@ class WebRTCService {
           if (currentPc && currentPc.iceConnectionState === 'connected') {
             try {
               const stats = await currentPc.getStats();
-              let audioBytesSent = 0;
-              let audioBytesReceived = 0;
+              let audioBytesSent: number | undefined = undefined;
+              let audioBytesReceived: number | undefined = undefined;
+              let activeCandidatePair: any = null;
+
               stats.forEach(report => {
                 if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-                  audioBytesReceived = report.bytesReceived || 0;
+                  audioBytesReceived = report.bytesReceived;
                 }
                 if (report.type === 'outbound-rtp' && report.kind === 'audio') {
-                  audioBytesSent = report.bytesSent || 0;
+                  audioBytesSent = report.bytesSent;
+                }
+                if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+                  activeCandidatePair = report;
                 }
               });
-              diagnosticLogger.log('media', 'media_flow_check', `5-second media flow check: Sent=${audioBytesSent} bytes, Received=${audioBytesReceived} bytes`, peerId, roomId, { audioBytesSent, audioBytesReceived });
-              if (audioBytesSent === 0 && audioBytesReceived === 0) {
+
+              let localCandidateType = 'unknown';
+              let remoteCandidateType = 'unknown';
+              if (activeCandidatePair) {
+                const localCandidate = stats.get(activeCandidatePair.localCandidateId);
+                const remoteCandidate = stats.get(activeCandidatePair.remoteCandidateId);
+                localCandidateType = localCandidate?.candidateType || 'unknown';
+                remoteCandidateType = remoteCandidate?.candidateType || 'unknown';
+              }
+
+              // Step 5: Exact diagnostic logging of bytes and active candidate types after 5s
+              console.log(`[Diagnostic][Step 5][${new Date().toISOString()}] 5-second stats check after connected for peer ${peerId}:
+                - bytesSent (outbound-rtp audio): ${audioBytesSent !== undefined ? audioBytesSent : 'NOT_FOUND'}
+                - bytesReceived (inbound-rtp audio): ${audioBytesReceived !== undefined ? audioBytesReceived : 'NOT_FOUND'}
+                - Active Candidate Pair details:
+                  - Local candidate type: ${localCandidateType} (host/srflx/relay)
+                  - Remote candidate type: ${remoteCandidateType} (host/srflx/relay)`);
+
+              diagnosticLogger.log('media', 'media_flow_check', `5-second media flow check: Sent=${audioBytesSent || 0} bytes, Received=${audioBytesReceived || 0} bytes`, peerId, roomId, { audioBytesSent, audioBytesReceived });
+              if ((audioBytesSent || 0) === 0 && (audioBytesReceived || 0) === 0) {
                 diagnosticLogger.log('error', 'media_flow_stalled', `ICE is connected but media bytes flow is at 0 (stalled/silent)`, peerId, roomId);
                 this.dispatchCallError(CallError.CONNECTED_NO_MEDIA, peerId);
               }
             } catch (e: any) {
+              console.error(`[Diagnostic][Step 5] Failed to execute 5-second media stats check:`, e);
               diagnosticLogger.log('error', 'media_flow_check_failed', `Failed to execute 5-second media stats check: ${e.message}`, peerId, roomId);
             }
           }
@@ -270,6 +295,7 @@ class WebRTCService {
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
+      console.log(`[Diagnostic][Step 3][${new Date().toISOString()}] PeerConnection Connection State changed to: ${state} (peer: ${peerId}, room: ${roomId})`);
       diagnosticLogger.log('webrtc', 'connection_state_changed', `PeerConnection State changed to: ${state}`, peerId, roomId, { state });
       if (state === 'failed') {
         diagnosticLogger.log('error', 'connection_failed', `PeerConnection reached Failed state`, peerId, roomId);
@@ -279,6 +305,7 @@ class WebRTCService {
 
     pc.onsignalingstatechange = () => {
       const state = pc.signalingState;
+      console.log(`[Diagnostic][Step 3][${new Date().toISOString()}] Signaling State changed to: ${state} (peer: ${peerId}, room: ${roomId})`);
       diagnosticLogger.log('webrtc', 'signaling_state_changed', `Signaling State changed to: ${state}`, peerId, roomId, { state });
     };
 
@@ -336,10 +363,18 @@ class WebRTCService {
 
     // Handle remote stream tracks being added
     pc.ontrack = (event) => {
-      this.trackReceived.set(mapKey, true);
-      const stream = event.streams[0];
       const track = event.track;
-      
+      const stream = event.streams[0];
+
+      // Step 4: Diagnostic logging on pc.ontrack firing
+      console.log(`[Diagnostic][Step 4][${new Date().toISOString()}] pc.ontrack FIRED! Kind: "${track?.kind}", ID: "${track?.id}", readyState: "${track?.readyState}", enabled: ${track?.enabled}`);
+      if (stream) {
+        console.log(`[Diagnostic][Step 4] pc.ontrack received MediaStream: total tracks = ${stream.getTracks().length}, audio tracks = ${stream.getAudioTracks().length}`);
+      } else {
+        console.log(`[Diagnostic][Step 4] WARNING: pc.ontrack stream array or first stream is null.`);
+      }
+
+      this.trackReceived.set(mapKey, true);
       diagnosticLogger.log('media', 'track_received', `Remote media track received! Kind: '${track?.kind}', ID: '${track?.id}', State: '${track?.readyState}'`, peerId, roomId, { kind: track?.kind, id: track?.id });
       if (stream) {
         diagnosticLogger.log('media', 'stream_assigned', `Successfully assigned remote MediaStream to peer. Total track count: ${stream.getTracks().length}`, peerId, roomId);
@@ -844,8 +879,16 @@ class WebRTCService {
   }
 
   private attachLocalTracks(pc: RTCPeerConnection) {
+    const isLocalStreamNull = this.localStream === null;
+    const tracksToAttempt = this.localStream ? this.localStream.getTracks() : [];
+    const currentSenders = pc.getSenders();
+    const tracksToBeAdded = tracksToAttempt.filter(track => !currentSenders.some(sender => sender.track === track));
+
+    console.log(`[Diagnostic][Step 2] attachLocalTracks execution:
+      - Whether localStream is null or a real MediaStream: ${isLocalStreamNull ? 'NULL' : 'REAL MediaStream'}
+      - How many tracks are about to be added via addTrack: ${tracksToBeAdded.length} (out of ${tracksToAttempt.length} total local tracks)`);
+
     if (this.localStream) {
-      const currentSenders = pc.getSenders();
       this.localStream.getTracks().forEach(track => {
         // Step 0 & 1: Confirm state of local track before adding
         console.log(`[Diagnostic] Checking local track state: kind=${track.kind}, ID=${track.id}, readyState=${track.readyState}, enabled=${track.enabled}`);
