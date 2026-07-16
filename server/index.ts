@@ -1488,6 +1488,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("call_ping", (data) => {
+      const { roomId, from } = data;
+      socket.to(roomId).emit("call_ping", data);
+    });
+
     // Device Sync Signaling Relay (Peer-to-Peer WebRTC)
     socket.on("sync_join_room", (data) => {
       const { roomId } = data;

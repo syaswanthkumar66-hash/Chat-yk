@@ -131,6 +131,58 @@ const VideoPlayer = ({
   );
 };
 
+const playPingSound = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
+    
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch(e) {
+    console.error("Ping sound failed", e);
+  }
+};
+
+const playPongSound = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(440, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.3);
+    
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch(e) {
+    console.error("Pong sound failed", e);
+  }
+};
+
 export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string, userId?: string, type: 'voice' | 'video', onClose: () => void }) => {
   const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
     removedFriendIds: s.removedFriendIds,
@@ -154,6 +206,12 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   const [showRings, setShowRings] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'speaker'>('grid');
   const [speakerMode, setSpeakerMode] = useState<'speaker' | 'earpiece'>('speaker');
+  const [pingSoundsEnabled, setPingSoundsEnabled] = useState(false);
+  const pingSoundsEnabledRef = useRef(false);
+
+  useEffect(() => {
+    pingSoundsEnabledRef.current = pingSoundsEnabled;
+  }, [pingSoundsEnabled]);
   
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
@@ -459,6 +517,13 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       }));
     };
 
+    const handleCallPing = (data: any) => {
+      const { from } = data;
+      if (from !== user?.id && pingSoundsEnabledRef.current) {
+        playPongSound();
+      }
+    };
+
     window.addEventListener('webrtc_stream', handleRemoteStream);
     window.addEventListener('webrtc_connection_failed', handleConnectionFailed);
     window.addEventListener('webrtc_call_error', handleWebRTCCallError);
@@ -468,6 +533,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     if (socket) {
       socket.on('user_joined_call', handleUserJoined);
       socket.on('webrtc_audit_broadcast', handleRemoteAudit);
+      socket.on('call_ping', handleCallPing);
     }
 
     return () => {
@@ -486,6 +552,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       if (socket) {
         socket.off('user_joined_call', handleUserJoined);
         socket.off('webrtc_audit_broadcast', handleRemoteAudit);
+        socket.off('call_ping', handleCallPing);
       }
       
       if (localStream) {
@@ -548,6 +615,13 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
         setParticipants(prev => prev.map(pt => pt.id === p.id ? { ...pt, status: 'online' } : pt));
       }, 3000 + Math.random() * 2000);
     });
+  };
+
+  const sendPing = () => {
+    if (!socket) return;
+    playPingSound();
+    const computedRoomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+    socket.emit('call_ping', { roomId: computedRoomId, from: user?.id });
   };
 
   const ringAllMembers = () => {
@@ -1228,6 +1302,27 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           >
             <Icon name={speakerMode === 'speaker' ? 'volume_up' : 'hearing'} className="text-lg md:text-2xl" />
           </button>
+
+          <button 
+            onClick={() => setPingSoundsEnabled(!pingSoundsEnabled)}
+            className={cn(
+              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
+              pingSoundsEnabled ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50' : 'bg-white/5 text-white hover:bg-white/10'
+            )}
+            title="Toggle Ping Sounds"
+          >
+            <Icon name={pingSoundsEnabled ? 'notifications_active' : 'notifications_off'} className="text-lg md:text-2xl" />
+          </button>
+
+          {pingSoundsEnabled && (
+            <button 
+              onClick={sendPing}
+              className="size-10 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all hover:text-yellow-400 active:scale-90"
+              title="Send Ping"
+            >
+              <Icon name="vibration" className="text-lg md:text-2xl" />
+            </button>
+          )}
 
           <button 
             onClick={() => setShowDiagnostics(!showDiagnostics)}
