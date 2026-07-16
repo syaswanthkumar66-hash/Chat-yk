@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon, Card } from './UI';
-import { useAppStore, generateInitialsAvatar } from '../store';
+import { useAppStore, generateInitialsAvatar, safeLocalStorageSetItem } from '../store';
 import { BACKEND_URL } from '../config';
 import { showLocalNotification } from '../services/notificationService';
 
@@ -72,7 +72,7 @@ export function NotificationPrompt() {
 
   const handleDismiss = () => {
     setStatus('hidden');
-    localStorage.setItem('notification_prompt_dismissed', 'true');
+    safeLocalStorageSetItem('notification_prompt_dismissed', 'true');
   };
 
   const triggerTestNotification = useCallback(async () => {

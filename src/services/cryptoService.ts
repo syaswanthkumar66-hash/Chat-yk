@@ -126,7 +126,8 @@ export class CryptoService {
           this.derivedKeys.clear(); // Clear cached secrets since keypair restored
 
           if (typeof window !== 'undefined') {
-            localStorage.setItem(storageKey, JSON.stringify({ publicJwk, privateJwk }));
+            const { safeLocalStorageSetItem } = await import('../store');
+            safeLocalStorageSetItem(storageKey, JSON.stringify({ publicJwk, privateJwk }));
           }
           console.log("E2E keys successfully restored and decrypted using Gmail key!");
           return;
@@ -152,7 +153,8 @@ export class CryptoService {
       const publicJwk = await crypto.subtle.exportKey("jwk", this.keyPair.publicKey);
       const privateJwk = await crypto.subtle.exportKey("jwk", this.keyPair.privateKey);
       if (typeof window !== 'undefined') {
-        localStorage.setItem(storageKey, JSON.stringify({ publicJwk, privateJwk }));
+        const { safeLocalStorageSetItem } = await import('../store');
+        safeLocalStorageSetItem(storageKey, JSON.stringify({ publicJwk, privateJwk }));
       }
 
       // Secure backup to Firestore using Gmail-derived master key
@@ -299,7 +301,20 @@ export class CryptoService {
       sharedSecret,
       arrayBuffer
     );
-    return new Blob([decryptedBuffer], { type: fileType });
+    
+    let finalType = fileType;
+    if (!finalType) {
+      const view = new Uint8Array(decryptedBuffer);
+      if (view.length >= 4 && view[0] === 0x1a && view[1] === 0x45 && view[2] === 0xdf && view[3] === 0xa3) {
+        finalType = 'audio/webm';
+      } else if (view.length >= 8 && view[4] === 0x66 && view[5] === 0x74 && view[6] === 0x79 && view[7] === 0x70) {
+        finalType = 'audio/mp4';
+      } else {
+        finalType = 'audio/webm'; // fallback
+      }
+    }
+    
+    return new Blob([decryptedBuffer], { type: finalType });
   }
 }
 

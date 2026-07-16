@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
-    "build:frontend": "vite build",
+    "build:frontend": "npm run lint && vite build",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "build": "npm run build:frontend && mkdir -p dist && cp -r server/ tsconfig.json package.json vapid-keys.json dist/ 2>/dev/null || true && npm run build:server && [ -f dist/server.cjs ] && echo 'Verification passed: dist/server.cjs exists'",
     "start": "node dist/server.cjs",

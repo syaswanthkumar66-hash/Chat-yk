@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAppStore, useStore, shallowEqual, generateInitialsAvatar, getOrCreateDeviceId } from './store';
+import { useAppStore, useStore, shallowEqual, generateInitialsAvatar, getOrCreateDeviceId, safeLocalStorageSetItem } from './store';
 import { Message, Notification as AppNotification } from './types';
 import { Hub } from './components/Hub';
 import { Onboarding } from './components/Onboarding';
@@ -564,9 +564,9 @@ export default function App() {
     if (!user || authMethod === 'local') return;
 
     // Store in localStorage for offline / quick recovery
-    localStorage.setItem(`proto_current_mode_${user.id}`, mode);
-    localStorage.setItem(`proto_active_chat_${user.id}`, activeChatId || '');
-    localStorage.setItem(`proto_active_recipient_${user.id}`, activeRecipientId || '');
+    safeLocalStorageSetItem(`proto_current_mode_${user.id}`, mode);
+    safeLocalStorageSetItem(`proto_active_chat_${user.id}`, activeChatId || '');
+    safeLocalStorageSetItem(`proto_active_recipient_${user.id}`, activeRecipientId || '');
 
     if (navigator.onLine) {
       try {
@@ -701,12 +701,12 @@ export default function App() {
               } catch (setDocErr) {
                 console.warn("Firestore setDoc failed during initial registration, queuing for offline retry:", setDocErr);
                 pendingSyncRef.current = { uid: firebaseUser.uid, data: userDataToRestore };
-                localStorage.setItem(`pending_profile_sync_${firebaseUser.uid}`, JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
+                safeLocalStorageSetItem(`pending_profile_sync_${firebaseUser.uid}`, JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
               }
             } else {
               console.log("Firestore currently unreachable. Keeping local session and queuing profile for offline retry.");
               pendingSyncRef.current = { uid: firebaseUser.uid, data: userDataToRestore };
-              localStorage.setItem(`pending_profile_sync_${firebaseUser.uid}`, JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
+              safeLocalStorageSetItem(`pending_profile_sync_${firebaseUser.uid}`, JSON.stringify({ uid: firebaseUser.uid, data: userDataToRestore }));
             }
           }
         } catch (err) {
@@ -828,8 +828,8 @@ export default function App() {
           const removed = userData.removedFriendIds || [];
           useAppStore.setState({ blockedUserIds: blocked, removedFriendIds: removed });
           if (typeof window !== 'undefined') {
-            localStorage.setItem('proto_blockedUserIds', JSON.stringify(blocked));
-            localStorage.setItem('proto_removedFriendIds', JSON.stringify(removed));
+            safeLocalStorageSetItem('proto_blockedUserIds', JSON.stringify(blocked));
+            safeLocalStorageSetItem('proto_removedFriendIds', JSON.stringify(removed));
           }
         }
 

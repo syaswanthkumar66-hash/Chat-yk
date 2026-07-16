@@ -116,6 +116,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
       if (progressPercent >= 100) {
         progressPercent = 100;
         clearInterval(interval);
+        syncIntervalRef1.current = null;
         
         setLiveSyncState(prev => prev ? {
           ...prev,
@@ -161,6 +162,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
         } : null);
       }
     }, 250);
+    syncIntervalRef1.current = interval;
   };
 
   const handleScanSyncQRForAccount = (acc: any) => {
@@ -190,6 +192,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
           if (progressPercent >= 100) {
             progressPercent = 100;
             clearInterval(interval);
+            syncIntervalRef2.current = null;
             
             // Sync success! clone and register
             const { login } = useAppStore.getState();
@@ -253,6 +256,7 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
           }
         }, 300);
 
+        syncIntervalRef2.current = interval;
       } else {
         alert('Invalid Sync QR Code payload format.');
       }
@@ -349,6 +353,15 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
 
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const syncIntervalRef1 = useRef<NodeJS.Timeout | null>(null);
+  const syncIntervalRef2 = useRef<NodeJS.Timeout | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (syncIntervalRef1.current) clearInterval(syncIntervalRef1.current);
+      if (syncIntervalRef2.current) clearInterval(syncIntervalRef2.current);
+    };
+  }, []);
 
   // Diagnostic state for Web Push Notifications (VAPID)
   const [subCopied, setSubCopied] = useState(false);

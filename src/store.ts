@@ -9,7 +9,7 @@ export function getOrCreateDeviceId(): string {
   let deviceId = localStorage.getItem('proto_device_id');
   if (!deviceId) {
     deviceId = `dev-${Math.random().toString(36).substring(2, 11)}`;
-    localStorage.setItem('proto_device_id', deviceId);
+    safeLocalStorageSetItem('proto_device_id', deviceId);
   }
   return deviceId;
 }
@@ -233,8 +233,8 @@ interface AppState {
   inAppToasts: { id: string; title: string; body: string; avatar: string; chatId: string }[];
   addInAppToast: (toast: { title: string; body: string; avatar: string; chatId: string }) => void;
   removeInAppToast: (id: string) => void;
-  cloudSyncStatus: 'syncing' | 'synced' | null;
-  setCloudSyncStatus: (status: 'syncing' | 'synced' | null) => void;
+  cloudSyncStatus: 'syncing' | 'synced' | 'error' | null;
+  setCloudSyncStatus: (status: 'syncing' | 'synced' | 'error' | null) => void;
   backendSyncStatus: 'idle' | 'checking' | 'mismatch' | 'syncing' | 'done' | 'error';
   backendSyncProgress: number;
   setBackendSyncStatus: (status: 'idle' | 'checking' | 'mismatch' | 'syncing' | 'done' | 'error') => void;
@@ -300,7 +300,7 @@ let lastSuccessfulWakeUpTime = 0;
 
 export function safeLocalStorageSetItem(key: string, value: string): boolean {
   try {
-    localStorage.setItem(key, value);
+    window.localStorage.setItem(key, value);
     return true;
   } catch (error: any) {
     console.error(`[StorageError] Failed to write key "${key}" to localStorage:`, error);
@@ -331,7 +331,7 @@ export function safeLocalStorageSetItem(key: string, value: string): boolean {
               return c;
             });
             const prunedValue = JSON.stringify(prunedChats);
-            localStorage.setItem(key, prunedValue);
+            safeLocalStorageSetItem(key, prunedValue);
             console.log(`[StorageError] Successfully recovered from QuotaExceededError by pruning message history for key "${key}"`);
             return true;
           }
@@ -397,27 +397,27 @@ const cachedAuthMethod = getLocalStorageItem('proto_authMethod', '') || null;
 if (typeof window !== 'undefined' && cachedUser?.id) {
   const legacyChats = localStorage.getItem('proto_chats');
   if (legacyChats && !localStorage.getItem(`proto_chats_${cachedUser.id}`)) {
-    localStorage.setItem(`proto_chats_${cachedUser.id}`, legacyChats);
+    safeLocalStorageSetItem(`proto_chats_${cachedUser.id}`, legacyChats);
   }
   const legacyUsers = localStorage.getItem('proto_users');
   if (legacyUsers && !localStorage.getItem(`proto_users_${cachedUser.id}`)) {
-    localStorage.setItem(`proto_users_${cachedUser.id}`, legacyUsers);
+    safeLocalStorageSetItem(`proto_users_${cachedUser.id}`, legacyUsers);
   }
   const legacyBlocked = localStorage.getItem('proto_blockedUserIds');
   if (legacyBlocked && !localStorage.getItem(`proto_blockedUserIds_${cachedUser.id}`)) {
-    localStorage.setItem(`proto_blockedUserIds_${cachedUser.id}`, legacyBlocked);
+    safeLocalStorageSetItem(`proto_blockedUserIds_${cachedUser.id}`, legacyBlocked);
   }
   const legacyRemoved = localStorage.getItem('proto_removedFriendIds');
   if (legacyRemoved && !localStorage.getItem(`proto_removedFriendIds_${cachedUser.id}`)) {
-    localStorage.setItem(`proto_removedFriendIds_${cachedUser.id}`, legacyRemoved);
+    safeLocalStorageSetItem(`proto_removedFriendIds_${cachedUser.id}`, legacyRemoved);
   }
   const legacyFR = localStorage.getItem('proto_friendRequests');
   if (legacyFR && !localStorage.getItem(`proto_friendRequests_${cachedUser.id}`)) {
-    localStorage.setItem(`proto_friendRequests_${cachedUser.id}`, legacyFR);
+    safeLocalStorageSetItem(`proto_friendRequests_${cachedUser.id}`, legacyFR);
   }
   const legacySFR = localStorage.getItem('proto_sentFriendRequests');
   if (legacySFR && !localStorage.getItem(`proto_sentFriendRequests_${cachedUser.id}`)) {
-    localStorage.setItem(`proto_sentFriendRequests_${cachedUser.id}`, legacySFR);
+    safeLocalStorageSetItem(`proto_sentFriendRequests_${cachedUser.id}`, legacySFR);
   }
 
   // After copying to user-specific keys, clean up legacy global keys to prevent crossover for future logins
@@ -450,12 +450,12 @@ const cachedSentFriendRequests = cachedUser
 
 export const useAppStore = create<AppState>((set) => ({
   onlineUserIds: [] as string[],
-  offlineMessageQueue: [],
+  offlineMessageQueue: cachedUser ? getLocalStorageJSON<{ id: string, chatId: string | null, recipientId: string | null, text: string, type: string, fileUrl?: string, fileSize?: string, e2eData?: any }[]>(`proto_offlineMessageQueue_${cachedUser.id}`, []) : [],
   generateInitialsAvatar: generateInitialsAvatar,
   autoSyncEnabled: getLocalStorageJSON<boolean>('auto_sync_enabled', true),
   setAutoSyncEnabled: (enabled: boolean) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('auto_sync_enabled', JSON.stringify(enabled));
+      safeLocalStorageSetItem('auto_sync_enabled', JSON.stringify(enabled));
     }
     set({ autoSyncEnabled: enabled });
   },
@@ -548,7 +548,7 @@ export const useAppStore = create<AppState>((set) => ({
     set({ user });
     if (typeof window !== 'undefined') {
       if (user) {
-        localStorage.setItem('proto_user', JSON.stringify(user));
+        safeLocalStorageSetItem('proto_user', JSON.stringify(user));
       } else {
         localStorage.removeItem('proto_user');
       }
@@ -557,7 +557,7 @@ export const useAppStore = create<AppState>((set) => ({
   updateUser: (data) => set((state) => {
     const updatedUser = state.user ? { ...state.user, ...data } : null;
     if (typeof window !== 'undefined' && updatedUser) {
-      localStorage.setItem('proto_user', JSON.stringify(updatedUser));
+      safeLocalStorageSetItem('proto_user', JSON.stringify(updatedUser));
     }
     // Also update in Firestore in background if available
     if (state.user && state.authMethod !== 'local') {
@@ -661,7 +661,9 @@ export const useAppStore = create<AppState>((set) => ({
       if (stored) {
         try {
           userFriendRequests = JSON.parse(stored);
-        } catch (e) {}
+        } catch (e) {
+          console.error("Error parsing stored friend requests for user", user.id, e);
+        }
       }
     }
 
@@ -672,7 +674,9 @@ export const useAppStore = create<AppState>((set) => ({
       if (stored) {
         try {
           userSentFriendRequests = JSON.parse(stored);
-        } catch (e) {}
+        } catch (e) {
+          console.error("Error parsing stored sent friend requests for user", user.id, e);
+        }
       }
     }
 
@@ -683,7 +687,9 @@ export const useAppStore = create<AppState>((set) => ({
       if (stored) {
         try {
           userBlockedUserIds = JSON.parse(stored);
-        } catch (e) {}
+        } catch (e) {
+          console.error("Error parsing stored blocked user IDs for user", user.id, e);
+        }
       }
     }
 
@@ -694,7 +700,9 @@ export const useAppStore = create<AppState>((set) => ({
       if (stored) {
         try {
           userRemovedFriendIds = JSON.parse(stored);
-        } catch (e) {}
+        } catch (e) {
+          console.error("Error parsing stored removed friend IDs for user", user.id, e);
+        }
       }
     }
 
@@ -713,9 +721,9 @@ export const useAppStore = create<AppState>((set) => ({
     });
     
     if (typeof window !== 'undefined') {
-      localStorage.setItem('proto_user', JSON.stringify(user));
-      localStorage.setItem('proto_isLoggedIn', 'true');
-      localStorage.setItem('proto_authMethod', authMethod);
+      safeLocalStorageSetItem('proto_user', JSON.stringify(user));
+      safeLocalStorageSetItem('proto_isLoggedIn', 'true');
+      safeLocalStorageSetItem('proto_authMethod', authMethod);
     }
 
     // Set scoped Firebase instance and register account with sessionIntegrityService asynchronously
@@ -975,11 +983,12 @@ export const useAppStore = create<AppState>((set) => ({
 
         // Update lastSyncedAt
         const nextSyncTime = new Date().toISOString();
-        localStorage.setItem(storageKey, nextSyncTime);
+        safeLocalStorageSetItem(storageKey, nextSyncTime);
         console.log('[Catch-Up Sync] Catch-up sync finished successfully. Updated lastSyncedAt:', nextSyncTime);
       }
     } catch (err) {
       console.error('[Catch-Up Sync] Failed during sync:', err);
+      set({ backendSyncStatus: 'error' });
     } finally {
       (window as any).__catchUpSyncInFlight = false;
       set({ isSyncing: false });
@@ -1029,7 +1038,7 @@ export const useAppStore = create<AppState>((set) => ({
           
           set({ backendSyncProgress: 95 });
           const storageKey = `proto_last_synced_at_${userId}`;
-          localStorage.setItem(storageKey, syncData.lastUpdated || new Date().toISOString());
+          safeLocalStorageSetItem(storageKey, syncData.lastUpdated || new Date().toISOString());
           (window as any).__lastUploadedSyncTime = syncData.lastUpdated;
           
           state.reportFingerprint();
@@ -1246,7 +1255,7 @@ export const useAppStore = create<AppState>((set) => ({
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
-      transports: ["websocket"],
+      transports: ["polling", "websocket"],
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -1364,6 +1373,9 @@ export const useAppStore = create<AppState>((set) => ({
             }));
           });
           useAppStore.setState({ offlineMessageQueue: [] });
+          if (uid) {
+            safeLocalStorageSetItem(`proto_offlineMessageQueue_${uid}`, JSON.stringify([]));
+          }
         }
       });
 
@@ -1382,8 +1394,7 @@ export const useAppStore = create<AppState>((set) => ({
                 });
             });
 
-            sock.off('disconnect_firebase'); // clean
-            sock.on('disconnect', () => {
+            sock.off('disconnect').on('disconnect', () => {
                // Mark self as offline in Firebase
                setDoc(doc(db, 'users', uid), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => {
                   try {
@@ -1394,8 +1405,7 @@ export const useAppStore = create<AppState>((set) => ({
                });
             });
 
-            sock.off('connect_firebase'); // clean
-            sock.on('connect', () => {
+            sock.off('connect').on('connect', () => {
                // Mark self as online in Firebase so other users can see status in search
                setDoc(doc(db, 'users', uid), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => {
                   try {
@@ -1592,6 +1602,22 @@ export const useAppStore = create<AppState>((set) => ({
         }
       });
 
+      // 6.5 message_sent
+      sock.off('message_sent').on('message_sent', (data: { chatId: string, messageId: string, timestamp: string }) => {
+        set((state) => ({
+          chats: state.chats.map(c => {
+            const isMatch = c.id === data.chatId || c.participants.some(p => p.id === data.chatId);
+            if (isMatch) {
+              return {
+                ...c,
+                messages: (c.messages || []).map(m => m.id === data.messageId ? { ...m, status: 'sent', timestamp: data.timestamp || m.timestamp } : m)
+              };
+            }
+            return c;
+          })
+        }));
+      });
+
       // 7. message_status_update
       sock.off('message_status_update').on('message_status_update', (data: { chatId: string, messageId: string, status: 'delivered' | 'read' }) => {
         set((state) => ({
@@ -1729,7 +1755,7 @@ export const useAppStore = create<AppState>((set) => ({
                 mergeCloudSyncPayload(syncData, user.id);
                 // Save last updated timestamp to local storage to prevent duplicate pull
                 const storageKey = `proto_last_synced_at_${user.id}`;
-                localStorage.setItem(storageKey, syncData.lastUpdated || new Date().toISOString());
+                safeLocalStorageSetItem(storageKey, syncData.lastUpdated || new Date().toISOString());
                 (window as any).__lastUploadedSyncTime = syncData.lastUpdated;
                 
                 // Report fingerprint after successful background merge
@@ -2055,7 +2081,7 @@ export const useAppStore = create<AppState>((set) => ({
       const nextRemoved = [...state.removedFriendIds, userId];
       if (typeof window !== 'undefined') {
         const key = state.user?.id ? `proto_removedFriendIds_${state.user.id}` : 'proto_removedFriendIds';
-        localStorage.setItem(key, JSON.stringify(nextRemoved));
+        safeLocalStorageSetItem(key, JSON.stringify(nextRemoved));
       }
       return {
         removedFriendIds: nextRemoved,
@@ -2113,7 +2139,7 @@ export const useAppStore = create<AppState>((set) => ({
       const nextRemoved = state.removedFriendIds.filter(id => id !== userId);
       if (typeof window !== 'undefined') {
         const key = state.user?.id ? `proto_removedFriendIds_${state.user.id}` : 'proto_removedFriendIds';
-        localStorage.setItem(key, JSON.stringify(nextRemoved));
+        safeLocalStorageSetItem(key, JSON.stringify(nextRemoved));
       }
       return {
         removedFriendIds: nextRemoved
@@ -2140,7 +2166,7 @@ export const useAppStore = create<AppState>((set) => ({
       const nextBlocked = [...state.blockedUserIds, userId];
       if (typeof window !== 'undefined') {
         const key = state.user?.id ? `proto_blockedUserIds_${state.user.id}` : 'proto_blockedUserIds';
-        localStorage.setItem(key, JSON.stringify(nextBlocked));
+        safeLocalStorageSetItem(key, JSON.stringify(nextBlocked));
       }
       return {
         blockedUserIds: nextBlocked,
@@ -2175,7 +2201,7 @@ export const useAppStore = create<AppState>((set) => ({
       const nextBlocked = state.blockedUserIds.filter(id => id !== userId);
       if (typeof window !== 'undefined') {
         const key = state.user?.id ? `proto_blockedUserIds_${state.user.id}` : 'proto_blockedUserIds';
-        localStorage.setItem(key, JSON.stringify(nextBlocked));
+        safeLocalStorageSetItem(key, JSON.stringify(nextBlocked));
       }
       return {
         blockedUserIds: nextBlocked
@@ -2448,24 +2474,11 @@ export const useAppStore = create<AppState>((set) => ({
       fileUrl,
       fileSize,
       isOwn: true,
-      status: isSocketConnected ? 'sent' : 'pending',
+      status: 'pending', // wait for message_sent ack for 'sent'
       isE2E: !!e2eData,
       iv: e2eData?.iv,
       encryptedFileKey: e2eData?.encryptedFileKey
     };
-
-    // Simulate read receipt since we don't have full socket ack logic here
-    if (isSocketConnected) {
-      setTimeout(() => {
-        useAppStore.setState((s) => ({
-          chats: s.chats.map(c => 
-            (c.id === chatId || (recipientId && c.participants.some(p => p.id === recipientId)))
-              ? { ...c, messages: c.messages.map(m => m.id === newMessage.id ? { ...m, status: 'read' as const } : m) }
-              : c
-          )
-        }));
-      }, 2000);
-    }
 
     // Emit via socket or fallback to Firebase
     const chat = state.chats.find(c => c.id === chatId);
@@ -2597,6 +2610,10 @@ export const useAppStore = create<AppState>((set) => ({
           }
         }
       }
+    }
+
+    if (state.user?.id) {
+      safeLocalStorageSetItem(`proto_offlineMessageQueue_${state.user.id}`, JSON.stringify(offlineMessageQueue));
     }
 
     let updatedChats = [...state.chats];
@@ -2814,6 +2831,7 @@ export const flushCloudAutoSync = async () => {
     }
   } catch (err) {
     console.error("[Auto-Sync-Flush] Failed to flush update to Firestore:", err);
+    store.setCloudSyncStatus('error');
     try {
       const { handleFirestoreError, OperationType } = await import('./firebase');
       handleFirestoreError(err, OperationType.WRITE, `cloud_syncs/${userId}`);
@@ -2870,6 +2888,7 @@ export const triggerCloudAutoSync = (userId: string) => {
       }
     } catch (err) {
       console.error("[Auto-Sync] Failed to push update to Firestore:", err);
+      store.setCloudSyncStatus('error');
       try {
         const { handleFirestoreError, OperationType } = await import('./firebase');
         handleFirestoreError(err, OperationType.WRITE, `cloud_syncs/${userId}`);
@@ -2917,7 +2936,7 @@ export function mergeCloudSyncPayload(payload: any, userId: string) {
 
   const saveLocalJSON = (key: string, value: any) => {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      safeLocalStorageSetItem(key, JSON.stringify(value));
     } catch (e) {
       console.error("Local storage error in mergeCloudSyncPayload:", e);
     }

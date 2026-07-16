@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, useAppStore } from '../store';
 import { Icon, Button, Avatar, Card } from './UI';
@@ -28,12 +28,22 @@ export const QuickProfileSwitcher = () => {
     targetAccount: any;
   } | null>(null);
 
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   // Re-fetch saved accounts when panel opens or user state changes
   useEffect(() => {
     if (isOpen) {
       setSavedAccounts(sessionIntegrityService.getSavedAccounts());
     }
   }, [isOpen, user?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, []);
 
   if (!isLoggedIn || !user) return null;
 
@@ -97,6 +107,7 @@ export const QuickProfileSwitcher = () => {
       if (progressPercent >= 100) {
         progressPercent = 100;
         clearInterval(interval);
+        syncIntervalRef.current = null;
         
         setLiveSyncState(prev => prev ? {
           ...prev,
@@ -147,6 +158,7 @@ export const QuickProfileSwitcher = () => {
         } : null);
       }
     }, 200);
+    syncIntervalRef.current = interval;
   };
 
   const handleScanSyncQR = async (scannedData: string) => {

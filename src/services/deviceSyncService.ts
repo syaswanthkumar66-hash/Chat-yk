@@ -103,7 +103,7 @@ class DeviceSyncService {
     });
 
     // Set up socket listeners
-    this.socket.on("sync_peer_joined", async () => {
+    this.socket.off("sync_peer_joined").on("sync_peer_joined", async () => {
       console.log("[SyncHost] Receiver joined sync room");
       this.updateProgress({
         status: 'connecting',
@@ -118,7 +118,7 @@ class DeviceSyncService {
       await this.initiateWebRTCSender();
     });
 
-    this.socket.on("sync_signal", async (data: { signal: any }) => {
+    this.socket.off("sync_signal").on("sync_signal", async (data: { signal: any }) => {
       const { signal } = data;
       if (!this.pc) return;
 
@@ -423,7 +423,7 @@ class DeviceSyncService {
     this.startTime = Date.now();
 
     // Setup socket signal handling
-    this.socket.on("sync_signal", async (data: { signal: any }) => {
+    this.socket.off("sync_signal").on("sync_signal", async (data: { signal: any }) => {
       const { signal } = data;
       
       try {

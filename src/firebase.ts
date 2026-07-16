@@ -17,8 +17,11 @@ import {
   where as firestoreWhere,
   collection as firestoreCollection,
   onSnapshot as firestoreOnSnapshot,
-  getDocFromServer as firestoreGetDocFromServer
+  getDocFromServer as firestoreGetDocFromServer,
+  setLogLevel
 } from 'firebase/firestore';
+
+setLogLevel('silent');
 import firebaseConfig from '../firebase-applet-config.json';
 import { BACKEND_URL } from './config';
 
@@ -129,6 +132,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const code = (error && typeof error === 'object' && 'code' in error) ? String(error.code).toLowerCase() : '';
   const isPermission = msg.includes('permission') || msg.includes('denied') || code.includes('permission-denied');
 
+  import('./store').then(({ useAppStore }) => {
+    useAppStore.getState().addInAppToast({
+      title: "Sync Error",
+      body: isPermission ? "Access denied. Action could not be saved." : "Database error. Action may not have been saved.",
+      avatar: "⚠️",
+      chatId: "system"
+    });
+  }).catch(console.warn);
+
   if (isPermission) {
     console.error('Firestore Error (Permission Denied): ', JSON.stringify(errInfo));
     throw new Error(JSON.stringify(errInfo));
@@ -139,6 +151,8 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Re-export core builders directly
 export { doc, collection, query, where, serverTimestamp } from 'firebase/firestore';
+
+setLogLevel('silent');
 
 // Recursive Timestamp converter to parse backend timestamps gracefully
 function convertTimestamps(val: any): any {

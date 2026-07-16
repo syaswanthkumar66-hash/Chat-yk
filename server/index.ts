@@ -1210,6 +1210,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
+      // Acknowledge the message was sent back to the sender
+      socket.emit("message_sent", {
+        messageId: messageData.id,
+        chatId: groupId || recipientId,
+        timestamp: messageData.timestamp
+      });
+
       if (groupId) {
         // Send to everyone in the group room except the sender
         socket.to(`group-${groupId}`).emit("receive_message", messageData);

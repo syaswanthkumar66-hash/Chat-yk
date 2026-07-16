@@ -1,4 +1,5 @@
 import { cryptoService } from './cryptoService';
+import { safeLocalStorageSetItem } from '../store';
 
 export interface SavedAccount {
   id: string;
@@ -38,7 +39,7 @@ export class SessionIntegrityService {
   saveAccounts(accounts: SavedAccount[]) {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(this.savedAccountsKey, JSON.stringify(accounts));
+      safeLocalStorageSetItem(this.savedAccountsKey, JSON.stringify(accounts));
     } catch (e) {
       console.error('Failed to save accounts list:', e);
     }

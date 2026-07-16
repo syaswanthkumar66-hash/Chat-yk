@@ -242,7 +242,25 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           autoGainControl: true
         }
       });
-      const options = { mimeType: 'audio/webm' };
+      let options: any = {};
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/aac',
+        'audio/wav'
+      ];
+      
+      let selectedMimeType = '';
+      for (const type of mimeTypes) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
+          options = { mimeType: type };
+          selectedMimeType = type;
+          break;
+        }
+      }
+      
       const recorder = new MediaRecorder(stream, options);
       pttMediaRecorder.current = recorder;
       pttChunks.current = [];
@@ -255,12 +273,13 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
       recorder.onstop = async () => {
         if (pttChunks.current.length === 0) return;
-        const blob = new Blob(pttChunks.current, { type: 'audio/webm' });
+        const finalMime = selectedMimeType || 'audio/webm';
+        const blob = new Blob(pttChunks.current, { type: finalMime });
         const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
         console.log(`[PTT] Finished recording live PTT voice note. Size: ${blob.size} bytes. Broadcasting to room: ${roomId}`);
         
         // Broadcast over WebRTC Data Channel
-        await webrtcService.broadcastAudioChunks(roomId, blob, 'audio/webm');
+        await webrtcService.broadcastAudioChunks(roomId, blob, finalMime);
         
         diagnosticLogger.log('webrtc', 'ptt_broadcast_done', `Finished broadcasting live P2P voice note (${(blob.size / 1024).toFixed(1)} KB) to all connected peers.`, undefined, roomId);
       };

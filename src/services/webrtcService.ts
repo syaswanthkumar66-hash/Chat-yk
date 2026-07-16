@@ -957,9 +957,15 @@ class WebRTCService {
             //    significantly conserving network bandwidth and reducing device battery drainage.
             // This is how raw analog microphone input is successfully transformed into robust, internet-suitable RTP packets.
             // -----------------------------------------------------------------------------------------
-            if ('setCodecPreferences' in transceiver && typeof RTCRtpSender.getCapabilities === 'function') {
+            const getCaps = (typeof RTCRtpReceiver !== 'undefined' && RTCRtpReceiver.getCapabilities) 
+              ? RTCRtpReceiver.getCapabilities.bind(RTCRtpReceiver)
+              : (typeof RTCRtpSender !== 'undefined' && RTCRtpSender.getCapabilities)
+                ? RTCRtpSender.getCapabilities.bind(RTCRtpSender)
+                : null;
+
+            if ('setCodecPreferences' in transceiver && getCaps) {
               try {
-                const capabilities = RTCRtpSender.getCapabilities('audio');
+                const capabilities = getCaps('audio');
                 if (capabilities && capabilities.codecs) {
                   const opusCodecs = capabilities.codecs.filter(
                     codec => codec.mimeType.toLowerCase() === 'audio/opus'
