@@ -59,7 +59,7 @@ try {
   if (forceMemoryCache) {
     dbInstance = initializeFirestore(app, {
       localCache: memoryLocalCache(),
-      experimentalForceLongPolling: true
+      
     }, firebaseConfig.firestoreDatabaseId);
     console.log("[Firebase] Successfully initialized Firestore with memoryLocalCache.");
   } else {
@@ -67,13 +67,13 @@ try {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager()
       }),
-      experimentalForceLongPolling: true
+      
     }, firebaseConfig.firestoreDatabaseId);
     console.log("[Firebase] Successfully initialized Firestore with persistentLocalCache.");
   }
 } catch (e) {
   console.warn("[Firebase] initializeFirestore failed, falling back to getFirestore:", e);
-  dbInstance = getFirestore(app);
+  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 }
 
 // Export db and auth bindings pointing to the primary authenticated Firebase instance
