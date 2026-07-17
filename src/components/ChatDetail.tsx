@@ -210,7 +210,7 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
         }
 
         try {
-          sharedSecret = await cryptoService.deriveSharedSecret(remoteId, pubKeyBase64);
+          sharedSecret = await cryptoService.deriveSharedSecret(remoteId, pubKeyBase64, state.user?.id);
         } catch (deriveErr) {
           throw new Error("DECRYPT_KEY_MISSING");
         }
@@ -1178,7 +1178,7 @@ export const ChatDetail = () => {
         }
         
         if (pubKeyBase64) {
-          sharedSecret = await cryptoService.deriveSharedSecret(targetId, pubKeyBase64);
+          sharedSecret = await cryptoService.deriveSharedSecret(targetId, pubKeyBase64, user?.id);
         }
       } catch(e) {
         console.error("Failed to setup E2EE", e);
@@ -1300,7 +1300,7 @@ export const ChatDetail = () => {
         if (targetId && !isGroup) {
           try {
             console.log(`WebRTC: Sending chunk-by-chunk media ${generatedMessageId} directly to peer ${targetId}...`);
-            webrtcService.sendAudioChunks(targetId, media.blob, media.blob.type, generatedMessageId);
+            webrtcService.sendAudioChunks(targetId, uploadBlob, media.blob.type, generatedMessageId);
           } catch (rtcErr) {
             console.warn("Direct WebRTC media chunk sending failed, relying on server backup", rtcErr);
           }
