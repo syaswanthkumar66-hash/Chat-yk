@@ -10,6 +10,13 @@ export interface RemoteTrackInfo {
 }
 
 class WebRTCService {
+  public async getIceServers(): Promise<any[]> {
+    if (!this.isIceServersFetched) {
+      await this.fetchIceConfig(2, 500);
+    }
+    return this.iceServers;
+  }
+
   private pcs: Map<string, RTCPeerConnection> = new Map();
   private localStream: MediaStream | null = null;
   private iceServers: any[] = [

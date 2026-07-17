@@ -226,7 +226,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
 
   // --- DIAGNOSTIC TEST MODE STATE ---
   const [testSelectedUserId, setTestSelectedUserId] = useState<string>('');
-  const [testType, setTestType] = useState<'notification' | 'file_transfer' | 'speed_test' | null>(null);
+  const [testType, setTestType] = useState<'notification' | 'file_transfer' | 'speed_test' | 'ice_test' | null>(null);
   const [testStatus, setTestStatus] = useState<'idle' | 'running' | 'success' | 'failed'>('idle');
   const [testProgress, setTestProgress] = useState<number>(0);
   const [testLogs, setTestLogs] = useState<string[]>([]);
@@ -496,6 +496,62 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
         logMsg(`[BURST] Packet stream bandwidth: ${liveSpeed} Mbps...`);
       }
     }, 350);
+  };
+
+  const runIceTest = async () => {
+    setTestSelectedUserId('self');
+    setTestType('ice_test');
+    setTestStatus('running');
+    setTestProgress(0);
+    setTestLogs([]);
+    setTestSpeed(0);
+    setSpeedHistory([]);
+    
+    logMsg(`Initializing ICE server testing...`);
+    
+    try {
+      const { webrtcService } = await import('../services/webrtcService');
+      logMsg(`Fetching TURN/STUN configuration...`);
+      setTestProgress(10);
+      
+      const iceServers = await webrtcService.getIceServers();
+      logMsg(`Configured ICE Servers: ${iceServers.length}`);
+      setTestProgress(30);
+
+      const pc = new RTCPeerConnection({ iceServers });
+      
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const type = event.candidate.candidate.split(' ')[7];
+          const protocol = event.candidate.protocol;
+          logMsg(`[ICE] Gathered candidate: type=${type} protocol=${protocol}`);
+        } else {
+          logMsg(`[ICE] Candidate gathering complete.`);
+          setTestProgress(100);
+          setTestStatus('success');
+          pc.close();
+        }
+      };
+
+      pc.onicecandidateerror = (event: any) => {
+        logMsg(`[ICE ERROR] URL: ${event.url} Error text: ${event.errorText} Code: ${event.errorCode}`);
+      };
+
+      logMsg(`Creating data channel to trigger ICE gathering...`);
+      setTestProgress(50);
+      pc.createDataChannel("ice_test_channel");
+      
+      logMsg(`Creating local description...`);
+      const offer = await pc.createOffer();
+      
+      logMsg(`Setting local description to begin gathering...`);
+      setTestProgress(70);
+      await pc.setLocalDescription(offer);
+      
+    } catch (err: any) {
+      logMsg(`[ERROR] ICE test failed: ${err.message || String(err)}`);
+      setTestStatus('failed');
+    }
   };
 
   const realSystemLogs = useMemo(() => {
@@ -3537,7 +3593,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
 
               {/* Step 2: Available Diagnostic Tests */}
               <div className="lg:col-span-2 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   {/* Test 1: Notifications */}
                   <Card className="p-6 bg-white border-none rounded-[2rem] shadow-xl shadow-primary/5 flex flex-col justify-between h-64 hover:shadow-2xl hover:shadow-primary/10 transition-all group">
                     <div className="space-y-3">
@@ -3597,6 +3653,26 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                       Measure Speed
                     </Button>
                   </Card>
+
+                  {/* Test 4: ICE Servers */}
+                  <Card className="p-6 bg-white border-none rounded-[2rem] shadow-xl shadow-primary/5 flex flex-col justify-between h-64 hover:shadow-2xl hover:shadow-primary/10 transition-all group">
+                    <div className="space-y-3">
+                      <div className="size-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Icon name="router" className="text-xl" />
+                      </div>
+                      <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-widest italic">ICE/STUN/TURN</h4>
+                      <p className="text-[10px] font-bold text-neutral-muted uppercase tracking-wider leading-relaxed">
+                        Verify STUN NAT traversal and TURN relay connectivity by initiating ICE gathering phase.
+                      </p>
+                    </div>
+                    <Button 
+                      disabled={testStatus === 'running'}
+                      onClick={runIceTest}
+                      className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[9px] font-black uppercase tracking-widest border-none disabled:opacity-50"
+                    >
+                      Test ICE Servers
+                    </Button>
+                  </Card>
                 </div>
               </div>
             </div>
@@ -3627,7 +3703,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                         />
                         <circle 
                           cx="72" cy="72" r="64" 
-                          stroke={testType === 'notification' ? '#7c3aed' : (testType === 'file_transfer' ? '#0d9488' : '#d97706')} 
+                          stroke={testType === 'notification' ? '#7c3aed' : (testType === 'file_transfer' ? '#0d9488' : (testType === 'ice_test' ? '#2563eb' : '#d97706'))} 
                           strokeWidth="10" fill="transparent" 
                           strokeDasharray={2 * Math.PI * 64}
                           strokeDashoffset={2 * Math.PI * 64 * (1 - testProgress / 100)}
@@ -3669,7 +3745,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                                 style={{ height: `${Math.max(heightPercent, 10)}%` }}
                                 className={cn(
                                   "w-2 rounded-t-sm transition-all duration-300",
-                                  testType === 'file_transfer' ? "bg-teal-500" : "bg-amber-500"
+                                  testType === 'file_transfer' ? "bg-teal-500" : (testType === 'ice_test' ? "bg-blue-500" : "bg-amber-500")
                                 )}
                               />
                             );
