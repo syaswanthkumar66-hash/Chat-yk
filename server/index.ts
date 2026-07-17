@@ -2171,13 +2171,20 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         // WARNING: Free public TURN relays (like metered.ca openrelay) are shared, 
         // rate-limited, best-effort services and are NOT reliable for production load.
         // Configure your own dedicated TURN provider (e.g. Twilio, Metered paid tier) for reliability.
+        ...(turnUrl ? [
+          {
+            urls: turnUrl.startsWith('turn:') || turnUrl.startsWith('turns:') || turnUrl.startsWith('stun:') ? turnUrl : `turn:${turnUrl}`,
+            ...(process.env.TURN_SERVER_USERNAME ? { username: process.env.TURN_SERVER_USERNAME } : {}),
+            ...(process.env.TURN_SERVER_PASSWORD ? { credential: process.env.TURN_SERVER_PASSWORD } : {})
+          }
+        ] : [
         { 
-          urls: turnUrl || 'turn:openrelay.metered.ca:80?transport=udp', 
-          username: process.env.TURN_SERVER_USERNAME || 'openrelayproject', 
-          credential: process.env.TURN_SERVER_PASSWORD || 'openrelayproject' 
+          urls: 'turn:openrelay.metered.ca:80?transport=udp', 
+          username: 'openrelayproject', 
+          credential: 'openrelayproject' 
         },
         // Additional fallbacks for the public relay using TCP in case UDP is blocked
-        ...(turnUrl ? [] : [
+        ...([
           { 
             urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
             username: 'openrelayproject', 
@@ -2189,8 +2196,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             credential: 'openrelayproject' 
           }
         ])
-      ]
-    });
+      ])
+    ]
+  });
   });
 
   // Native Realtime calling API configuration stub (Cloudflare replaced)
