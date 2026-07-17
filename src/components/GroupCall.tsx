@@ -503,6 +503,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
     const handleUserJoined = (data: { userId: string }) => {
       console.log('User joined call:', data.userId);
+      setParticipants(prev => prev.map(p => p.id === data.userId ? { ...p, status: 'online' } : p));
     };
 
     const handleCallStats = (e: any) => {
@@ -694,11 +695,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
         isSpeaking: false,
         status: 'ringing'
       });
-
-      // Transition private call target to online
-      privateCallTimeoutId = setTimeout(() => {
-        setParticipants(prev => prev.map(p => p.id === targetUser.id ? { ...p, status: 'online' } : p));
-      }, 3000);
+      // We no longer mock transition for private calls. We wait for WebRTC stream.
     } else if (chat && !userId) {
       // For group calls, add all participants as ringing/offline initially
       chat.participants.filter(p => p.id !== 'me').forEach(u => {
@@ -706,10 +703,10 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
           id: u.id,
           name: u.name,
           avatar: u.avatar,
-          isMuted: Math.random() > 0.7,
-          isVideoOff: type === 'voice' || Math.random() > 0.8,
+          isMuted: false,
+          isVideoOff: type === 'voice',
           isSpeaking: false,
-          status: Math.random() > 0.1 ? 'ringing' : 'offline'
+          status: 'ringing'
         });
       });
     }
@@ -720,31 +717,9 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
       if (!isHold) setDuration(d => d + 1);
     }, 1000);
 
-    // Mock others joining for group calls (transition from ringing to online)
-    let joinTimers: any[] = [];
-    if (chat && !userId) {
-      joinTimers = chat.participants.filter(p => p.id !== 'me').slice(0, 5).map((u, i) => {
-        return setTimeout(() => {
-          setParticipants(prev => {
-            return prev.map(p => p.id === u.id && p.status === 'ringing' 
-              ? { 
-                  ...p, 
-                  status: 'online', 
-                  isMuted: Math.random() > 0.8, 
-                  isVideoOff: type === 'voice' || Math.random() > 0.7,
-                  isSpeaking: Math.random() > 0.7
-                } 
-              : p
-            );
-          });
-        }, (i + 1) * 2000 + Math.random() * 3000);
-      });
-    }
-
     return () => {
       clearInterval(timer);
       if (privateCallTimeoutId) clearTimeout(privateCallTimeoutId);
-      joinTimers?.forEach(t => clearTimeout(t));
     };
   }, [groupId, userId, type, targetUser, chat, isHold, callAttempt]);
 
@@ -766,6 +741,57 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
   const onlineParticipants = sortedParticipants.filter(p => p.status === 'online');
   const waitingParticipants = sortedParticipants.filter(p => p.status !== 'online');
+
+  // Outgoing ringtone synthesizer
+  useEffect(() => {
+    let audioCtx: AudioContext | null = null;
+    let oscillator: OscillatorNode | null = null;
+    let gainNode: GainNode | null = null;
+    let interval: any = null;
+
+    if (waitingParticipants.length > 0 && waitingParticipants.some(p => p.status === 'ringing') && onlineParticipants.length === 1) {
+      try {
+        audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        
+        const playOutgoingRing = () => {
+          if (!audioCtx) return;
+          oscillator = audioCtx.createOscillator();
+          gainNode = audioCtx.createGain();
+          
+          oscillator.type = 'sine';
+          oscillator.frequency.setValueAtTime(440, audioCtx.currentTime);
+          oscillator.frequency.setValueAtTime(480, audioCtx.currentTime + 0.1);
+          
+          gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 0.1);
+          gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime + 1.0);
+          gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+          
+          oscillator.start(audioCtx.currentTime);
+          oscillator.stop(audioCtx.currentTime + 1.3);
+        };
+
+        playOutgoingRing();
+        interval = setInterval(playOutgoingRing, 3500);
+        
+      } catch(e) {
+        console.warn("Could not play outgoing ringtone:", e);
+      }
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+      if (oscillator) {
+        try { oscillator.stop(); } catch(e) {}
+      }
+      if (audioCtx) {
+        audioCtx.close().catch(console.warn);
+      }
+    };
+  }, [waitingParticipants.length, onlineParticipants.length]);
 
   // Compute remote participants that are visible in the layout vs those that need a background audio player
   const visibleRemoteIds = isOneOnOne 

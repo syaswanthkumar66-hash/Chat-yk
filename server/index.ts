@@ -2150,6 +2150,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   });
 
   app.get("/api/webrtc/config", (req, res) => {
+    let turnUrl = process.env.TURN_SERVER_URL;
+    if (turnUrl && !turnUrl.startsWith('turn:') && !turnUrl.startsWith('stun:') && !turnUrl.startsWith('turns:')) {
+      turnUrl = `turn:${turnUrl}`;
+    }
+
     res.json({
       iceServers: [
         // STUN servers allow direct peer-to-peer connections for most NAT types
@@ -2167,12 +2172,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         // rate-limited, best-effort services and are NOT reliable for production load.
         // Configure your own dedicated TURN provider (e.g. Twilio, Metered paid tier) for reliability.
         { 
-          urls: process.env.TURN_SERVER_URL || 'turn:openrelay.metered.ca:80?transport=udp', 
+          urls: turnUrl || 'turn:openrelay.metered.ca:80?transport=udp', 
           username: process.env.TURN_SERVER_USERNAME || 'openrelayproject', 
           credential: process.env.TURN_SERVER_PASSWORD || 'openrelayproject' 
         },
         // Additional fallbacks for the public relay using TCP in case UDP is blocked
-        ...(process.env.TURN_SERVER_URL ? [] : [
+        ...(turnUrl ? [] : [
           { 
             urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
             username: 'openrelayproject', 

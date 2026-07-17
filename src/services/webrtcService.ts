@@ -1,3 +1,4 @@
+import { createPrioritizedPeerConnection } from '../hooks/useWebRTCConnection';
 import { useAppStore } from '../store';
 import { BACKEND_URL } from '../config';
 import { CallError, CallErrorDetails } from '../types';
@@ -202,12 +203,7 @@ class WebRTCService {
     }
 
     diagnosticLogger.log('webrtc', 'create_peer_connection', `Initiating RTCPeerConnection creation for peer ${peerId}. ICE servers configured count: ${this.iceServers.length}`, peerId, roomId, { iceServers: this.iceServers });
-    const pc = new RTCPeerConnection({
-      iceServers: this.iceServers,
-      rtcpMuxPolicy: 'require',
-      bundlePolicy: 'max-bundle',
-      iceTransportPolicy: 'all' // Ensure all connections (both STUN direct and TURN relayed) are fully allowed and utilized
-    });
+    const pc = createPrioritizedPeerConnection(this.iceServers, peerId, roomId, (msg) => useAppStore.getState().addConnectionLog(msg));
 
     this.pcs.set(mapKey, pc);
     this.candidatesGathered.set(mapKey, 0);

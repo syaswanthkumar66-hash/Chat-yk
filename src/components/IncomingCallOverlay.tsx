@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Icon } from './UI';
 import { useAppStore } from '../store';
@@ -22,6 +22,55 @@ export const IncomingCallOverlay = ({ incomingCall, onAccept, onDecline }: Incom
   const caller = users.find(u => u.id === incomingCall.from);
   const callerName = caller ? (caller as any).name || (caller as any).displayName : 'Unknown Caller';
   const callerAvatar = caller?.avatar || generateInitialsAvatar(incomingCall.from, callerName);
+
+  // Ringtone synthesizer
+  useEffect(() => {
+    let audioCtx: AudioContext | null = null;
+    let oscillator: OscillatorNode | null = null;
+    let gainNode: GainNode | null = null;
+    let interval: any = null;
+
+    try {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      const playRing = () => {
+        if (!audioCtx) return;
+        oscillator = audioCtx.createOscillator();
+        gainNode = audioCtx.createGain();
+        
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(440, audioCtx.currentTime);
+        oscillator.frequency.setValueAtTime(480, audioCtx.currentTime + 0.1);
+        
+        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime + 1.2);
+        gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.4);
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        oscillator.start(audioCtx.currentTime);
+        oscillator.stop(audioCtx.currentTime + 1.5);
+      };
+
+      playRing();
+      interval = setInterval(playRing, 2000);
+      
+    } catch(e) {
+      console.warn("Could not play ringtone:", e);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+      if (oscillator) {
+        try { oscillator.stop(); } catch(e) {}
+      }
+      if (audioCtx) {
+        audioCtx.close().catch(console.warn);
+      }
+    };
+  }, []);
 
   return (
     <div id="incoming-call-overlay" className="fixed inset-0 z-[300] bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center text-white">

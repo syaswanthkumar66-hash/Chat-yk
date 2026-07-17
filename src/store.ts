@@ -1255,7 +1255,7 @@ export const useAppStore = create<AppState>((set) => ({
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -1283,7 +1283,7 @@ export const useAppStore = create<AppState>((set) => ({
     const setupSocketListeners = (sock: Socket, uid: string) => {
       // 1. connect_error
       sock.off('connect_error').on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
+        console.error('Socket connection error:', error, JSON.stringify(error, Object.getOwnPropertyNames(error)));
         const appState = useAppStore.getState();
         appState.addConnectionLog(`Socket connection error: ${error.message || error}`);
         

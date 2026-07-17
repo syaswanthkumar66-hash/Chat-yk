@@ -35,8 +35,10 @@ function formatLastSeen(lastSeen?: string | null): string {
   }
 }
 
+import { WebBrowser } from './WebBrowser';
+
 export const SocialLayout = () => {
-  const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'calls' | 'profile'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'calls' | 'profile' | 'browser'>('chats');
   const [chatFilter, setChatFilter] = useState<'all' | 'individuals' | 'groups'>('all');
   const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [showScanner, setShowScanner] = useState(false);
@@ -913,6 +915,9 @@ export const SocialLayout = () => {
           {activeTab === 'profile' && (
             <ProfileView onSettingsClick={() => setShowSettings(true)} />
           )}
+          {activeTab === 'browser' && (
+            <WebBrowser onClose={() => setActiveTab('chats')} />
+          )}
         </main>
 
         {/* Bottom Nav */}
@@ -921,6 +926,7 @@ export const SocialLayout = () => {
             { id: 'chats', icon: 'chat_bubble', label: 'Chats' },
             { id: 'friends', icon: 'group', label: 'Friends' },
             { id: 'calls', icon: 'call', label: 'Calls' },
+            { id: 'browser', icon: 'language', label: 'Web' },
             { id: 'profile', icon: 'person', label: 'Me' }
           ].map(item => (
             <button
