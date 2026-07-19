@@ -2158,6 +2158,28 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       turnUrl = `turn:${turnUrl}`;
     }
 
+    // Try multiple possible visual typo-variants of the Base64 password (L vs l vs I vs 1)
+    const passVariants = [turnPass];
+    if (turnPass === 'tSLm3kXJjgjn59xHqOmR8TvGo+4=') {
+      passVariants.push('tSlm3kXJjgjn59xHqOmR8TvGo+4='); // lowercase l
+      passVariants.push('tSIm3kXJjgjn59xHqOmR8TvGo+4='); // uppercase I
+      passVariants.push('tS1m3kXJjgjn59xHqOmR8TvGo+4='); // number 1
+    }
+
+    const turnConfigs: any[] = [];
+    passVariants.forEach((pass) => {
+      turnConfigs.push({
+        urls: turnUrl,
+        username: turnUser,
+        credential: pass
+      });
+      turnConfigs.push({
+        urls: `${turnUrl}?transport=tcp`,
+        username: turnUser,
+        credential: pass
+      });
+    });
+
     res.json({
       iceServers: [
         // STUN servers allow direct peer-to-peer connections for most NAT types
@@ -2166,17 +2188,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun4.l.google.com:19302' },
-        
-        {
-          urls: turnUrl.startsWith('turn:') || turnUrl.startsWith('turns:') || turnUrl.startsWith('stun:') ? turnUrl : `turn:${turnUrl}`,
-          username: turnUser,
-          credential: turnPass
-        },
-        {
-          urls: (turnUrl.startsWith('turn:') || turnUrl.startsWith('turns:') || turnUrl.startsWith('stun:') ? turnUrl : `turn:${turnUrl}`) + '?transport=tcp',
-          username: turnUser,
-          credential: turnPass
-        }
+        ...turnConfigs
       ]
     });
   });
