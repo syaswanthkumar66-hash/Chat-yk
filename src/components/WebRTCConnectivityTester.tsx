@@ -11,19 +11,57 @@ export const WebRTCConnectivityTester = () => {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
   };
 
-  const runTest = async () => {
+  const runTest = async (mode: 'all' | 'stun' | 'turn' = 'all') => {
     setIsTesting(true);
     setLogs([]);
     setCandidates([]);
     
     try {
+      log(`Starting diagnostic test [Mode: ${mode.toUpperCase()}]...`);
       log('Fetching ICE configuration...');
       const iceServers = await webrtcService.getIceServers();
       log(`Retrieved ${iceServers.length} ICE server configs`);
       
+      let filteredServers = [...iceServers];
+      if (mode === 'stun') {
+        filteredServers = iceServers.map((server: any) => {
+          const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+          const stunUrls = urls.filter((u: string) => u.startsWith('stun:'));
+          if (stunUrls.length > 0) {
+            return { urls: stunUrls };
+          }
+          return null;
+        }).filter((s: any) => s !== null);
+        log(`[Filter] STUN servers only mode. Servers: ${filteredServers.length}`);
+      } else if (mode === 'turn') {
+        filteredServers = iceServers.map((server: any) => {
+          const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+          const turnUrls = urls.filter((u: string) => u.startsWith('turn:') || u.startsWith('turns:'));
+          if (turnUrls.length > 0) {
+            return { 
+              ...server, 
+              urls: turnUrls 
+            };
+          }
+          return null;
+        }).filter((s: any) => s !== null);
+        log(`[Filter] TURN servers only mode. Servers: ${filteredServers.length}`);
+      }
+
+      // Log configuration details for diagnostics
+      filteredServers.forEach((server: any, idx: number) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+        const isTurn = urls.some((u: string) => u.startsWith('turn:') || u.startsWith('turns:'));
+        if (isTurn) {
+          log(`[CONFIG] Server ${idx + 1} (TURN): ${urls.join(', ')} | Auth Username: '${server.username || ''}'`);
+        } else {
+          log(`[CONFIG] Server ${idx + 1} (STUN): ${urls.join(', ')}`);
+        }
+      });
+      
       const pc = new RTCPeerConnection({
-        iceServers,
-        iceTransportPolicy: 'all'
+        iceServers: filteredServers,
+        iceTransportPolicy: mode === 'turn' ? 'relay' : 'all'
       });
 
       pc.onicecandidate = (event) => {
@@ -62,7 +100,7 @@ export const WebRTCConnectivityTester = () => {
 
   return (
     <Card className="p-6 bg-slate-900 border-slate-800 border overflow-hidden">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <Icon name="network_check" className="text-primary" />
@@ -70,9 +108,29 @@ export const WebRTCConnectivityTester = () => {
           </h3>
           <p className="text-sm text-slate-400">Perform a real-time STUN/TURN gathering test to debug relay issues.</p>
         </div>
-        <Button onClick={runTest} disabled={isTesting} className="bg-primary hover:bg-primary/90 text-white font-bold rounded-xl px-4 py-2 text-sm uppercase tracking-widest">
-          {isTesting ? 'Testing...' : 'Run Diagnostics'}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button 
+            onClick={() => runTest('all')} 
+            disabled={isTesting} 
+            className="bg-primary hover:bg-primary/90 text-white font-bold rounded-xl px-4 py-2 text-xs uppercase tracking-widest disabled:opacity-50"
+          >
+            {isTesting ? 'Testing...' : 'Full Test'}
+          </Button>
+          <Button 
+            onClick={() => runTest('stun')} 
+            disabled={isTesting} 
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl px-4 py-2 text-xs uppercase tracking-widest disabled:opacity-50"
+          >
+            STUN Only
+          </Button>
+          <Button 
+            onClick={() => runTest('turn')} 
+            disabled={isTesting} 
+            className="bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl px-4 py-2 text-xs uppercase tracking-widest disabled:opacity-50"
+          >
+            TURN Only
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

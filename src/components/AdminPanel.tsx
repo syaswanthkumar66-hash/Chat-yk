@@ -499,7 +499,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
     }, 350);
   };
 
-  const runIceTest = async () => {
+  const runIceTest = async (mode: 'all' | 'stun' | 'turn' = 'all') => {
     setTestSelectedUserId('self');
     setTestType('ice_test');
     setTestStatus('running');
@@ -508,7 +508,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
     setTestSpeed(0);
     setSpeedHistory([]);
     
-    logMsg(`Initializing ICE server testing...`);
+    logMsg(`Initializing ICE server testing [Mode: ${mode.toUpperCase()}]...`);
     
     try {
       const { webrtcService } = await import('../services/webrtcService');
@@ -516,10 +516,55 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
       setTestProgress(10);
       
       const iceServers = await webrtcService.getIceServers();
-      logMsg(`Configured ICE Servers: ${iceServers.length}`);
+      logMsg(`Retrieved ${iceServers.length} ICE server configs`);
+      
+      // Filter based on selected mode
+      let filteredServers = [...iceServers];
+      if (mode === 'stun') {
+        filteredServers = iceServers.map((server: any) => {
+          const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+          const stunUrls = urls.filter((u: string) => u.startsWith('stun:'));
+          if (stunUrls.length > 0) {
+            return { urls: stunUrls };
+          }
+          return null;
+        }).filter((s: any) => s !== null);
+        logMsg(`[Filter] STUN servers only mode. Servers: ${filteredServers.length}`);
+      } else if (mode === 'turn') {
+        filteredServers = iceServers.map((server: any) => {
+          const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+          const turnUrls = urls.filter((u: string) => u.startsWith('turn:') || u.startsWith('turns:'));
+          if (turnUrls.length > 0) {
+            return { 
+              ...server, 
+              urls: turnUrls 
+            };
+          }
+          return null;
+        }).filter((s: any) => s !== null);
+        logMsg(`[Filter] TURN servers only mode. Servers: ${filteredServers.length}`);
+      } else {
+        logMsg(`[Filter] Full ICE (STUN + TURN) mode. Servers: ${filteredServers.length}`);
+      }
+      
+      // Log configuration details for diagnostics
+      filteredServers.forEach((server: any, index: number) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+        const isTurn = urls.some((u: string) => u.startsWith('turn:') || u.startsWith('turns:'));
+        if (isTurn) {
+          logMsg(`[TURN CONFIG] Server ${index + 1}: ${urls.join(', ')}`);
+          logMsg(`[TURN CONFIG] Username: '${server.username || ''}' | Password: ${server.credential ? '***' : 'none'}`);
+        } else {
+          logMsg(`[STUN CONFIG] Server ${index + 1}: ${urls.join(', ')}`);
+        }
+      });
+      
       setTestProgress(30);
 
-      const pc = new RTCPeerConnection({ iceServers });
+      const pc = new RTCPeerConnection({ 
+        iceServers: filteredServers,
+        iceTransportPolicy: mode === 'turn' ? 'relay' : 'all'
+      });
       
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -3666,13 +3711,31 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                         Verify STUN NAT traversal and TURN relay connectivity by initiating ICE gathering phase.
                       </p>
                     </div>
-                    <Button 
-                      disabled={testStatus === 'running'}
-                      onClick={runIceTest}
-                      className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[9px] font-black uppercase tracking-widest border-none disabled:opacity-50"
-                    >
-                      Test ICE Servers
-                    </Button>
+                    <div className="space-y-2 mt-4">
+                      <Button 
+                        disabled={testStatus === 'running'}
+                        onClick={() => runIceTest('all')}
+                        className="w-full h-9 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[8px] font-black uppercase tracking-widest border-none disabled:opacity-50"
+                      >
+                        Full Test (STUN + TURN)
+                      </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button 
+                          disabled={testStatus === 'running'}
+                          onClick={() => runIceTest('stun')}
+                          className="w-full h-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[8px] font-black uppercase tracking-widest border-none disabled:opacity-50"
+                        >
+                          STUN Only
+                        </Button>
+                        <Button 
+                          disabled={testStatus === 'running'}
+                          onClick={() => runIceTest('turn')}
+                          className="w-full h-8 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-[8px] font-black uppercase tracking-widest border-none disabled:opacity-50"
+                        >
+                          TURN Only
+                        </Button>
+                      </div>
+                    </div>
                   </Card>
                 </div>
               </div>
