@@ -10,6 +10,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { Icon, cn } from './components/UI';
 import { NotificationPrompt } from './components/NotificationPrompt';
 import { QuickProfileSwitcher } from './components/QuickProfileSwitcher';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests, setScopedUserInstance } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -503,6 +504,17 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    const handleBeforeUnload = () => {
+      import('./store').then(({ useAppStore }) => {
+        const socket = useAppStore.getState().socket;
+        if (socket && socket.connected) {
+          socket.emit('explicit_disconnect');
+          socket.disconnect();
+        }
+      });
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     const handlePageHide = () => {
       if (user?.id) {
         import('./store').then(({ useAppStore }) => {
@@ -523,6 +535,7 @@ export default function App() {
       window.removeEventListener('focus', handleRefocusSync);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isLoggedIn, user?.id]);
 
@@ -1397,6 +1410,7 @@ export default function App() {
       </div>
 
       {isLoggedIn && <NotificationPrompt />}
+      <PWAInstallPrompt />
       {isLoggedIn && onlineDevices.length > 1 && (backendSyncStatus === 'mismatch' || backendSyncStatus === 'syncing' || backendSyncStatus === 'checking') && <QuickProfileSwitcher />}
     </div>
   );
