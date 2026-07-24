@@ -25,11 +25,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
     console.error("Uncaught error caught by ErrorBoundary:", error, errorInfo);
     
     // Check if it is a Google Translate / DOM manipulation error
-    const isDOMError = error.message.includes('removeChild') || 
-                       error.message.includes('insertBefore') || 
-                       error.message.includes('Node') ||
-                       error.message.includes('translate') ||
-                       error.message.includes('child');
+    const isDOMError = error.message.includes('NotFoundError') || 
+                       error.message.includes('Failed to execute \'removeChild\'') || 
+                       error.message.includes('Failed to execute \'insertBefore\'') ||
+                       error.message.includes('The node to be removed is not a child of this node');
                        
     if (isDOMError) {
       console.warn("Detected potential Google Translate / DOM corruption error. Attempting auto-recovery in 500ms...");
