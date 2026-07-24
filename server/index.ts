@@ -858,8 +858,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
-    socket.on("get_online_users", () => {
+    socket.on("get_online_users", async () => {
       socket.emit("online_users", getOnlineUsersPayload());
+      
+      // Send all users data
+      if (db) {
+        try {
+          const snapshot = await db.collection('users').get();
+          const allUsers = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+          socket.emit("all_users_data", allUsers);
+        } catch (e) {
+          console.error("Failed to fetch all users:", e);
+        }
+      }
     });
 
     socket.on("register", async (data) => {

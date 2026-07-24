@@ -42,6 +42,9 @@ function formatLastSeen(lastSeen?: string | null): string {
     const date = new Date(lastSeen);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 5000) {
+       return 'Just now';
+    }
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMins / 60);
 

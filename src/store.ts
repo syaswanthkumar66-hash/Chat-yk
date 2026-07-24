@@ -1483,7 +1483,28 @@ export const useAppStore = create<AppState>((set) => ({
         console.log('Connected to server');
         lastSuccessfulWakeUpTime = Date.now();
         useAppStore.getState().addConnectionLog('Successfully connected to backend server!');
-        set({ wssStatus: 'connected', isWssConnected: true, wssMessage: 'Connected & Secure' });
+        set((state) => {
+          const newState = { wssStatus: 'connected', isWssConnected: true, wssMessage: 'Connected & Secure' } as any;
+          if (uid) {
+            const nextOnline = [...(state.onlineUserIds || [])];
+            if (!nextOnline.includes(uid)) nextOnline.push(uid);
+            newState.onlineUserIds = nextOnline;
+            newState.users = state.users.map((u: any) => {
+              if (u.id === uid) {
+                 return { ...u, isOnline: true, lastSeen: undefined };
+              }
+              return u;
+            });
+            newState.chats = state.chats.map((c: any) => ({
+              ...c,
+              participants: c.participants.map((p: any) => {
+                if (p.id === uid) return { ...p, isOnline: true, lastSeen: undefined };
+                return p;
+              })
+            }));
+          }
+          return newState;
+        });
         startHeartbeat();
         const { cryptoService } = await import('./services/cryptoService');
         const publicKey = await cryptoService.getMyPublicKeyBase64(uid);
@@ -1641,6 +1662,26 @@ export const useAppStore = create<AppState>((set) => ({
             users: updatedUsers,
             chats: updatedChats
           };
+        });
+      });
+
+      // 5a. all_users_data
+      sock.off('all_users_data').on('all_users_data', (allUsers: any[]) => {
+        set((state) => {
+          const onlineUserIds = state.onlineUserIds || [];
+          const mergedUsers = allUsers.map((u: any) => {
+            const isOnline = onlineUserIds.includes(u.id);
+            return {
+              ...u,
+              isOnline
+            };
+          });
+          
+          if (state.user?.id) {
+            safeLocalStorageSetItem(`proto_users_${state.user.id}`, JSON.stringify(mergedUsers));
+          }
+          
+          return { users: mergedUsers };
         });
       });
 
