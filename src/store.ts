@@ -1036,6 +1036,7 @@ export const useAppStore = create<AppState>((set) => ({
         const publicKey = await cryptoService.getMyPublicKeyBase64(userId).catch(() => '');
         const deviceId = getOrCreateDeviceId();
         socket.emit('register', { userId, publicKey, deviceId });
+        socket.emit('get_online_users');
 
         // 2. Re-join group rooms
         state.chats.forEach(chat => {

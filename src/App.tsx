@@ -1038,7 +1038,7 @@ export default function App() {
 
           // 2. Prevent UI & audio flood of historical/past notifications on subsequent loads
           const notifTime = new Date(notif.createdAt).getTime();
-          if (isNaN(notifTime) || notifTime < syncStartTime - 5000) {
+          if (isNaN(notifTime) || notifTime < Date.now() - 15000) {
             console.log(`Processing historical notification ${notif.id} silently.`);
             continue;
           }
