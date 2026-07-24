@@ -100,7 +100,12 @@ export const FileShareLayout = () => {
             <Icon name="grid_view" />
           </button>
           <div>
-            <h1 className="text-2xl font-black tracking-tighter text-slate-900 uppercase italic leading-none">{activeTab}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-black tracking-tighter text-slate-900 uppercase italic leading-none">{activeTab}</h1>
+              <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-[8px] font-black uppercase tracking-widest hidden sm:inline-block">
+                FILE ENGINE V2
+              </span>
+            </div>
             <div className="flex items-center gap-3 mt-1.5">
               <button 
                 onClick={() => {

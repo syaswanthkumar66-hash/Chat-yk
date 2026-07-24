@@ -316,7 +316,12 @@ export const SocialLayout = () => {
                 <Icon name="grid_view" className="text-lg sm:text-xl" />
               </motion.button>
               <div className="flex flex-col min-w-0">
-                <h1 className="text-lg sm:text-2xl font-black tracking-tighter text-slate-900 uppercase italic leading-none truncate">{activeTab}</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg sm:text-2xl font-black tracking-tighter text-slate-900 uppercase italic leading-none truncate">{activeTab}</h1>
+                  <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 text-[8px] font-black uppercase tracking-widest hidden sm:inline-block">
+                    V2 ENGINE
+                  </span>
+                </div>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   {shouldShowSyncUI && (
                     <>

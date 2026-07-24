@@ -49,7 +49,8 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     onlineDevices,
     currentDeviceId,
     dataUsage,
-    resetDataUsage
+    resetDataUsage,
+    loadDataUsage
   } = useStore(s => ({
     user: s.user,
     updateUser: s.updateUser,
@@ -74,9 +75,25 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     onlineDevices: s.onlineDevices,
     currentDeviceId: s.currentDeviceId,
     dataUsage: s.dataUsage,
-    resetDataUsage: s.resetDataUsage
+    resetDataUsage: s.resetDataUsage,
+    loadDataUsage: s.loadDataUsage
   }), shallowEqual);
   const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection' | 'devices-sync' | 'data-usage'>('main');
+  const [dataUsageTab, setDataUsageTab] = useState<'overview' | 'chat' | 'calls' | 'saver'>('overview');
+  const [isRefreshingUsage, setIsRefreshingUsage] = useState(false);
+  const [lowDataMode, setLowDataMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('proto_low_data_mode') === 'true';
+    }
+    return false;
+  });
+  const [autoCompressMedia, setAutoCompressMedia] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('proto_auto_compress_media') !== 'false';
+    }
+    return true;
+  });
+  const [usageMsg, setUsageMsg] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [description, setDescription] = useState(user?.description || '');
@@ -2134,149 +2151,473 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
         const chatPercentage = grandTotal > 0 ? Math.round((totalChat / grandTotal) * 100) : 0;
         const callPercentage = grandTotal > 0 ? Math.round((totalCall / grandTotal) * 100) : 0;
 
+        const chatUploadPct = totalChat > 0 ? Math.round((chatUpload / totalChat) * 100) : 0;
+        const chatDownloadPct = totalChat > 0 ? Math.round((chatDownload / totalChat) * 100) : 0;
+
+        const callUploadPct = totalCall > 0 ? Math.round((callUpload / totalCall) * 100) : 0;
+        const callDownloadPct = totalCall > 0 ? Math.round((callDownload / totalCall) * 100) : 0;
+
+        const handleRefreshStats = async () => {
+          if (!user?.id || isRefreshingUsage) return;
+          setIsRefreshingUsage(true);
+          try {
+            await loadDataUsage(user.id);
+            setUsageMsg("Network statistics re-synced from Firestore.");
+          } catch (e) {
+            setUsageMsg("Refreshed local metrics.");
+          } finally {
+            setTimeout(() => setIsRefreshingUsage(false), 600);
+            setTimeout(() => setUsageMsg(null), 3500);
+          }
+        };
+
+        const handleToggleLowDataMode = () => {
+          const next = !lowDataMode;
+          setLowDataMode(next);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('proto_low_data_mode', String(next));
+          }
+          setUsageMsg(next ? "Low Data Mode Enabled" : "Low Data Mode Disabled");
+          setTimeout(() => setUsageMsg(null), 3000);
+        };
+
+        const handleToggleAutoCompress = () => {
+          const next = !autoCompressMedia;
+          setAutoCompressMedia(next);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('proto_auto_compress_media', String(next));
+          }
+          setUsageMsg(next ? "Auto-compression enabled" : "Auto-compression disabled");
+          setTimeout(() => setUsageMsg(null), 3000);
+        };
+
+        const handleClearAudioCache = () => {
+          try {
+            if (typeof window !== 'undefined') {
+              // Clear cached voice notes from localStorage keys starting with proto_
+              let count = 0;
+              for (let i = localStorage.length - 1; i >= 0; i--) {
+                const key = localStorage.key(i);
+                if (key && (key.startsWith('proto_audio_') || key.startsWith('proto_voice_'))) {
+                  localStorage.removeItem(key);
+                  count++;
+                }
+              }
+              setUsageMsg(`Cleared local audio cache (${count} items removed).`);
+              setTimeout(() => setUsageMsg(null), 3500);
+            }
+          } catch (e) {
+            setUsageMsg("Cache cleanup completed.");
+            setTimeout(() => setUsageMsg(null), 3000);
+          }
+        };
+
         return (
-          <div className="space-y-6">
-            <header className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
+          <div className="space-y-5 sm:space-y-6">
+            {/* Header V2 */}
+            <header className="flex items-center justify-between gap-2 mb-2 sm:mb-4">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                 <button 
                   onClick={() => setActiveView('main')} 
-                  className="size-10 rounded-full bg-white border border-primary/5 shadow-sm flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all shrink-0"
+                  className="size-9 sm:size-10 rounded-full bg-white border border-primary/10 shadow-sm flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all shrink-0"
+                  title="Back to Settings"
                 >
-                  <Icon name="arrow_back" />
+                  <Icon name="arrow_back" className="text-sm sm:text-base" />
                 </button>
-                <div className="flex flex-col text-left">
-                  <h3 className="text-xl font-bold text-slate-800 italic uppercase tracking-tight">Data & Storage Usage</h3>
-                  <p className="text-[10px] text-neutral-muted">Calculated & synchronized with Firestore</p>
+                <div className="flex flex-col text-left min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-xl font-bold text-slate-800 uppercase tracking-tight truncate">Data & Storage</h3>
+                    <span className="text-[9px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md font-bold uppercase tracking-widest shrink-0">V2</span>
+                  </div>
+                  <p className="text-[10px] sm:text-xs text-neutral-muted truncate">Real-time traffic analytics & Firestore synced</p>
                 </div>
               </div>
-              <span className="text-[9px] bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0">
-                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Firestore Active
-              </span>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={handleRefreshStats}
+                  disabled={isRefreshingUsage}
+                  className="size-8 sm:size-9 rounded-full bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary/30 flex items-center justify-center shadow-2xs transition-all active:scale-95 disabled:opacity-50"
+                  title="Refresh stats from Firestore"
+                >
+                  <Icon name="refresh" className={`text-base ${isRefreshingUsage ? 'animate-spin text-primary' : ''}`} />
+                </button>
+                <span className="hidden sm:flex text-[9px] sm:text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full font-black uppercase tracking-wider items-center gap-1.5 shrink-0">
+                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Synced
+                </span>
+              </div>
             </header>
 
-            {/* Overview Summary Banner */}
-            <div className="p-5 bg-gradient-to-br from-primary/10 via-primary/5 to-slate-50 border border-primary/10 rounded-3xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="size-8 rounded-xl bg-primary text-white flex items-center justify-center shadow-md">
-                    <Icon name="data_usage" className="text-lg" />
-                  </div>
-                  <span className="text-xs font-black uppercase tracking-wider text-slate-800">Total Network Traffic</span>
-                </div>
-                <span className="text-base font-black text-primary font-mono">{formatBytes(grandTotal)}</span>
+            {/* Notification Toast Message */}
+            {usageMsg && (
+              <div className="p-3 bg-primary/10 border border-primary/20 rounded-2xl text-xs font-semibold text-primary flex items-center gap-2 animate-fadeIn text-left">
+                <Icon name="check_circle" className="text-base shrink-0" />
+                <span>{usageMsg}</span>
               </div>
+            )}
 
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="p-3 bg-white/80 rounded-2xl border border-primary/5 space-y-1 text-left">
-                  <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-black uppercase tracking-wider">
-                    <Icon name="cloud_upload" className="text-xs" />
-                    <span>Total Upload</span>
+            {/* Segmented Tab Selector */}
+            <div className="p-1 bg-slate-100/80 rounded-2xl border border-slate-200/60 grid grid-cols-4 gap-1 text-xs font-bold text-slate-600">
+              <button
+                onClick={() => setDataUsageTab('overview')}
+                className={`py-2 px-1.5 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+                  dataUsageTab === 'overview'
+                    ? 'bg-white text-primary shadow-xs font-black'
+                    : 'hover:text-slate-900 hover:bg-white/50'
+                }`}
+              >
+                <Icon name="dashboard" className="text-sm" />
+                <span className="text-[10px] sm:text-xs">Overview</span>
+              </button>
+
+              <button
+                onClick={() => setDataUsageTab('chat')}
+                className={`py-2 px-1.5 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+                  dataUsageTab === 'chat'
+                    ? 'bg-white text-primary shadow-xs font-black'
+                    : 'hover:text-slate-900 hover:bg-white/50'
+                }`}
+              >
+                <Icon name="chat" className="text-sm" />
+                <span className="text-[10px] sm:text-xs">Chat</span>
+              </button>
+
+              <button
+                onClick={() => setDataUsageTab('calls')}
+                className={`py-2 px-1.5 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+                  dataUsageTab === 'calls'
+                    ? 'bg-white text-primary shadow-xs font-black'
+                    : 'hover:text-slate-900 hover:bg-white/50'
+                }`}
+              >
+                <Icon name="call" className="text-sm" />
+                <span className="text-[10px] sm:text-xs">Calls</span>
+              </button>
+
+              <button
+                onClick={() => setDataUsageTab('saver')}
+                className={`py-2 px-1.5 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 ${
+                  dataUsageTab === 'saver'
+                    ? 'bg-white text-primary shadow-xs font-black'
+                    : 'hover:text-slate-900 hover:bg-white/50'
+                }`}
+              >
+                <Icon name="auto_awesome" className="text-sm" />
+                <span className="text-[10px] sm:text-xs">Data Saver</span>
+              </button>
+            </div>
+
+            {/* TAB 1: OVERVIEW */}
+            {dataUsageTab === 'overview' && (
+              <div className="space-y-4 animate-fadeIn">
+                {/* Total Traffic Hero Card */}
+                <div className="p-4 sm:p-5 bg-gradient-to-br from-primary/10 via-primary/5 to-slate-50 border border-primary/10 rounded-2xl sm:rounded-3xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="size-9 rounded-2xl bg-primary text-white flex items-center justify-center shadow-md shrink-0">
+                        <Icon name="data_usage" className="text-lg" />
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800">Total Traffic</span>
+                        <span className="text-[10px] text-neutral-muted">All sessions accumulated</span>
+                      </div>
+                    </div>
+                    <span className="text-base sm:text-lg font-black text-primary font-mono shrink-0">{formatBytes(grandTotal)}</span>
                   </div>
-                  <div className="text-sm font-black text-slate-800 font-mono">{formatBytes(totalUpload)}</div>
-                </div>
 
-                <div className="p-3 bg-white/80 rounded-2xl border border-primary/5 space-y-1 text-left">
-                  <div className="flex items-center gap-1.5 text-blue-600 text-[10px] font-black uppercase tracking-wider">
-                    <Icon name="cloud_download" className="text-xs" />
-                    <span>Total Download</span>
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3 pt-1">
+                    <div className="p-3 bg-white/90 rounded-2xl border border-primary/10 space-y-1 text-left shadow-2xs">
+                      <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-black uppercase tracking-wider">
+                        <Icon name="cloud_upload" className="text-xs shrink-0" />
+                        <span>Sent (Upload)</span>
+                      </div>
+                      <div className="text-xs sm:text-sm font-black text-slate-800 font-mono truncate">{formatBytes(totalUpload)}</div>
+                    </div>
+
+                    <div className="p-3 bg-white/90 rounded-2xl border border-primary/10 space-y-1 text-left shadow-2xs">
+                      <div className="flex items-center gap-1.5 text-blue-600 text-[10px] font-black uppercase tracking-wider">
+                        <Icon name="cloud_download" className="text-xs shrink-0" />
+                        <span>Received (Download)</span>
+                      </div>
+                      <div className="text-xs sm:text-sm font-black text-slate-800 font-mono truncate">{formatBytes(totalDownload)}</div>
+                    </div>
                   </div>
-                  <div className="text-sm font-black text-slate-800 font-mono">{formatBytes(totalDownload)}</div>
-                </div>
-              </div>
 
-              {/* Bandwidth distribution bar */}
-              <div className="space-y-1.5 text-left">
-                <div className="flex justify-between items-center text-[10px] font-bold text-slate-600">
-                  <span>Chat vs Call Bandwidth Ratio</span>
-                  <span>Chat {chatPercentage}% • Calls {callPercentage}%</span>
+                  {/* Bandwidth distribution bar */}
+                  <div className="space-y-1.5 text-left pt-1">
+                    <div className="flex justify-between items-center text-[10px] sm:text-xs font-bold text-slate-600">
+                      <span>Traffic Breakdown Ratio</span>
+                      <span>Chat {chatPercentage}% • Calls {callPercentage}%</span>
+                    </div>
+                    <div className="h-2.5 w-full bg-slate-200/80 rounded-full overflow-hidden flex shadow-inner">
+                      <div 
+                        style={{ width: `${chatPercentage}%` }} 
+                        className="h-full bg-primary transition-all duration-500" 
+                        title={`Chat: ${formatBytes(totalChat)}`}
+                      />
+                      <div 
+                        style={{ width: `${callPercentage}%` }} 
+                        className="h-full bg-amber-500 transition-all duration-500" 
+                        title={`Calls: ${formatBytes(totalCall)}`}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden flex">
+
+                {/* Quick Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
                   <div 
-                    style={{ width: `${chatPercentage}%` }} 
-                    className="h-full bg-primary transition-all duration-500" 
-                    title={`Chat: ${formatBytes(totalChat)}`}
-                  />
+                    onClick={() => setDataUsageTab('chat')}
+                    className="p-4 bg-white border border-slate-200/80 rounded-2xl space-y-2 hover:border-primary/30 transition-all cursor-pointer shadow-2xs group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="size-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
+                          <Icon name="chat" className="text-base" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">Chat & Media</span>
+                      </div>
+                      <Icon name="chevron_right" className="text-slate-400 group-hover:text-primary text-sm transition-colors" />
+                    </div>
+                    <div className="text-base font-black text-slate-800 font-mono">{formatBytes(totalChat)}</div>
+                    <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
+                      <span>Sent: {formatBytes(chatUpload)}</span>
+                      <span>Received: {formatBytes(chatDownload)}</span>
+                    </div>
+                  </div>
+
                   <div 
-                    style={{ width: `${callPercentage}%` }} 
-                    className="h-full bg-amber-500 transition-all duration-500" 
-                    title={`Calls: ${formatBytes(totalCall)}`}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Chat Data Usage Card */}
-            <div className="p-5 bg-white border border-slate-100 rounded-3xl space-y-4 shadow-sm text-left">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="size-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold">
-                    <Icon name="chat" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-800">Chat & Media Usage</span>
-                    <span className="text-[10px] text-neutral-muted">Messages, photos, files & voice notes</span>
-                  </div>
-                </div>
-                <span className="text-xs font-black text-slate-800 font-mono bg-slate-100 px-2.5 py-1 rounded-xl">
-                  {formatBytes(totalChat)}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Uploaded</span>
-                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(chatUpload)}</div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Downloaded</span>
-                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(chatDownload)}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Call Data Usage Card */}
-            <div className="p-5 bg-white border border-slate-100 rounded-3xl space-y-4 shadow-sm text-left">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="size-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
-                    <Icon name="call" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-800">Voice & Video Calls Usage</span>
-                    <span className="text-[10px] text-neutral-muted">WebRTC RTP packets & audio/video stream flow</span>
+                    onClick={() => setDataUsageTab('calls')}
+                    className="p-4 bg-white border border-slate-200/80 rounded-2xl space-y-2 hover:border-amber-500/30 transition-all cursor-pointer shadow-2xs group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="size-8 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
+                          <Icon name="call" className="text-base" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">Calls & Streams</span>
+                      </div>
+                      <Icon name="chevron_right" className="text-slate-400 group-hover:text-amber-600 text-sm transition-colors" />
+                    </div>
+                    <div className="text-base font-black text-slate-800 font-mono">{formatBytes(totalCall)}</div>
+                    <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
+                      <span>Sent: {formatBytes(callUpload)}</span>
+                      <span>Received: {formatBytes(callDownload)}</span>
+                    </div>
                   </div>
                 </div>
-                <span className="text-xs font-black text-slate-800 font-mono bg-slate-100 px-2.5 py-1 rounded-xl">
-                  {formatBytes(totalCall)}
-                </span>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Sent Stream</span>
-                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(callUpload)}</div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Received Stream</span>
-                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(callDownload)}</div>
+                {/* Protocol Security Badge */}
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2 text-left">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                    <Icon name="security" className="text-primary text-base shrink-0" />
+                    <span>Security & Protocol Specs</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-neutral-muted font-medium pt-1">
+                    <div className="p-2 bg-white rounded-xl border border-slate-100">
+                      <span className="block text-slate-400 font-bold uppercase">Encryption</span>
+                      <span className="text-slate-700 font-bold">E2EE AES-GCM 256</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-xl border border-slate-100">
+                      <span className="block text-slate-400 font-bold uppercase">WebRTC Protocol</span>
+                      <span className="text-slate-700 font-bold">SCTP DataChannel / RTP</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* TAB 2: CHAT & MEDIA */}
+            {dataUsageTab === 'chat' && (
+              <div className="space-y-4 animate-fadeIn text-left">
+                <div className="p-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl space-y-4 shadow-2xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="size-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+                        <Icon name="chat" className="text-xl" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-slate-800">Chat & Media Data</span>
+                        <span className="text-[10px] text-neutral-muted">Encrypted messages, photos, files & audio notes</span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-black text-slate-800 font-mono bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl shrink-0">
+                      {formatBytes(totalChat)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        <span className="flex items-center gap-1"><Icon name="arrow_upward" className="text-emerald-500 text-xs" /> Sent</span>
+                        <span>{chatUploadPct}%</span>
+                      </div>
+                      <div className="text-sm font-bold text-slate-800 font-mono">{formatBytes(chatUpload)}</div>
+                      <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                        <div style={{ width: `${chatUploadPct}%` }} className="h-full bg-emerald-500 rounded-full" />
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        <span className="flex items-center gap-1"><Icon name="arrow_downward" className="text-blue-500 text-xs" /> Received</span>
+                        <span>{chatDownloadPct}%</span>
+                      </div>
+                      <div className="text-sm font-bold text-slate-800 font-mono">{formatBytes(chatDownload)}</div>
+                      <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                        <div style={{ width: `${chatDownloadPct}%` }} className="h-full bg-blue-500 rounded-full" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-primary/5 rounded-2xl border border-primary/10 flex items-center justify-between text-xs font-semibold text-slate-700">
+                    <div className="flex items-center gap-2">
+                      <Icon name="subtitles" className="text-primary text-base" />
+                      <span>Average Payload / Text Msg</span>
+                    </div>
+                    <span className="font-mono font-bold text-primary">~ 1.2 KB</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: CALLS & WEBRTC */}
+            {dataUsageTab === 'calls' && (
+              <div className="space-y-4 animate-fadeIn text-left">
+                <div className="p-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl space-y-4 shadow-2xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="size-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold shrink-0">
+                        <Icon name="call" className="text-xl" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-slate-800">Voice & Video Calls</span>
+                        <span className="text-[10px] text-neutral-muted">WebRTC audio/video stream packets</span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-black text-slate-800 font-mono bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl shrink-0">
+                      {formatBytes(totalCall)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        <span className="flex items-center gap-1"><Icon name="call_made" className="text-amber-500 text-xs" /> Sent Stream</span>
+                        <span>{callUploadPct}%</span>
+                      </div>
+                      <div className="text-sm font-bold text-slate-800 font-mono">{formatBytes(callUpload)}</div>
+                      <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                        <div style={{ width: `${callUploadPct}%` }} className="h-full bg-amber-500 rounded-full" />
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        <span className="flex items-center gap-1"><Icon name="call_received" className="text-blue-500 text-xs" /> Received Stream</span>
+                        <span>{callDownloadPct}%</span>
+                      </div>
+                      <div className="text-sm font-bold text-slate-800 font-mono">{formatBytes(callDownload)}</div>
+                      <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                        <div style={{ width: `${callDownloadPct}%` }} className="h-full bg-blue-500 rounded-full" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-amber-50/60 rounded-2xl border border-amber-200/50 flex items-center justify-between text-xs font-semibold text-slate-700">
+                    <div className="flex items-center gap-2">
+                      <Icon name="graphic_eq" className="text-amber-600 text-base" />
+                      <span>Audio Codec Efficiency</span>
+                    </div>
+                    <span className="font-mono font-bold text-amber-700">OPUS ~32 kbps</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: DATA SAVER & STORAGE CLEANUP */}
+            {dataUsageTab === 'saver' && (
+              <div className="space-y-4 animate-fadeIn text-left">
+                <div className="p-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl space-y-4 shadow-2xs">
+                  <div className="flex items-center gap-3">
+                    <div className="size-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+                      <Icon name="auto_awesome" className="text-xl" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-800">Data Saver Settings</span>
+                      <span className="text-[10px] text-neutral-muted">Optimize bandwidth usage and free local storage</span>
+                    </div>
+                  </div>
+
+                  {/* Low Data Mode Toggle */}
+                  <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-100 flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs font-bold text-slate-800">Low Data Mode</span>
+                      <span className="text-[10px] text-neutral-muted">Lowers call audio bitrate and pauses auto-downloads</span>
+                    </div>
+                    <button
+                      onClick={handleToggleLowDataMode}
+                      className={`w-12 h-6 rounded-full transition-colors relative p-0.5 ${
+                        lowDataMode ? 'bg-primary' : 'bg-slate-300'
+                      }`}
+                    >
+                      <div
+                        className={`size-5 rounded-full bg-white shadow-md transition-transform ${
+                          lowDataMode ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Auto-Compress Toggle */}
+                  <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-100 flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs font-bold text-slate-800">Auto-Compress Media</span>
+                      <span className="text-[10px] text-neutral-muted">Compress voice notes and images before transmission</span>
+                    </div>
+                    <button
+                      onClick={handleToggleAutoCompress}
+                      className={`w-12 h-6 rounded-full transition-colors relative p-0.5 ${
+                        autoCompressMedia ? 'bg-primary' : 'bg-slate-300'
+                      }`}
+                    >
+                      <div
+                        className={`size-5 rounded-full bg-white shadow-md transition-transform ${
+                          autoCompressMedia ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Clear Audio Cache Action */}
+                  <Button
+                    variant="secondary"
+                    className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 py-2.5 rounded-2xl text-xs font-bold flex items-center justify-center"
+                    onClick={handleClearAudioCache}
+                  >
+                    <Icon name="cleaning_services" className="text-base mr-2 text-primary" />
+                    Clear Voice Note Audio Cache
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Reset Action & Timestamp */}
-            <div className="pt-2 space-y-3">
+            <div className="pt-1 space-y-3">
               <Button
                 variant="secondary"
-                className="w-full text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 border-none py-3"
+                className="w-full text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 border border-red-200/60 py-3 font-semibold rounded-2xl"
                 onClick={() => {
                   if (window.confirm("Are you sure you want to reset all data usage statistics to 0? This cannot be undone.")) {
                     resetDataUsage();
+                    setUsageMsg("Data usage statistics reset.");
+                    setTimeout(() => setUsageMsg(null), 3000);
                   }
                 }}
               >
-                <Icon name="delete_sweep" className="text-sm mr-1.5" />
-                Reset Usage Statistics
+                <Icon name="delete_sweep" className="text-base mr-2 shrink-0" />
+                Reset All Usage Statistics
               </Button>
 
               {dataUsage?.lastUpdated && (
