@@ -53,6 +53,7 @@ class WebRTCService {
   private dataChannels: Map<string, RTCDataChannel> = new Map();
   private isIceServersFetched = false;
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+  private pendingLocalCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
   
   private pendingSignals: { from: string; signal: any; roomId: string }[] = [];
   private statsIntervals: Map<string, any> = new Map();
@@ -130,6 +131,8 @@ class WebRTCService {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             
+            this.flushPendingLocalCandidates(mapKey, peerId, roomId);
+
             const socket = useAppStore.getState().socket;
             if (socket) {
               socket.emit('sfu_signal', {
@@ -319,8 +322,17 @@ class WebRTCService {
       }
 
       if (state === 'disconnected') {
-        diagnosticLogger.log('error', 'ice_disconnected', `ICE Connection disconnected. Waiting 5 seconds for WebRTC auto-recovery/re-gathering...`, peerId, roomId);
+        diagnosticLogger.log('error', 'ice_disconnected', `ICE Connection disconnected. Waiting 2 seconds before attempting re-ice / ICE Restart...`, peerId, roomId);
         this.dispatchCallError(CallError.CONNECTION_DISCONNECTED, peerId);
+        
+        setTimeout(() => {
+          const currentPc = this.pcs.get(mapKey);
+          if (currentPc && currentPc.iceConnectionState === 'disconnected') {
+            diagnosticLogger.log('error', 'ice_recovery_trigger', `ICE still disconnected after 2s. Triggering re-ice / ICE Restart.`, peerId, roomId);
+            this.handleIceFailure(peerId, roomId);
+          }
+        }, 2000);
+
         setTimeout(() => {
           const currentPc = this.pcs.get(mapKey);
           if (currentPc && (currentPc.iceConnectionState === 'disconnected' || currentPc.iceConnectionState === 'failed')) {
@@ -328,7 +340,7 @@ class WebRTCService {
             this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
             this.removePeer(peerId, roomId);
           }
-        }, 5000);
+        }, 15000);
       }
     };
 
@@ -395,7 +407,11 @@ class WebRTCService {
             });
           }
         } else {
-          diagnosticLogger.log('webrtc', 'ice_candidate_held', `ICE candidate held back - setLocalDescription not called yet`, peerId, roomId);
+          diagnosticLogger.log('webrtc', 'ice_candidate_held', `ICE candidate held back - setLocalDescription not called yet. Queuing it...`, peerId, roomId);
+          if (!this.pendingLocalCandidates.has(mapKey)) {
+            this.pendingLocalCandidates.set(mapKey, []);
+          }
+          this.pendingLocalCandidates.get(mapKey)!.push(event.candidate);
         }
       }
     };
@@ -925,6 +941,28 @@ class WebRTCService {
     return results;
   }
 
+  private flushPendingLocalCandidates(mapKey: string, peerId: string, roomId: string) {
+    const candidates = this.pendingLocalCandidates.get(mapKey);
+    if (candidates && candidates.length > 0) {
+      diagnosticLogger.log('webrtc', 'flush_local_candidates', `Flushing ${candidates.length} queued local ICE candidates to peer`, peerId, roomId);
+      const socket = useAppStore.getState().socket;
+      if (socket) {
+        for (const candidate of candidates) {
+          socket.emit('sfu_signal', {
+            roomId,
+            from: useAppStore.getState().user?.id,
+            signal: {
+              type: 'ice_candidate',
+              candidate: candidate,
+              to: peerId
+            }
+          });
+        }
+      }
+      this.pendingLocalCandidates.delete(mapKey);
+    }
+  }
+
   private attachLocalTracks(pc: RTCPeerConnection) {
     const isLocalStreamNull = this.localStream === null;
     const tracksToAttempt = this.localStream ? this.localStream.getTracks() : [];
@@ -1024,6 +1062,8 @@ class WebRTCService {
 
       const offer = await pc.createOffer({ iceRestart: true });
       await pc.setLocalDescription(offer);
+
+      this.flushPendingLocalCandidates(mapKey, peerId, roomId);
 
       const socket = useAppStore.getState().socket;
       if (socket) {
@@ -1325,6 +1365,8 @@ class WebRTCService {
           diagnosticLogger.log('webrtc', 'set_local_description', `Setting local description with newly created SDP Offer`, peerId, roomId);
           await pc.setLocalDescription(offer);
           
+          this.flushPendingLocalCandidates(this.getMapKey(peerId, roomId), peerId, roomId);
+
           const socket = useAppStore.getState().socket;
           if (socket) {
             diagnosticLogger.log('socket', 'send_offer', `Transmitting local SDP Offer to peer ${peerId} via Socket.io`, peerId, roomId);
@@ -1366,6 +1408,8 @@ class WebRTCService {
           
           diagnosticLogger.log('webrtc', 'set_local_description_answer', `Setting local description with newly created SDP Answer`, from, roomId);
           await pc.setLocalDescription(answer);
+
+          this.flushPendingLocalCandidates(this.getMapKey(from, roomId), from, roomId);
 
           const socket = useAppStore.getState().socket;
           if (socket) {

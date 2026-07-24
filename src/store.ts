@@ -1391,13 +1391,11 @@ export const useAppStore = create<AppState>((set) => ({
           (window as any)._heartbeatWorker.terminate();
         }
         const workerCode = `
-          let timer1, timer15;
+          let timer15;
           self.onmessage = function(e) {
             if (e.data === 'start') {
-              timer1 = setInterval(() => self.postMessage('ping_1s'), 1000);
               timer15 = setInterval(() => self.postMessage('ping_15s'), 15000);
             } else if (e.data === 'stop') {
-              clearInterval(timer1);
               clearInterval(timer15);
             }
           };
@@ -1407,12 +1405,7 @@ export const useAppStore = create<AppState>((set) => ({
         (window as any)._heartbeatWorker = worker;
         
         worker.onmessage = (e) => {
-          if (e.data === 'ping_1s') {
-            const sock = useAppStore.getState().socket;
-            if (sock && sock.connected) {
-              sock.emit('get_online_users');
-            }
-          } else if (e.data === 'ping_15s') {
+          if (e.data === 'ping_15s') {
             doHeartbeatPing();
           }
         };
@@ -1574,7 +1567,7 @@ export const useAppStore = create<AppState>((set) => ({
                 });
             });
 
-            sock.off('disconnect').on('disconnect', () => {
+            sock.on('disconnect', () => {
                // Mark self as offline in Firebase
                setDoc(doc(db, 'users', uid), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => {
                   try {
@@ -1585,7 +1578,7 @@ export const useAppStore = create<AppState>((set) => ({
                });
             });
 
-            sock.off('connect').on('connect', () => {
+            sock.on('connect', () => {
                sock.emit('get_online_users');
                // Mark self as online in Firebase so other users can see status in search
                setDoc(doc(db, 'users', uid), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => {

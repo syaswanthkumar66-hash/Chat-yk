@@ -504,6 +504,15 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const handlePageHide = () => {
+      if (user?.id) {
+        import('./store').then(({ useAppStore }) => {
+          if (useAppStore.getState().authMethod !== 'local') {
+            import('./firebase').then(({ db, doc, setDoc }) => {
+              setDoc(doc(db, 'users', user.id), { isOnline: false, lastSeen: new Date().toISOString() }, { merge: true }).catch(console.error);
+            });
+          }
+        });
+      }
       import('./store').then(({ flushCloudAutoSync }) => {
         flushCloudAutoSync().catch(console.error);
       });
