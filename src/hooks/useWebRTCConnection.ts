@@ -6,31 +6,13 @@ export const createPrioritizedPeerConnection = (
   roomId: string,
   onLog: (msg: string) => void
 ): RTCPeerConnection => {
-  onLog(`[WebRTC] Initializing connection for ${peerId} (prioritizing local network)`);
+  onLog(`[WebRTC] Initializing connection for ${peerId}`);
   
-  // Phase 1: Local Network Only (No STUN/TURN)
   const pc = new RTCPeerConnection({
-    iceServers: [],
+    iceServers: iceServers,
     rtcpMuxPolicy: 'require',
     bundlePolicy: 'max-bundle'
   });
-
-  // Phase 2: STUN/TURN Fallback after 1 second if not connected
-  setTimeout(() => {
-    if (pc.signalingState !== 'closed' && pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') {
-      onLog(`[WebRTC] Local connection taking too long, falling back to STUN/TURN relays...`);
-      try {
-        pc.setConfiguration({
-          iceServers: iceServers,
-          rtcpMuxPolicy: 'require',
-          bundlePolicy: 'max-bundle',
-          iceTransportPolicy: 'all'
-        });
-      } catch (e) {
-        onLog(`[WebRTC] Error configuring STUN/TURN: ${e}`);
-      }
-    }
-  }, 1000);
 
   // Log ICE Gathering
   pc.addEventListener('icegatheringstatechange', () => {

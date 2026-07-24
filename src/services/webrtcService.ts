@@ -238,65 +238,67 @@ class WebRTCService {
 
         this.startStatsMonitoring(peerId, roomId);
 
-        // CONNECTED_NO_MEDIA check: 5-second grace period then confirm non-zero audio bytes flowing
-        setTimeout(async () => {
-          const currentPc = this.pcs.get(mapKey);
-          if (currentPc && currentPc.iceConnectionState === 'connected') {
-            try {
-              const stats = await currentPc.getStats();
-              let audioBytesSent: number | undefined = undefined;
-              let audioBytesReceived: number | undefined = undefined;
-              let activeCandidatePair: any = null;
+        if (!roomId.startsWith('chat-webrtc-')) {
+          // CONNECTED_NO_MEDIA check: 5-second grace period then confirm non-zero audio bytes flowing
+          setTimeout(async () => {
+            const currentPc = this.pcs.get(mapKey);
+            if (currentPc && currentPc.iceConnectionState === 'connected') {
+              try {
+                const stats = await currentPc.getStats();
+                let audioBytesSent: number | undefined = undefined;
+                let audioBytesReceived: number | undefined = undefined;
+                let activeCandidatePair: any = null;
 
-              stats.forEach(report => {
-                if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-                  audioBytesReceived = report.bytesReceived;
-                }
-                if (report.type === 'outbound-rtp' && report.kind === 'audio') {
-                  audioBytesSent = report.bytesSent;
-                }
-                if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
-                  activeCandidatePair = report;
-                }
-              });
+                stats.forEach(report => {
+                  if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+                    audioBytesReceived = report.bytesReceived;
+                  }
+                  if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+                    audioBytesSent = report.bytesSent;
+                  }
+                  if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+                    activeCandidatePair = report;
+                  }
+                });
 
-              let localCandidateType = 'unknown';
-              let remoteCandidateType = 'unknown';
-              if (activeCandidatePair) {
-                const localCandidate = stats.get(activeCandidatePair.localCandidateId);
-                const remoteCandidate = stats.get(activeCandidatePair.remoteCandidateId);
-                localCandidateType = localCandidate?.candidateType || 'unknown';
-                remoteCandidateType = remoteCandidate?.candidateType || 'unknown';
+                let localCandidateType = 'unknown';
+                let remoteCandidateType = 'unknown';
+                if (activeCandidatePair) {
+                  const localCandidate = stats.get(activeCandidatePair.localCandidateId);
+                  const remoteCandidate = stats.get(activeCandidatePair.remoteCandidateId);
+                  localCandidateType = localCandidate?.candidateType || 'unknown';
+                  remoteCandidateType = remoteCandidate?.candidateType || 'unknown';
+                }
+
+                // Step 5: Exact diagnostic logging of bytes and active candidate types after 5s
+                console.log(`[Diagnostic][Step 5][${new Date().toISOString()}] 5-second stats check after connected for peer ${peerId}:
+                  - bytesSent (outbound-rtp audio): ${audioBytesSent !== undefined ? audioBytesSent : 'NOT_FOUND'}
+                  - bytesReceived (inbound-rtp audio): ${audioBytesReceived !== undefined ? audioBytesReceived : 'NOT_FOUND'}
+                  - Active Candidate Pair details:
+                    - Local candidate type: ${localCandidateType} (host/srflx/relay)
+                    - Remote candidate type: ${remoteCandidateType} (host/srflx/relay)`);
+
+                diagnosticLogger.log('media', 'media_flow_check', `5-second media flow check: Sent=${audioBytesSent || 0} bytes, Received=${audioBytesReceived || 0} bytes`, peerId, roomId, { audioBytesSent, audioBytesReceived });
+                if ((audioBytesSent || 0) === 0 && (audioBytesReceived || 0) === 0) {
+                  diagnosticLogger.log('error', 'media_flow_stalled', `ICE is connected but media bytes flow is at 0 (stalled/silent)`, peerId, roomId);
+                  this.dispatchCallError(CallError.CONNECTED_NO_MEDIA, peerId);
+                }
+              } catch (e: any) {
+                console.error(`[Diagnostic][Step 5] Failed to execute 5-second media stats check:`, e);
+                diagnosticLogger.log('error', 'media_flow_check_failed', `Failed to execute 5-second media stats check: ${e.message}`, peerId, roomId);
               }
-
-              // Step 5: Exact diagnostic logging of bytes and active candidate types after 5s
-              console.log(`[Diagnostic][Step 5][${new Date().toISOString()}] 5-second stats check after connected for peer ${peerId}:
-                - bytesSent (outbound-rtp audio): ${audioBytesSent !== undefined ? audioBytesSent : 'NOT_FOUND'}
-                - bytesReceived (inbound-rtp audio): ${audioBytesReceived !== undefined ? audioBytesReceived : 'NOT_FOUND'}
-                - Active Candidate Pair details:
-                  - Local candidate type: ${localCandidateType} (host/srflx/relay)
-                  - Remote candidate type: ${remoteCandidateType} (host/srflx/relay)`);
-
-              diagnosticLogger.log('media', 'media_flow_check', `5-second media flow check: Sent=${audioBytesSent || 0} bytes, Received=${audioBytesReceived || 0} bytes`, peerId, roomId, { audioBytesSent, audioBytesReceived });
-              if ((audioBytesSent || 0) === 0 && (audioBytesReceived || 0) === 0) {
-                diagnosticLogger.log('error', 'media_flow_stalled', `ICE is connected but media bytes flow is at 0 (stalled/silent)`, peerId, roomId);
-                this.dispatchCallError(CallError.CONNECTED_NO_MEDIA, peerId);
-              }
-            } catch (e: any) {
-              console.error(`[Diagnostic][Step 5] Failed to execute 5-second media stats check:`, e);
-              diagnosticLogger.log('error', 'media_flow_check_failed', `Failed to execute 5-second media stats check: ${e.message}`, peerId, roomId);
             }
-          }
-        }, 5000);
+          }, 5000);
 
-        // TRACK_NOT_RECEIVED check: Confirm track received within 8 seconds of connection
-        setTimeout(() => {
-          const currentPc = this.pcs.get(mapKey);
-          if (currentPc && currentPc.iceConnectionState === 'connected' && !this.trackReceived.get(mapKey)) {
-            diagnosticLogger.log('error', 'track_not_received_timeout', `Connected but no remote track received within 8 seconds of ICE establishment`, peerId, roomId);
-            this.dispatchCallError(CallError.TRACK_NOT_RECEIVED, peerId);
-          }
-        }, 8000);
+          // TRACK_NOT_RECEIVED check: Confirm track received within 8 seconds of connection
+          setTimeout(() => {
+            const currentPc = this.pcs.get(mapKey);
+            if (currentPc && currentPc.iceConnectionState === 'connected' && !this.trackReceived.get(mapKey)) {
+              diagnosticLogger.log('error', 'track_not_received_timeout', `Connected but no remote track received within 8 seconds of ICE establishment`, peerId, roomId);
+              this.dispatchCallError(CallError.TRACK_NOT_RECEIVED, peerId);
+            }
+          }, 8000);
+        }
       }
 
       if (state === 'failed') {
