@@ -9,7 +9,7 @@ export const WebRTCConnectivityTester = () => {
 
   // Custom credentials override state
   const [customUrl, setCustomUrl] = useState('turn:free.expressturn.com:3478');
-  const [customUsername, setCustomUsername] = useState('000000002099639457');
+  const [customUsername, setCustomUsername] = useState('000000002100245221');
   const [customPassword, setCustomPassword] = useState('tSLm3kXJjgjn59xHqOmR8TvGo+4=');
   const [useCustomCreds, setUseCustomCreds] = useState(false);
   const [showCredsPanel, setShowCredsPanel] = useState(false);
@@ -47,11 +47,6 @@ export const WebRTCConnectivityTester = () => {
           }
           filteredServers.push({
             urls: url,
-            username: customUsername,
-            credential: customPassword
-          });
-          filteredServers.push({
-            urls: url.includes('?') ? `${url}&transport=tcp` : `${url}?transport=tcp`,
             username: customUsername,
             credential: customPassword
           });
@@ -105,10 +100,17 @@ export const WebRTCConnectivityTester = () => {
         iceTransportPolicy: mode === 'turn' ? 'relay' : 'all'
       });
 
+      let gatheredRelays = 0;
+
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           const c = event.candidate;
-          log(`Candidate gathered: ${c.type} (${c.protocol}) via ${c.relatedAddress || 'local'}`);
+          if (c.type === 'relay') {
+            gatheredRelays++;
+            log(`✅ [TURN SUCCESS] Relay candidate gathered: ${c.type} (${c.protocol}) via ${c.relatedAddress || 'TURN relay'}`);
+          } else {
+            log(`Candidate gathered: ${c.type} (${c.protocol}) via ${c.relatedAddress || 'local'}`);
+          }
           setCandidates(prev => [...prev, {
             type: c.type,
             protocol: c.protocol,
@@ -117,13 +119,27 @@ export const WebRTCConnectivityTester = () => {
           }]);
         } else {
           log('ICE gathering completed.');
+          if (mode === 'turn' || mode === 'all') {
+            if (gatheredRelays > 0) {
+              log(`🎉 [PASSED] TURN server verified! Gathered ${gatheredRelays} active relay candidate(s).`);
+            } else if (mode === 'turn') {
+              log(`⚠️ [WARNING] No relay candidates were gathered. Check username/password or firewall settings.`);
+            }
+          }
           pc.close();
           setIsTesting(false);
         }
       };
 
       pc.onicecandidateerror = (event: any) => {
-        log(`[ERROR] ICE Candidate Error: ${event.errorText} (${event.errorCode}) on ${event.url}`);
+        const errUrl = event.url || '';
+        if (errUrl.includes('transport=tcp')) {
+          log(`[INFO] Probe note: ${event.errorText} (${event.errorCode}) on ${errUrl} - ExpressTURN standard transport is UDP on 3478.`);
+        } else if (errUrl.includes('stun:free.expressturn.com')) {
+          log(`[INFO] Probe note: ${event.errorText} (${event.errorCode}) on ${errUrl} - STUN bindings use Google STUN servers.`);
+        } else {
+          log(`[ICE ERROR] URL: ${errUrl} Error text: ${event.errorText}. Code: ${event.errorCode}`);
+        }
       };
 
       log('Creating data channel to trigger ICE gathering...');

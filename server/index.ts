@@ -2151,34 +2151,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
   app.get("/api/webrtc/config", (req, res) => {
     let turnUrl = process.env.TURN_SERVER_URL || 'turn:free.expressturn.com:3478';
-    let turnUser = process.env.TURN_SERVER_USERNAME || '000000002099639457';
+    let turnUser = process.env.TURN_SERVER_USERNAME || '000000002100245221';
     let turnPass = process.env.TURN_SERVER_PASSWORD || 'tSLm3kXJjgjn59xHqOmR8TvGo+4=';
 
     if (turnUrl && !turnUrl.startsWith('turn:') && !turnUrl.startsWith('stun:') && !turnUrl.startsWith('turns:')) {
       turnUrl = `turn:${turnUrl}`;
     }
-
-    // Try multiple possible visual typo-variants of the Base64 password (L vs l vs I vs 1)
-    const passVariants = [turnPass];
-    if (turnPass === 'tSLm3kXJjgjn59xHqOmR8TvGo+4=') {
-      passVariants.push('tSlm3kXJjgjn59xHqOmR8TvGo+4='); // lowercase l
-      passVariants.push('tSIm3kXJjgjn59xHqOmR8TvGo+4='); // uppercase I
-      passVariants.push('tS1m3kXJjgjn59xHqOmR8TvGo+4='); // number 1
-    }
-
-    const turnConfigs: any[] = [];
-    passVariants.forEach((pass) => {
-      turnConfigs.push({
-        urls: turnUrl,
-        username: turnUser,
-        credential: pass
-      });
-      turnConfigs.push({
-        urls: `${turnUrl}?transport=tcp`,
-        username: turnUser,
-        credential: pass
-      });
-    });
 
     res.json({
       iceServers: [
@@ -2188,7 +2166,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun4.l.google.com:19302' },
-        ...turnConfigs
+        {
+          urls: turnUrl,
+          username: turnUser,
+          credential: turnPass
+        }
       ]
     });
   });
