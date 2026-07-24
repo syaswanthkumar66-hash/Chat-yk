@@ -1608,9 +1608,12 @@ export const useAppStore = create<AppState>((set) => ({
           chats: state.chats.map(c => {
             const isMatch = c.id === data.chatId || c.participants.some(p => p.id === data.chatId);
             if (isMatch) {
+              const updatedMessages = (c.messages || []).map(m => m.id === data.messageId ? { ...m, status: 'sent', timestamp: data.timestamp || m.timestamp } : m);
+              const updatedLastMessage = c.lastMessage?.id === data.messageId ? { ...c.lastMessage, status: 'sent', timestamp: data.timestamp || c.lastMessage.timestamp } : c.lastMessage;
               return {
                 ...c,
-                messages: (c.messages || []).map(m => m.id === data.messageId ? { ...m, status: 'sent', timestamp: data.timestamp || m.timestamp } : m)
+                messages: updatedMessages as Message[],
+                lastMessage: updatedLastMessage as Message | undefined
               };
             }
             return c;

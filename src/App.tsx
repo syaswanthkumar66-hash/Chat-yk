@@ -223,9 +223,19 @@ function useNotifications(processedNotificationsRef: React.RefObject<Set<string>
 
     const handleUserStatus = (data: { userId: string, isOnline: boolean }) => {
       if (data.userId === user.id) return;
+      
+      // Update the user's online status and last seen in our local store
+      useAppStore.setState((state) => ({
+        users: state.users.map(u => 
+          u.id === data.userId 
+            ? { ...u, isOnline: data.isOnline, lastSeen: data.isOnline ? undefined : new Date().toISOString() } 
+            : u
+        )
+      }));
+
       if (!data.isOnline) return;
 
-      // Find the user in our list
+      // Find the user in our list for notifications
       const targetUser = users.find(u => u.id === data.userId);
       if (!targetUser || !targetUser.isFriend) return;
 
@@ -831,6 +841,32 @@ export default function App() {
             safeLocalStorageSetItem('proto_blockedUserIds', JSON.stringify(blocked));
             safeLocalStorageSetItem('proto_removedFriendIds', JSON.stringify(removed));
           }
+        }
+
+        // Refresh friends presence and profiles
+        const currentUsers = useAppStore.getState().users;
+        const friendIds = currentUsers.filter(u => u.isFriend).map(u => u.id);
+        if (friendIds.length > 0) {
+          await Promise.all(friendIds.map(async (fId) => {
+            try {
+              const fDoc = await getDoc(doc(db, 'users', fId));
+              if (fDoc.exists()) {
+                const fData = fDoc.data();
+                useAppStore.setState(state => ({
+                  users: state.users.map(u => u.id === fId ? {
+                    ...u,
+                    isOnline: fData.isOnline || false,
+                    lastSeen: fData.lastSeen || u.lastSeen,
+                    displayName: fData.displayName || u.displayName,
+                    avatar: fData.avatar || u.avatar,
+                    description: fData.description || u.description
+                  } : u)
+                }));
+              }
+            } catch (e) {
+              console.warn(`Failed to refresh friend data for ${fId}`, e);
+            }
+          }));
         }
 
         const requestsRef = collection(db, 'friendRequests');
