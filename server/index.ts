@@ -710,14 +710,19 @@ const io = new Server(httpServer, {
     origin: true,
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  pingInterval: 15000,
+  pingTimeout: 10000,
 });
 
 app.use(express.json({ limit: '10mb' }));
 
-// Health Check / Wake Up Endpoint
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+// Health Check & Render Keep-Alive Endpoint
+app.get(["/api/health", "/api/ping", "/ping"], (req, res) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.json({ status: "ok", timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -822,6 +827,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   // Socket.io logic
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
+
+    socket.on("ping_server", (data, callback) => {
+      if (typeof callback === 'function') {
+        callback({ status: "pong", timestamp: new Date().toISOString() });
+      } else {
+        socket.emit("pong_server", { timestamp: new Date().toISOString() });
+      }
+    });
 
     socket.on("register", async (data) => {
       // Graceful handling if data is just string (old logic) or object (new E2EE logic)

@@ -1102,9 +1102,9 @@ export const useAppStore = create<AppState>((set) => ({
       if (isWakingUp) {
         return;
       }
-      // If we successfully woke up the server very recently (within 60 seconds),
+      // If we successfully woke up the server very recently (within 30 seconds),
       // we assume it is still awake and we just let socket.io's built-in reconnection do the job.
-      if (Date.now() - lastSuccessfulWakeUpTime < 60000) {
+      if (Date.now() - lastSuccessfulWakeUpTime < 30000) {
         useAppStore.getState().addConnectionLog('Backend was recently verified to be awake. Relying on socket.io automatic reconnection...');
         if (useAppStore.getState().socket && !useAppStore.getState().isWssConnected) {
           useAppStore.getState().socket.connect();
@@ -1137,10 +1137,14 @@ export const useAppStore = create<AppState>((set) => ({
           const timeoutId = setTimeout(() => controller.abort(), 4000);
           
           let success = false;
+          const cacheBusterUrl = `${targetUrl}/api/health?_t=${Date.now()}`;
           try {
-            const response = await fetch(`${targetUrl}/api/health`, {
+            const response = await fetch(cacheBusterUrl, {
               signal: controller.signal,
-              headers: { 'Cache-Control': 'no-cache' }
+              headers: { 
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+              }
             });
             if (response.ok) {
               success = true;
@@ -1150,7 +1154,7 @@ export const useAppStore = create<AppState>((set) => ({
             try {
               const noCorsController = new AbortController();
               const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 4000);
-              await fetch(`${targetUrl}/api/health`, {
+              await fetch(cacheBusterUrl, {
                 mode: 'no-cors',
                 signal: noCorsController.signal,
                 headers: { 'Cache-Control': 'no-cache' }
@@ -1194,21 +1198,32 @@ export const useAppStore = create<AppState>((set) => ({
       
       heartbeatIntervalId = setInterval(async () => {
         const currentStatus = useAppStore.getState().wssStatus;
-        if (currentStatus !== 'connected') {
+        const sock = useAppStore.getState().socket;
+
+        if (currentStatus !== 'connected' || !sock) {
           return;
         }
         
         console.log('Heartbeat: Keep-alive ping to prevent server sleep...');
         
+        // Emit Socket.IO level keep-alive frame
+        try {
+          sock.emit('ping_server', { timestamp: Date.now() });
+        } catch (_) {}
+
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
           
           let success = false;
+          const cacheBusterUrl = `${targetUrl}/api/health?_t=${Date.now()}`;
           try {
-            const response = await fetch(`${targetUrl}/api/health`, {
+            const response = await fetch(cacheBusterUrl, {
               signal: controller.signal,
-              headers: { 'Cache-Control': 'no-cache' }
+              headers: { 
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+              }
             });
             if (response.ok) {
               success = true;
@@ -1218,7 +1233,7 @@ export const useAppStore = create<AppState>((set) => ({
             try {
               const noCorsController = new AbortController();
               const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 5000);
-              await fetch(`${targetUrl}/api/health`, {
+              await fetch(cacheBusterUrl, {
                 mode: 'no-cors',
                 signal: noCorsController.signal,
                 headers: { 'Cache-Control': 'no-cache' }
@@ -1248,7 +1263,7 @@ export const useAppStore = create<AppState>((set) => ({
             wakeUp().catch(console.error);
           }
         }
-      }, 30000); // every 30 seconds
+      }, 15000); // run every 15 seconds to prevent Render proxy / free instance idle spin-down
     };
 
     // Trigger wakeup process in parallel
@@ -1281,6 +1296,11 @@ export const useAppStore = create<AppState>((set) => ({
     };
 
     const setupSocketListeners = (sock: Socket, uid: string) => {
+      sock.off('pong_server').on('pong_server', (data) => {
+        lastSuccessfulWakeUpTime = Date.now();
+        console.log('Socket pong received from server:', data);
+      });
+
       // 1. connect_error
       sock.off('connect_error').on('connect_error', (error) => {
         console.error('Socket connection error:', error, JSON.stringify(error, Object.getOwnPropertyNames(error)));
