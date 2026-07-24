@@ -130,7 +130,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     username: storeUser.username,
     avatar: storeUser.avatar,
     bio: storeUser.description || '',
-    status: ((storeUser.isOnline || onlineUserIds.includes(storeUser.id)) ? 'online' : (storeUser.isInactive ? 'away' : 'offline')) as 'online' | 'offline' | 'away',
+    status: ((storeUser.isOnline || onlineUserIds.includes(storeUser.id)) ? (storeUser.isInactive ? 'away' : 'online') : 'offline') as 'online' | 'offline' | 'away',
     relationship,
     joinedDate: storeUser.joinDate ? new Date(storeUser.joinDate).toLocaleDateString() : 'Recently',
     lastSeen: storeUser.lastSeen

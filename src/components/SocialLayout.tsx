@@ -591,7 +591,7 @@ export const SocialLayout = () => {
                       <Avatar 
                         src={chat.isGroup ? chat.avatar! : (partner?.avatar || '')} 
                         className="size-14" 
-                        status={!chat.isGroup && partner ? (isUserOnline(partner.id) ? 'online' : 'offline') : undefined} 
+                        status={!chat.isGroup && partner ? (isUserOnline(partner.id) ? (partner.isInactive ? 'away' : 'online') : 'offline') : undefined} 
                       />
                       {chat.isGroup && (
                         <div className="absolute -bottom-1 -right-1 size-6 rounded-xl bg-primary text-white flex items-center justify-center border-2 border-white shadow-sm">
@@ -762,7 +762,7 @@ export const SocialLayout = () => {
                         const friendLastSeen = getUserLastSeen(loopUser.id) || loopUser.lastSeen;
                         return (
                           <div key={`friend-${loopUser.id}`} className="flex items-center gap-4 p-2 cursor-pointer hover:bg-primary/5 rounded-xl transition-colors group" onClick={() => setViewingUserId(loopUser.id)}>
-                            <Avatar src={loopUser.avatar} className="size-12" status={isFriendOnline ? 'online' : 'offline'} />
+                            <Avatar src={loopUser.avatar} className="size-12" status={isFriendOnline ? (loopUser.isInactive ? 'away' : 'online') : 'offline'} />
                             <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
                               <div>
                                 <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
@@ -829,7 +829,7 @@ export const SocialLayout = () => {
                         const personLastSeen = getUserLastSeen(loopUser.id) || loopUser.lastSeen;
                         return (
                           <div key={`discover-${loopUser.id}`} className="flex items-center gap-4 p-2 cursor-pointer hover:bg-primary/5 rounded-xl transition-colors group" onClick={() => setViewingUserId(loopUser.id)}>
-                            <Avatar src={loopUser.avatar} className="size-12" status={isPersonOnline ? 'online' : 'offline'} />
+                            <Avatar src={loopUser.avatar} className="size-12" status={isPersonOnline ? (loopUser.isInactive ? 'away' : 'online') : 'offline'} />
                             <div className="flex-1 border-b border-primary/5 pb-2 flex items-center justify-between">
                               <div>
                                 <h3 className="font-bold text-slate-800">{loopUser.displayName}</h3>
@@ -903,7 +903,7 @@ export const SocialLayout = () => {
                   <Avatar 
                     src={user.avatar} 
                     className="size-14 cursor-pointer hover:scale-105 transition-transform" 
-                    status={user.isOnline ? 'online' : 'offline'}
+                    status={user.isOnline ? (user.isInactive ? 'away' : 'online') : 'offline'}
                     onClick={() => setViewingUserId(user.id)}
                   />
                   <div className="flex-1">

@@ -1660,6 +1660,10 @@ export const ChatDetail = () => {
   const isOnline = chat 
     ? (!chat.isGroup && (users.find(u => u.id === otherParticipantId)?.isOnline || (otherParticipantId && onlineUserIds.includes(otherParticipantId))))
     : (recipient?.isOnline || (recipient?.id && onlineUserIds.includes(recipient.id)));
+  
+  const isInactive = chat
+    ? (!chat.isGroup && (users.find(u => u.id === otherParticipantId)?.isInactive))
+    : (recipient?.isInactive);
   const otherParticipant = chat
     ? (!chat.isGroup ? users.find(u => u.id === otherParticipantId) : null)
     : recipient;
@@ -2115,20 +2119,20 @@ export const ChatDetail = () => {
                       <Avatar 
                         src={chatAvatar!} 
                         className="size-9 sm:size-11 flex-shrink-0 group-hover:scale-105 transition-transform" 
-                        status={!chat?.isGroup ? (isOnline ? 'online' : 'offline') : undefined} 
+                        status={!chat?.isGroup ? (isOnline ? (isInactive ? 'away' : 'online') : 'offline') : undefined} 
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <h3 className="font-black text-slate-900 truncate tracking-tight italic uppercase text-xs sm:text-base">{chatName}</h3>
                           {isMuted && <Icon name="notifications_off" className="text-[10px] text-slate-400" />}
                         </div>
-                        <p className={`text-[10px] font-black uppercase tracking-widest transition-colors duration-200 ${isRecipientTyping ? 'text-green-500 animate-pulse' : (isSelfTyping ? 'text-slate-400 animate-pulse italic' : (isOnline ? 'text-primary' : 'text-slate-400'))}`}>
+                        <p className={`text-[10px] font-black uppercase tracking-widest transition-colors duration-200 ${isRecipientTyping ? 'text-green-500 animate-pulse' : (isSelfTyping ? 'text-slate-400 animate-pulse italic' : (isOnline ? (isInactive ? 'text-orange-500' : 'text-primary') : 'text-slate-400'))}`}>
                           {isRecipientTyping ? (
                             <span>{typingText}</span>
                           ) : isSelfTyping ? (
                             <span>Typing from another device...</span>
                           ) : (
-                            chat?.isGroup ? `${memberCount} members` : (isOnline ? 'Live Now' : (lastSeenVal ? `Last seen: ${formatLastSeen(lastSeenVal)}` : 'Offline'))
+                            chat?.isGroup ? `${memberCount} members` : (isOnline ? (isInactive ? 'Away' : 'Live Now') : (lastSeenVal ? `Last seen: ${formatLastSeen(lastSeenVal)}` : 'Offline'))
                           )}
                         </p>
                       </div>

@@ -972,7 +972,7 @@ export const GroupInfo = ({ onClose }: { onClose: () => void }) => {
                     }}
                     className="flex items-center gap-4 p-3 rounded-2xl hover:bg-primary/5 transition-colors cursor-pointer group"
                   >
-                    <Avatar src={u.avatar} className="size-12" status={(u.isOnline || onlineUserIds.includes(u.id)) ? 'online' : 'offline'} />
+                    <Avatar src={u.avatar} className="size-12" status={((u.isOnline || onlineUserIds.includes(u.id)) ? (u.isInactive ? 'away' : 'online') : 'offline')} />
                     <div className="flex-1">
                       <p className="font-bold text-slate-800">{u.displayName}</p>
                       <p className="text-[10px] text-neutral-muted uppercase tracking-widest">{u.username}</p>

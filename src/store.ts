@@ -1565,9 +1565,10 @@ export const useAppStore = create<AppState>((set) => ({
       }
 
       // 4. user_status
-      sock.off('user_status').on('user_status', (data: { userId: string, isOnline: boolean }) => {
+      sock.off('user_status').on('user_status', (data: { userId: string, isOnline: boolean, isInactive?: boolean }) => {
         const targetUid = data.userId;
         const isOnline = data.isOnline;
+        const isInactive = data.isInactive;
         const nowIso = new Date().toISOString();
 
         set((currentState) => {
@@ -1584,6 +1585,7 @@ export const useAppStore = create<AppState>((set) => ({
               return {
                 ...u,
                 isOnline,
+                isInactive,
                 lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (u.lastSeen || nowIso))
               };
             }
@@ -1598,6 +1600,7 @@ export const useAppStore = create<AppState>((set) => ({
                 return {
                   ...p,
                   isOnline,
+                  isInactive,
                   lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (p.lastSeen || nowIso))
                 };
               }
@@ -1614,16 +1617,26 @@ export const useAppStore = create<AppState>((set) => ({
       });
 
       // 5. online_users
-      sock.off('online_users').on('online_users', (onlineUserIds: string[]) => {
+      sock.off('online_users').on('online_users', (payload: any[]) => {
         const nowIso = new Date().toISOString();
+        const onlineUserIds = payload.map(p => typeof p === 'string' ? p : p.userId);
+        const inactiveMap = new Map<string, boolean>();
+        payload.forEach(p => {
+          if (typeof p !== 'string' && p.isInactive !== undefined) {
+            inactiveMap.set(p.userId, p.isInactive);
+          }
+        });
+
         set((state) => ({
           onlineUserIds,
           users: state.users.map(u => {
             const isOnline = onlineUserIds.includes(u.id);
+            const isInactive = inactiveMap.has(u.id) ? inactiveMap.get(u.id) : undefined;
             const wasOnline = u.isOnline;
             return {
               ...u,
               isOnline,
+              ...(isInactive !== undefined ? { isInactive } : {}),
               lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (u.lastSeen || nowIso))
             };
           }),
@@ -1631,10 +1644,12 @@ export const useAppStore = create<AppState>((set) => ({
             ...c,
             participants: c.participants.map(p => {
               const isOnline = onlineUserIds.includes(p.id);
+              const isInactive = inactiveMap.has(p.id) ? inactiveMap.get(p.id) : undefined;
               const wasOnline = p.isOnline;
               return {
                 ...p,
                 isOnline,
+                ...(isInactive !== undefined ? { isInactive } : {}),
                 lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (p.lastSeen || nowIso))
               };
             })

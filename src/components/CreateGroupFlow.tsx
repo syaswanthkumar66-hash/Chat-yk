@@ -104,7 +104,7 @@ export const CreateGroupFlow = ({ onClose, onCreate }: CreateGroupFlowProps) => 
                       e.stopPropagation();
                       useAppStore.getState().setViewingUserId(user.id);
                     }}>
-                      <Avatar src={user.avatar} className="size-12" status={(user.isOnline || onlineUserIds.includes(user.id)) ? 'online' : 'offline'} />
+                      <Avatar src={user.avatar} className="size-12" status={((user.isOnline || onlineUserIds.includes(user.id)) ? (user.isInactive ? 'away' : 'online') : 'offline')} />
                     </div>
                     <div className="flex-1">
                       <h4 className="font-bold text-slate-800">{user.displayName}</h4>

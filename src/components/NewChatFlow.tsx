@@ -88,7 +88,7 @@ export const NewChatFlow = ({ onClose, onSelect, onAddFriend }: NewChatFlowProps
                   setViewingUserId(user.id);
                   onClose();
                 }}>
-                  <Avatar src={user.avatar} className="size-12" status={isUserOnline(user) ? 'online' : 'offline'} />
+                  <Avatar src={user.avatar} className="size-12" status={isUserOnline(user) ? (user.isInactive ? 'away' : 'online') : 'offline'} />
                 </div>
                 <div className="flex-1">
                   <h4 className="font-bold text-slate-800">{user.displayName}</h4>

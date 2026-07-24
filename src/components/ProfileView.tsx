@@ -1291,7 +1291,7 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
                     }}
                     className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-primary/5 transition-all text-left group"
                   >
-                    <Avatar src={friend.avatar} className="size-12 group-hover:scale-105 transition-transform" status={friend.isOnline ? 'online' : 'offline'} />
+                    <Avatar src={friend.avatar} className="size-12 group-hover:scale-105 transition-transform" status={(friend.isOnline ? (friend.isInactive ? 'away' : 'online') : 'offline')} />
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-slate-800 truncate">{friend.displayName}</p>
                       <p className="text-[10px] text-neutral-muted uppercase tracking-widest">{friend.username}</p>

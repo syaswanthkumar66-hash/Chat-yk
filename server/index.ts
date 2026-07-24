@@ -828,6 +828,28 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
+    const isUserInactive = (userId: string) => {
+      if (!userId) return true;
+      const deviceMap = users.get(userId);
+      if (!deviceMap || deviceMap.size === 0) return true;
+      let allInactive = true;
+      for (const socketId of deviceMap.values()) {
+        const sock = io.sockets.sockets.get(socketId);
+        if (sock && (sock as any).isVisible !== false) {
+          allInactive = false;
+          break;
+        }
+      }
+      return allInactive;
+    };
+
+    const getOnlineUsersPayload = () => {
+      return Array.from(users.keys()).map(userId => ({
+        userId,
+        isInactive: isUserInactive(userId)
+      }));
+    };
+
     socket.on("ping_server", (data, callback) => {
       if (typeof callback === 'function') {
         callback({ status: "pong", timestamp: new Date().toISOString() });
@@ -837,7 +859,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     });
 
     socket.on("get_online_users", () => {
-      socket.emit("online_users", Array.from(users.keys()));
+      socket.emit("online_users", getOnlineUsersPayload());
     });
 
     socket.on("register", async (data) => {
@@ -866,8 +888,8 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       console.log(`User ${userId} registered device ${deviceId} with socket ${socket.id}`);
       
       // Broadcast online status
-      io.emit("user_status", { userId, isOnline: true });
-      io.emit("online_users", Array.from(users.keys()));
+      io.emit("user_status", { userId, isOnline: true, isInactive: isUserInactive(userId) });
+      io.emit("online_users", getOnlineUsersPayload());
 
       // Sync with Firestore
       updateFirestorePresence(userId, true);
@@ -907,9 +929,18 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     socket.on("update_active_view", (data) => {
       const { activeViewId, isVisible } = data || {};
+      const userId = (socket as any).userId;
+      const previousInactive = isUserInactive(userId);
+
       (socket as any).activeViewId = activeViewId;
       (socket as any).isVisible = isVisible;
-      console.log(`Socket ${socket.id} (user ${(socket as any).userId}) updated active view:`, { activeViewId, isVisible });
+      console.log(`Socket ${socket.id} (user ${userId}) updated active view:`, { activeViewId, isVisible });
+
+      const newInactive = isUserInactive(userId);
+      if (previousInactive !== newInactive && userId) {
+        io.emit("user_status", { userId, isOnline: true, isInactive: newInactive });
+        io.emit("online_users", getOnlineUsersPayload());
+      }
     });
 
     socket.on("join_group", (groupId) => {
@@ -1546,7 +1577,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const deviceId = (socket as any).deviceId;
       
       if (senderId) {
+        const previousInactive = isUserInactive(senderId);
         const deviceMap = users.get(senderId);
+        
         if (deviceMap) {
           // Remove this specific socket/device connection
           if (deviceId) {
@@ -1565,13 +1598,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             users.delete(senderId);
             clearTypingTimeout(`user-${senderId}`);
             io.emit("user_status", { userId: senderId, isOnline: false });
-            io.emit("online_users", Array.from(users.keys()));
-
+            io.emit("online_users", getOnlineUsersPayload());
             // Sync with Firestore
             updateFirestorePresence(senderId, false);
             console.log(`User ${senderId} has disconnected all devices. Broadcasted offline.`);
           } else {
             console.log(`User ${senderId} disconnected device ${deviceId}. ${deviceMap.size} devices still active.`);
+            
+            const newInactive = isUserInactive(senderId);
+            if (previousInactive !== newInactive) {
+              io.emit("user_status", { userId: senderId, isOnline: true, isInactive: newInactive });
+              io.emit("online_users", getOnlineUsersPayload());
+            }
+
             // Broadcast remaining devices list to all remaining active sockets of this user
             const activeDeviceIds = Array.from(deviceMap.keys());
             for (const [dId, sId] of deviceMap.entries()) {
