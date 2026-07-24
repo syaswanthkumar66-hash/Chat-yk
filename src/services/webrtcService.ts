@@ -1340,7 +1340,7 @@ class WebRTCService {
           }
         } catch (err: any) {
           diagnosticLogger.log('error', 'offer_failed', `Failed to create/send offer to peer ${peerId}: ${err.message}`, peerId, roomId, { error: err });
-          this.dispatchCallError(CallError.RENEGOTIATION_FAILED, peerId);
+          console.warn("Ignoring renegotiation error for", peerId);
         }
       }
     } else if (signal.type === 'offer') {
@@ -1382,7 +1382,7 @@ class WebRTCService {
           }
         } catch (err: any) {
           diagnosticLogger.log('error', 'answer_failed', `Failed to handle offer / generate answer for peer ${from}: ${err.message}`, from, roomId, { error: err });
-          this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
+          console.warn("Ignoring renegotiation error for", from);
         }
       }
     } else if (signal.type === 'answer') {
@@ -1397,7 +1397,7 @@ class WebRTCService {
             await this.applyPendingIceCandidates(from, roomId, pc);
           } catch (err: any) {
             diagnosticLogger.log('error', 'answer_apply_failed', `Failed to set remote description from peer ${from}: ${err.message}`, from, roomId, { error: err });
-            this.dispatchCallError(CallError.RENEGOTIATION_FAILED, from);
+            console.warn("Ignoring renegotiation error for", from);
           }
         }
       }

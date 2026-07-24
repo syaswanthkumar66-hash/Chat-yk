@@ -44,7 +44,7 @@ function useNotifications(processedNotificationsRef: React.RefObject<Set<string>
     if (!socket || !user) return;
 
     const emitActiveState = () => {
-      const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
+      const isVisible = typeof document !== 'undefined' ? (document.visibilityState === 'visible' && document.hasFocus()) : true;
       let activeViewId: string | null = null;
       
       if (activeChatId) {

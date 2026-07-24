@@ -1316,79 +1316,114 @@ export const useAppStore = create<AppState>((set) => ({
       isWakingUp = false;
     };
 
-    const startHeartbeat = () => {
-      if (heartbeatIntervalId) {
-        clearInterval(heartbeatIntervalId);
+    const doHeartbeatPing = async () => {
+      const currentStatus = useAppStore.getState().wssStatus;
+      const sock = useAppStore.getState().socket;
+      if (currentStatus !== 'connected' || !sock) {
+        return;
       }
       
-      heartbeatIntervalId = setInterval(async () => {
-        const currentStatus = useAppStore.getState().wssStatus;
-        const sock = useAppStore.getState().socket;
+      console.log('Heartbeat: Keep-alive ping to prevent server sleep...');
+      
+      // Emit Socket.IO level keep-alive frame
+      try {
+        sock.emit('ping_server', { timestamp: Date.now() });
+      } catch (_) {}
 
-        if (currentStatus !== 'connected' || !sock) {
-          return;
-        }
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         
-        console.log('Heartbeat: Keep-alive ping to prevent server sleep...');
-        
-        // Emit Socket.IO level keep-alive frame
+        let success = false;
+        const cacheBusterUrl = `${targetUrl}/api/health?_t=${Date.now()}`;
         try {
-          sock.emit('ping_server', { timestamp: Date.now() });
-        } catch (_) {}
-
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
-          
-          let success = false;
-          const cacheBusterUrl = `${targetUrl}/api/health?_t=${Date.now()}`;
+          const response = await fetch(cacheBusterUrl, {
+            signal: controller.signal,
+            headers: { 
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          });
+          if (response.ok) {
+            success = true;
+          }
+        } catch (err) {
+          // Fallback to no-cors
           try {
-            const response = await fetch(cacheBusterUrl, {
-              signal: controller.signal,
-              headers: { 
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-              }
+            const noCorsController = new AbortController();
+            const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 5000);
+            await fetch(cacheBusterUrl, {
+              mode: 'no-cors',
+              signal: noCorsController.signal,
+              headers: { 'Cache-Control': 'no-cache' }
             });
-            if (response.ok) {
-              success = true;
-            }
-          } catch (err) {
-            // Fallback to no-cors
-            try {
-              const noCorsController = new AbortController();
-              const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 5000);
-              await fetch(cacheBusterUrl, {
-                mode: 'no-cors',
-                signal: noCorsController.signal,
-                headers: { 'Cache-Control': 'no-cache' }
-              });
-              clearTimeout(noCorsTimeoutId);
-              success = true;
-            } catch (noCorsErr) {
-              console.log('Heartbeat keep-alive failed:', noCorsErr);
-            }
-          }
-          
-          clearTimeout(timeoutId);
-          
-          if (success) {
-            console.log('Heartbeat: Server is alive and warm.');
-          } else {
-            throw new Error('Server did not respond to keep-alive ping');
-          }
-        } catch (err: any) {
-          const errMsg = `Heartbeat: Warning: Keep-alive ping failed: ${err.message || err}. Server might be sleeping.`;
-          useAppStore.getState().addConnectionLog(errMsg);
-          
-          // Re-trigger wakeup if disconnected or connecting
-          const appState = useAppStore.getState();
-          if (appState.wssStatus !== 'connected') {
-            appState.addConnectionLog('Heartbeat: Server seems unreachable, starting exponential backoff wake-up...');
-            wakeUp().catch(console.error);
+            clearTimeout(noCorsTimeoutId);
+            success = true;
+          } catch (noCorsErr) {
+            console.log('Heartbeat keep-alive failed:', noCorsErr);
           }
         }
-      }, 15000); // run every 15 seconds to prevent Render proxy / free instance idle spin-down
+        
+        clearTimeout(timeoutId);
+        
+        if (success) {
+          console.log('Heartbeat: Server is alive and warm.');
+        } else {
+          throw new Error('Server did not respond to keep-alive ping');
+        }
+      } catch (err: any) {
+        const errMsg = `Heartbeat: Warning: Keep-alive ping failed: ${err.message || err}. Server might be sleeping.`;
+        useAppStore.getState().addConnectionLog(errMsg);
+        
+        // Re-trigger wakeup if disconnected or connecting
+        const appState = useAppStore.getState();
+        if (appState.wssStatus !== 'connected') {
+          appState.addConnectionLog('Heartbeat: Server seems unreachable, starting exponential backoff wake-up...');
+          wakeUp().catch(console.error);
+        }
+      }
+    };
+
+    const startHeartbeat = () => {
+      // In browsers, use a Web Worker to ensure background tabs do not throttle intervals.
+      if (typeof window !== 'undefined') {
+        if ((window as any)._heartbeatWorker) {
+          (window as any)._heartbeatWorker.terminate();
+        }
+        const workerCode = `
+          let timer1, timer15;
+          self.onmessage = function(e) {
+            if (e.data === 'start') {
+              timer1 = setInterval(() => self.postMessage('ping_1s'), 1000);
+              timer15 = setInterval(() => self.postMessage('ping_15s'), 15000);
+            } else if (e.data === 'stop') {
+              clearInterval(timer1);
+              clearInterval(timer15);
+            }
+          };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const worker = new Worker(URL.createObjectURL(blob));
+        (window as any)._heartbeatWorker = worker;
+        
+        worker.onmessage = (e) => {
+          if (e.data === 'ping_1s') {
+            const sock = useAppStore.getState().socket;
+            if (sock && sock.connected) {
+              sock.emit('get_online_users');
+            }
+          } else if (e.data === 'ping_15s') {
+            doHeartbeatPing();
+          }
+        };
+        worker.postMessage('start');
+      } else {
+        // Fallback for non-browser environments
+        if (heartbeatIntervalId) {
+          clearInterval(heartbeatIntervalId);
+        }
+        heartbeatIntervalId = setInterval(doHeartbeatPing, 15000);
+      }
     };
 
     // Trigger wakeup process in parallel
@@ -1428,7 +1463,7 @@ export const useAppStore = create<AppState>((set) => ({
 
       // 1. connect_error
       sock.off('connect_error').on('connect_error', (error) => {
-        console.error('Socket connection error:', error, JSON.stringify(error, Object.getOwnPropertyNames(error)));
+        console.warn('Socket connection error:', error, JSON.stringify(error, Object.getOwnPropertyNames(error)));
         const appState = useAppStore.getState();
         appState.addConnectionLog(`Socket connection error: ${error.message || error}`);
         
