@@ -73,6 +73,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     cancelFriendRequest,
     setActiveGroupCall,
     users,
+    onlineUserIds,
     user: currentUser
   } = useStore(s => ({
     setActiveChatId: s.setActiveChatId,
@@ -92,6 +93,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     cancelFriendRequest: s.cancelFriendRequest,
     setActiveGroupCall: s.setActiveGroupCall,
     users: s.users,
+    onlineUserIds: s.onlineUserIds,
     user: s.user
   }), shallowEqual);
   const [loading, setLoading] = useState(true);
@@ -128,7 +130,7 @@ export const UserProfileView = ({ userId, onBack }: UserProfileViewProps) => {
     username: storeUser.username,
     avatar: storeUser.avatar,
     bio: storeUser.description || '',
-    status: (storeUser.isOnline ? 'online' : (storeUser.isInactive ? 'away' : 'offline')) as 'online' | 'offline' | 'away',
+    status: ((storeUser.isOnline || onlineUserIds.includes(storeUser.id)) ? 'online' : (storeUser.isInactive ? 'away' : 'offline')) as 'online' | 'offline' | 'away',
     relationship,
     joinedDate: storeUser.joinDate ? new Date(storeUser.joinDate).toLocaleDateString() : 'Recently',
     lastSeen: storeUser.lastSeen

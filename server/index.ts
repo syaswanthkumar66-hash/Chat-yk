@@ -836,6 +836,10 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
     });
 
+    socket.on("get_online_users", () => {
+      socket.emit("online_users", Array.from(users.keys()));
+    });
+
     socket.on("register", async (data) => {
       // Graceful handling if data is just string (old logic) or object (new E2EE logic)
       let userId, publicKey, deviceId;
@@ -2268,3 +2272,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   startServer();
 
 export default app;
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('UNHANDLED REJECTION:', reason);
+});

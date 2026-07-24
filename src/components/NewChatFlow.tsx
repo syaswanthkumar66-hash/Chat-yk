@@ -10,14 +10,17 @@ interface NewChatFlowProps {
 }
 
 export const NewChatFlow = ({ onClose, onSelect, onAddFriend }: NewChatFlowProps) => {
-  const { blockedUserIds, removedFriendIds, setViewingUserId, users, user: currentUser } = useStore(s => ({
+  const { blockedUserIds, removedFriendIds, setViewingUserId, users, user: currentUser, onlineUserIds } = useStore(s => ({
     blockedUserIds: s.blockedUserIds,
     removedFriendIds: s.removedFriendIds,
     setViewingUserId: s.setViewingUserId,
     users: s.users,
-    user: s.user
+    user: s.user,
+    onlineUserIds: s.onlineUserIds
   }), shallowEqual);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const isUserOnline = (u: any) => u.isOnline || onlineUserIds.includes(u.id);
 
   const filteredFriends = users
     .filter(user => 
@@ -29,8 +32,10 @@ export const NewChatFlow = ({ onClose, onSelect, onAddFriend }: NewChatFlowProps
     )
     .sort((a, b) => {
       // Online first
-      if (a.isOnline && !b.isOnline) return -1;
-      if (!a.isOnline && b.isOnline) return 1;
+      const aOnline = isUserOnline(a);
+      const bOnline = isUserOnline(b);
+      if (aOnline && !bOnline) return -1;
+      if (!aOnline && bOnline) return 1;
       // Then alphabetical
       return (a.displayName || '').localeCompare(b.displayName || '');
     });
@@ -83,7 +88,7 @@ export const NewChatFlow = ({ onClose, onSelect, onAddFriend }: NewChatFlowProps
                   setViewingUserId(user.id);
                   onClose();
                 }}>
-                  <Avatar src={user.avatar} className="size-12" status={user.isOnline ? 'online' : 'offline'} />
+                  <Avatar src={user.avatar} className="size-12" status={isUserOnline(user) ? 'online' : 'offline'} />
                 </div>
                 <div className="flex-1">
                   <h4 className="font-bold text-slate-800">{user.displayName}</h4>

@@ -1395,7 +1395,7 @@ export const useAppStore = create<AppState>((set) => ({
     wakeUp().catch(console.error);
 
     const socket = io(targetUrl, {
-      transports: ["polling", "websocket"],
+      transports: ["websocket"],
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -1551,6 +1551,7 @@ export const useAppStore = create<AppState>((set) => ({
             });
 
             sock.off('connect').on('connect', () => {
+               sock.emit('get_online_users');
                // Mark self as online in Firebase so other users can see status in search
                setDoc(doc(db, 'users', uid), { isOnline: true, lastSeen: new Date().toISOString() }, { merge: true }).catch((err) => {
                   try {
@@ -1565,50 +1566,78 @@ export const useAppStore = create<AppState>((set) => ({
 
       // 4. user_status
       sock.off('user_status').on('user_status', (data: { userId: string, isOnline: boolean }) => {
-        // 1s throttled presence update
-        pendingStatusUpdates[data.userId] = data.isOnline;
-        if (!statusThrottleTimeout) {
-          statusThrottleTimeout = setTimeout(() => {
-            set((currentState) => {
-              let nextOnline = [...currentState.onlineUserIds];
-              const updatedUsers = [...currentState.users];
+        const targetUid = data.userId;
+        const isOnline = data.isOnline;
+        const nowIso = new Date().toISOString();
 
-              Object.entries(pendingStatusUpdates).forEach(([uid, isOnline]) => {
-                if (isOnline) {
-                  if (!nextOnline.includes(uid)) nextOnline.push(uid);
-                } else {
-                  nextOnline = nextOnline.filter(id => id !== uid);
-                }
+        set((currentState) => {
+          let nextOnline = [...currentState.onlineUserIds];
+          if (isOnline) {
+            if (!nextOnline.includes(targetUid)) nextOnline.push(targetUid);
+          } else {
+            nextOnline = nextOnline.filter(id => id !== targetUid);
+          }
 
-                const userIdx = updatedUsers.findIndex(u => u.id === uid);
-                if (userIdx !== -1) {
-                  updatedUsers[userIdx] = {
-                    ...updatedUsers[userIdx],
-                    isOnline,
-                    lastSeen: isOnline ? undefined : new Date().toISOString()
-                  };
-                }
-              });
-
-              pendingStatusUpdates = {};
-              statusThrottleTimeout = null;
-
-              return { 
-                onlineUserIds: nextOnline,
-                users: updatedUsers
+          const updatedUsers = currentState.users.map(u => {
+            if (u.id === targetUid) {
+              const wasOnline = u.isOnline;
+              return {
+                ...u,
+                isOnline,
+                lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (u.lastSeen || nowIso))
               };
-            });
-          }, 1000);
-        }
+            }
+            return u;
+          });
+
+          const updatedChats = currentState.chats.map(chat => ({
+            ...chat,
+            participants: chat.participants.map(p => {
+              if (p.id === targetUid) {
+                const wasOnline = p.isOnline;
+                return {
+                  ...p,
+                  isOnline,
+                  lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (p.lastSeen || nowIso))
+                };
+              }
+              return p;
+            })
+          }));
+
+          return { 
+            onlineUserIds: nextOnline,
+            users: updatedUsers,
+            chats: updatedChats
+          };
+        });
       });
 
       // 5. online_users
       sock.off('online_users').on('online_users', (onlineUserIds: string[]) => {
+        const nowIso = new Date().toISOString();
         set((state) => ({
           onlineUserIds,
-          users: state.users.map(u => ({
-            ...u,
-            isOnline: onlineUserIds.includes(u.id)
+          users: state.users.map(u => {
+            const isOnline = onlineUserIds.includes(u.id);
+            const wasOnline = u.isOnline;
+            return {
+              ...u,
+              isOnline,
+              lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (u.lastSeen || nowIso))
+            };
+          }),
+          chats: state.chats.map(c => ({
+            ...c,
+            participants: c.participants.map(p => {
+              const isOnline = onlineUserIds.includes(p.id);
+              const wasOnline = p.isOnline;
+              return {
+                ...p,
+                isOnline,
+                lastSeen: isOnline ? undefined : (wasOnline ? nowIso : (p.lastSeen || nowIso))
+              };
+            })
           }))
         }));
       });

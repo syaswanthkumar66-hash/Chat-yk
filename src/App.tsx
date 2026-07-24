@@ -223,16 +223,6 @@ function useNotifications(processedNotificationsRef: React.RefObject<Set<string>
 
     const handleUserStatus = (data: { userId: string, isOnline: boolean }) => {
       if (data.userId === user.id) return;
-      
-      // Update the user's online status and last seen in our local store
-      useAppStore.setState((state) => ({
-        users: state.users.map(u => 
-          u.id === data.userId 
-            ? { ...u, isOnline: data.isOnline, lastSeen: data.isOnline ? undefined : new Date().toISOString() } 
-            : u
-        )
-      }));
-
       if (!data.isOnline) return;
 
       // Find the user in our list for notifications

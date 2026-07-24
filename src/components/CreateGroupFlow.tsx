@@ -15,7 +15,7 @@ export const CreateGroupFlow = ({ onClose, onCreate }: CreateGroupFlowProps) => 
   const [groupName, setGroupName] = useState('');
   const [groupAvatar, setGroupAvatar] = useState(generateInitialsAvatar('group', 'Group'));
 
-  const { users, user } = useStore(s => ({ users: s.users, user: s.user }), shallowEqual);
+  const { users, user, onlineUserIds } = useStore(s => ({ users: s.users, user: s.user, onlineUserIds: s.onlineUserIds }), shallowEqual);
 
   const filteredFriends = users.filter(usr => 
     usr.id !== user?.id &&
@@ -104,7 +104,7 @@ export const CreateGroupFlow = ({ onClose, onCreate }: CreateGroupFlowProps) => 
                       e.stopPropagation();
                       useAppStore.getState().setViewingUserId(user.id);
                     }}>
-                      <Avatar src={user.avatar} className="size-12" status={user.isOnline ? 'online' : 'offline'} />
+                      <Avatar src={user.avatar} className="size-12" status={(user.isOnline || onlineUserIds.includes(user.id)) ? 'online' : 'offline'} />
                     </div>
                     <div className="flex-1">
                       <h4 className="font-bold text-slate-800">{user.displayName}</h4>

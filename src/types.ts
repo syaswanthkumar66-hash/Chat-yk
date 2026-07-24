@@ -221,6 +221,7 @@ export interface User {
   avatar: string;
   status: 'online' | 'offline' | 'away';
   lastSeen?: string;
+  isOnline?: boolean;
 }
 
 export interface Message {
