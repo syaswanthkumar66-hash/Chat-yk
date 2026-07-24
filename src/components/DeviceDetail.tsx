@@ -1,6 +1,6 @@
 import { useStore, shallowEqual } from '../store';
 import { Icon, Card, Button } from './UI';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 export const DeviceDetail = () => {
   const { activeDeviceId, setActiveDeviceId, devices } = useStore(s => ({

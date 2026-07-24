@@ -983,7 +983,17 @@ class WebRTCService {
         if (!exists) {
 
             console.log(`[Diagnostic] Attaching local track "${track.kind}" to peer connection`);
-          sender = pc.addTrack(track, this.localStream!);
+          // Check if there is an empty transceiver of this kind we can reuse
+          const transceiver = pc.getTransceivers().find(t => t.receiver.track.kind === track.kind && !t.sender.track);
+          if (transceiver) {
+            console.log(`[Diagnostic] Reusing empty transceiver for local track "${track.kind}"`);
+            transceiver.sender.replaceTrack(track);
+            transceiver.direction = 'sendrecv';
+            sender = transceiver.sender;
+          } else {
+            console.log(`[Diagnostic] Attaching local track "${track.kind}" to peer connection`);
+            sender = pc.addTrack(track, this.localStream!);
+          }
         } else {
           console.log(`[Diagnostic] Local track "${track.kind}" is already attached to this peer connection`);
         }

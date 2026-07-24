@@ -2,7 +2,7 @@ import { useState, useRef, ChangeEvent, useEffect, FormEvent } from 'react';
 import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { BACKEND_URL } from '../config';
 import { Button, Icon, Avatar } from './UI';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, doc, getDoc, setDoc } from '../firebase';
 import { QRScanner } from './QRScanner';
 import { 

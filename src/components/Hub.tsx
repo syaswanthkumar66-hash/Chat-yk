@@ -1,6 +1,6 @@
 import { useAppStore, generateInitialsAvatar } from '../store';
 import { Icon } from './UI';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 export const Hub = () => {
   const setMode = useAppStore(state => state.setMode);

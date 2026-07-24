@@ -4,7 +4,7 @@ import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../
 import { BACKEND_URL } from '../config';
 import { webrtcService } from '../services/webrtcService';
 import { Icon, Avatar, Button, Card, cn } from './UI';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { GroupInfo } from './GroupInfo';
 import { MediaGallery } from './MediaGallery';
 import { FileTransferError, FileTransferErrorDetails } from '../types';

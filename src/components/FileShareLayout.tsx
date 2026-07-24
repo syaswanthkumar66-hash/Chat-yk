@@ -5,7 +5,7 @@ import { DeviceDetail } from './DeviceDetail';
 import { StorageAnalytics } from './StorageAnalytics';
 import { GlobalSearch } from './GlobalSearch';
 import { FilePreviewModal } from './FilePreviewModal';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Transfer } from '../types';
 import { DeviceSyncFlow } from './DeviceSyncFlow';
 

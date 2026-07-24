@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { Icon, Button } from './UI';
 
 export const WebBrowser = ({ onClose }: { onClose: () => void }) => {

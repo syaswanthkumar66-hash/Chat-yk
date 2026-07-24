@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { useStore, useAppStore } from '../store';
 import { Icon, Button, Avatar, Card } from './UI';
 import { sessionIntegrityService } from '../services/sessionIntegrityService';

@@ -14,7 +14,7 @@ import { GroupCall } from './GroupCall';
 import { GroupInfo } from './GroupInfo';
 import { DeviceSyncFlow } from './DeviceSyncFlow';
 import { IncomingCallOverlay } from './IncomingCallOverlay';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { db, collection, query, where, getDocs, getDoc, doc } from '../firebase';
 
 function formatLastSeen(lastSeen?: string | null): string {

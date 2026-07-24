@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { Icon, Avatar, Button, Card } from './UI';
 import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 

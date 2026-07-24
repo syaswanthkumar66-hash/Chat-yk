@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { Icon, Avatar, Button, cn } from './UI';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { registerPushNotifications } from '../services/notificationService';
 import { sessionIntegrityService } from '../services/sessionIntegrityService';
 import { BACKEND_URL } from '../config';

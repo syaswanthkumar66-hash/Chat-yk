@@ -11,7 +11,7 @@ import { Icon, cn } from './components/UI';
 import { NotificationPrompt } from './components/NotificationPrompt';
 import { QuickProfileSwitcher } from './components/QuickProfileSwitcher';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, handleFirestoreError, OperationType, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocFromServer, collection, query, where, onSnapshot, runBypassSelfTests, setScopedUserInstance } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { sessionIntegrityService } from './services/sessionIntegrityService';

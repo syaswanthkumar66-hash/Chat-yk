@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Icon, Avatar, Button, cn } from './UI';
 import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { webrtcService } from '../services/webrtcService';

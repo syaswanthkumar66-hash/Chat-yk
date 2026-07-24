@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { Icon, Avatar, Card, Button, cn } from './UI';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 import { MediaGallery } from './MediaGallery';
 import { QRCodeCanvas } from 'qrcode.react';

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Icon, Avatar, Card, Button } from './UI';
 import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { db, collection, query as firestoreQuery, where, getDocs } from '../firebase';

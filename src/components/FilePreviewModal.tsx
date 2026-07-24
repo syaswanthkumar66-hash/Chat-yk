@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Transfer } from '../types';
 import { Icon, Card, Button } from './UI';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 interface FilePreviewModalProps {
   transfer: Transfer;

@@ -1,7 +1,7 @@
 import { WebRTCConnectivityTester } from './WebRTCConnectivityTester';
 import { useState, useEffect, useMemo } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { BACKEND_URL } from '../config';
 import { db, onSnapshot, collection } from '../firebase';

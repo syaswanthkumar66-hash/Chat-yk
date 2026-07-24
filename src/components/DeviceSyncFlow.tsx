@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Icon, Card, Button } from './UI';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { QRScanner } from './QRScanner';
 import { deviceSyncService, SyncProgress } from '../services/deviceSyncService';

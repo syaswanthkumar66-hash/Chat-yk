@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useStore, shallowEqual } from '../store';
 import { Icon, cn } from './UI';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { db, doc, updateDoc, deleteDoc, getDoc, auth } from '../firebase';
 import { Notification as AppNotification } from '../types';
 import { registerPushNotifications } from '../services/notificationService';

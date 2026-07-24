@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Icon, Avatar, Button, Card, cn } from './UI';
 import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface CreateGroupFlowProps {
   onClose: () => void;

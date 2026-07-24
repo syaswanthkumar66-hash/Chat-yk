@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { Icon, Button } from './UI';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { Html5Qrcode } from 'html5-qrcode';
 
 export const QRScanner = ({ onScan, onClose }: { onScan: (data: string) => void, onClose: () => void }) => {
