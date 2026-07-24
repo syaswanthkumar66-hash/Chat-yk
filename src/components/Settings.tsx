@@ -7,6 +7,7 @@ import { sessionIntegrityService } from '../services/sessionIntegrityService';
 import { BACKEND_URL } from '../config';
 import { QRCodeCanvas } from 'qrcode.react';
 import { QRScanner } from './QRScanner';
+import { formatBytes } from '../types';
 
 const PRELOADED_AVATARS = [
   'avatar1', 'avatar2', 'avatar3', 'avatar4', 'avatar5', 'avatar6'
@@ -46,7 +47,9 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     autoSyncEnabled,
     setAutoSyncEnabled,
     onlineDevices,
-    currentDeviceId
+    currentDeviceId,
+    dataUsage,
+    resetDataUsage
   } = useStore(s => ({
     user: s.user,
     updateUser: s.updateUser,
@@ -69,9 +72,11 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     autoSyncEnabled: s.autoSyncEnabled,
     setAutoSyncEnabled: s.setAutoSyncEnabled,
     onlineDevices: s.onlineDevices,
-    currentDeviceId: s.currentDeviceId
+    currentDeviceId: s.currentDeviceId,
+    dataUsage: s.dataUsage,
+    resetDataUsage: s.resetDataUsage
   }), shallowEqual);
-  const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection' | 'devices-sync'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection' | 'devices-sync' | 'data-usage'>('main');
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [description, setDescription] = useState(user?.description || '');
@@ -2113,7 +2118,175 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
 
           </div>
         );
-      default:
+      case 'data-usage':
+        const chatUpload = dataUsage?.chatUploadBytes || 0;
+        const chatDownload = dataUsage?.chatDownloadBytes || 0;
+        const totalChat = chatUpload + chatDownload;
+
+        const callUpload = dataUsage?.callUploadBytes || 0;
+        const callDownload = dataUsage?.callDownloadBytes || 0;
+        const totalCall = callUpload + callDownload;
+
+        const totalUpload = chatUpload + callUpload;
+        const totalDownload = chatDownload + callDownload;
+        const grandTotal = totalUpload + totalDownload;
+
+        const chatPercentage = grandTotal > 0 ? Math.round((totalChat / grandTotal) * 100) : 0;
+        const callPercentage = grandTotal > 0 ? Math.round((totalCall / grandTotal) * 100) : 0;
+
+        return (
+          <div className="space-y-6">
+            <header className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setActiveView('main')} 
+                  className="size-10 rounded-full bg-white border border-primary/5 shadow-sm flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all shrink-0"
+                >
+                  <Icon name="arrow_back" />
+                </button>
+                <div className="flex flex-col text-left">
+                  <h3 className="text-xl font-bold text-slate-800 italic uppercase tracking-tight">Data & Storage Usage</h3>
+                  <p className="text-[10px] text-neutral-muted">Calculated & synchronized with Firestore</p>
+                </div>
+              </div>
+              <span className="text-[9px] bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0">
+                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Firestore Active
+              </span>
+            </header>
+
+            {/* Overview Summary Banner */}
+            <div className="p-5 bg-gradient-to-br from-primary/10 via-primary/5 to-slate-50 border border-primary/10 rounded-3xl space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="size-8 rounded-xl bg-primary text-white flex items-center justify-center shadow-md">
+                    <Icon name="data_usage" className="text-lg" />
+                  </div>
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-800">Total Network Traffic</span>
+                </div>
+                <span className="text-base font-black text-primary font-mono">{formatBytes(grandTotal)}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="p-3 bg-white/80 rounded-2xl border border-primary/5 space-y-1 text-left">
+                  <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-black uppercase tracking-wider">
+                    <Icon name="cloud_upload" className="text-xs" />
+                    <span>Total Upload</span>
+                  </div>
+                  <div className="text-sm font-black text-slate-800 font-mono">{formatBytes(totalUpload)}</div>
+                </div>
+
+                <div className="p-3 bg-white/80 rounded-2xl border border-primary/5 space-y-1 text-left">
+                  <div className="flex items-center gap-1.5 text-blue-600 text-[10px] font-black uppercase tracking-wider">
+                    <Icon name="cloud_download" className="text-xs" />
+                    <span>Total Download</span>
+                  </div>
+                  <div className="text-sm font-black text-slate-800 font-mono">{formatBytes(totalDownload)}</div>
+                </div>
+              </div>
+
+              {/* Bandwidth distribution bar */}
+              <div className="space-y-1.5 text-left">
+                <div className="flex justify-between items-center text-[10px] font-bold text-slate-600">
+                  <span>Chat vs Call Bandwidth Ratio</span>
+                  <span>Chat {chatPercentage}% • Calls {callPercentage}%</span>
+                </div>
+                <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden flex">
+                  <div 
+                    style={{ width: `${chatPercentage}%` }} 
+                    className="h-full bg-primary transition-all duration-500" 
+                    title={`Chat: ${formatBytes(totalChat)}`}
+                  />
+                  <div 
+                    style={{ width: `${callPercentage}%` }} 
+                    className="h-full bg-amber-500 transition-all duration-500" 
+                    title={`Calls: ${formatBytes(totalCall)}`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Chat Data Usage Card */}
+            <div className="p-5 bg-white border border-slate-100 rounded-3xl space-y-4 shadow-sm text-left">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="size-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold">
+                    <Icon name="chat" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-800">Chat & Media Usage</span>
+                    <span className="text-[10px] text-neutral-muted">Messages, photos, files & voice notes</span>
+                  </div>
+                </div>
+                <span className="text-xs font-black text-slate-800 font-mono bg-slate-100 px-2.5 py-1 rounded-xl">
+                  {formatBytes(totalChat)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Uploaded</span>
+                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(chatUpload)}</div>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Downloaded</span>
+                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(chatDownload)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Call Data Usage Card */}
+            <div className="p-5 bg-white border border-slate-100 rounded-3xl space-y-4 shadow-sm text-left">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="size-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
+                    <Icon name="call" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-800">Voice & Video Calls Usage</span>
+                    <span className="text-[10px] text-neutral-muted">WebRTC RTP packets & audio/video stream flow</span>
+                  </div>
+                </div>
+                <span className="text-xs font-black text-slate-800 font-mono bg-slate-100 px-2.5 py-1 rounded-xl">
+                  {formatBytes(totalCall)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Sent Stream</span>
+                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(callUpload)}</div>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Received Stream</span>
+                  <div className="text-xs font-bold text-slate-700 font-mono">{formatBytes(callDownload)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Reset Action & Timestamp */}
+            <div className="pt-2 space-y-3">
+              <Button
+                variant="secondary"
+                className="w-full text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 border-none py-3"
+                onClick={() => {
+                  if (window.confirm("Are you sure you want to reset all data usage statistics to 0? This cannot be undone.")) {
+                    resetDataUsage();
+                  }
+                }}
+              >
+                <Icon name="delete_sweep" className="text-sm mr-1.5" />
+                Reset Usage Statistics
+              </Button>
+
+              {dataUsage?.lastUpdated && (
+                <p className="text-[10px] text-neutral-muted text-center italic">
+                  Last synced to Firestore: {new Date(dataUsage.lastUpdated).toLocaleString()}
+                </p>
+              )}
+            </div>
+          </div>
+        );
         return (
           <>
             {/* Profile Section */}
@@ -2223,6 +2396,21 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                     <div className="flex flex-col items-start">
                       <span className="text-sm font-bold text-slate-700">Connection Diagnostics</span>
                       <span className="text-[10px] text-neutral-muted">Heartbeat, retry metrics & status logs</span>
+                    </div>
+                  </div>
+                  <Icon name="chevron_right" className="text-slate-400" />
+                </button>
+                <button 
+                  onClick={() => setActiveView('data-usage')}
+                  className="w-full p-4 rounded-2xl bg-primary/5 flex items-center justify-between hover:bg-primary/10 transition-colors group border border-primary/5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="size-10 rounded-xl bg-white flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors shadow-sm">
+                      <Icon name="data_usage" />
+                    </div>
+                    <div className="flex flex-col items-start text-left">
+                      <span className="text-sm font-bold text-slate-700">Data & Network Usage</span>
+                      <span className="text-[10px] text-neutral-muted">Track Chat & Call upload and download metrics</span>
                     </div>
                   </div>
                   <Icon name="chevron_right" className="text-slate-400" />
@@ -2514,20 +2702,20 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="relative bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border border-slate-100"
+        className="relative bg-white rounded-2xl sm:rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[96dvh] sm:max-h-[90vh] border border-slate-100 modal-card-watch"
       >
-        <header className="p-6 border-b border-primary/5 flex items-center justify-between bg-bg-light/80 backdrop-blur-xl sticky top-0 z-10">
-          <div className="flex items-center gap-4">
-            <div className="size-12 rounded-2xl bg-white border border-white shadow-sm flex items-center justify-center text-primary">
-              <Icon name="settings" className="text-2xl" />
+        <header className="p-3 sm:p-6 border-b border-primary/5 flex items-center justify-between bg-bg-light/80 backdrop-blur-xl sticky top-0 z-10">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <div className="size-9 sm:size-12 rounded-xl sm:rounded-2xl bg-white border border-white shadow-sm flex items-center justify-center text-primary flex-shrink-0">
+              <Icon name="settings" className="text-lg sm:text-2xl" />
             </div>
             <div>
-              <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter italic leading-none">Settings</h2>
-              <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mt-1">Preferences & Account</p>
+              <h2 className="text-lg sm:text-2xl font-black text-slate-900 uppercase tracking-tighter italic leading-none">Settings</h2>
+              <p className="text-[8px] sm:text-[10px] font-black text-primary uppercase tracking-[0.2em] mt-0.5">Preferences & Account</p>
             </div>
           </div>
-          <button onClick={onClose} className="size-11 rounded-2xl bg-white border border-white shadow-sm hover:bg-primary hover:text-white flex items-center justify-center text-primary transition-all active:scale-95">
-            <Icon name="close" />
+          <button onClick={onClose} className="size-8 sm:size-11 rounded-xl sm:rounded-2xl bg-white border border-white shadow-sm hover:bg-primary hover:text-white flex items-center justify-center text-primary transition-all active:scale-95 flex-shrink-0">
+            <Icon name="close" className="text-sm sm:text-base" />
           </button>
         </header>
 

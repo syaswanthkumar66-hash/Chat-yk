@@ -480,7 +480,7 @@ export const Onboarding = () => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-4 md:p-6 bg-bg-light relative overflow-hidden">
+    <div className="flex flex-col items-center justify-center h-full p-2 sm:p-4 md:p-6 bg-bg-light relative overflow-x-hidden overflow-y-auto">
       {/* Background Decorative Elements */}
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
         <div className="absolute -top-24 -left-24 size-64 md:size-96 bg-primary/10 blur-[80px] md:blur-[100px] rounded-full" />
@@ -517,7 +517,7 @@ export const Onboarding = () => {
             exit={{ opacity: 0, scale: 1.05 }}
             className="w-full max-w-md relative z-10"
           >
-            <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-2xl shadow-slate-200/50 space-y-6 md:space-y-8">
+            <div className="bg-white p-3 sm:p-6 md:p-8 rounded-2xl sm:rounded-[2.5rem] border border-slate-100 shadow-2xl shadow-slate-200/50 space-y-4 sm:space-y-6 md:space-y-8">
               <div className="flex flex-col items-center text-center gap-3">
                 <div className="size-14 rounded-2xl bg-primary flex items-center justify-center text-white shadow-xl shadow-primary/30 rotate-3">
                   <Icon name="share_reviews" className="text-3xl" fill />

@@ -2507,8 +2507,8 @@ export const ChatDetail = () => {
               <EmojiPicker 
                 onEmojiClick={handleEmojiClick} 
                 theme={Theme.LIGHT}
-                width={320}
-                height={400}
+                width={Math.min(typeof window !== 'undefined' ? window.innerWidth - 24 : 300, 320)}
+                height={Math.min(typeof window !== 'undefined' ? window.innerHeight * 0.45 : 350, 400)}
                 lazyLoadEmojis={true}
               />
             </motion.div>

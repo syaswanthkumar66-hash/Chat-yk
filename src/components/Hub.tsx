@@ -8,60 +8,60 @@ export const Hub = () => {
   const logout = useAppStore(state => state.logout);
 
   return (
-    <div className="h-full bg-bg-light text-slate-900 overflow-hidden flex flex-col md:flex-row">
+    <div className="h-full bg-bg-light text-slate-900 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row">
       {/* Left Pane - Branding & Intro */}
-      <div className="flex-1 p-8 pt-[max(2rem,env(safe-area-inset-top))] md:p-20 flex flex-col justify-between relative overflow-hidden border-b md:border-b-0 md:border-r border-primary/10">
+      <div className="flex-1 p-4 sm:p-8 pt-[max(1rem,env(safe-area-inset-top))] md:p-12 lg:p-20 flex flex-col justify-between relative overflow-hidden border-b md:border-b-0 md:border-r border-primary/10 min-h-[50vh] md:min-h-0">
         <div className="relative z-10">
-          <div className="flex items-center justify-between mb-10 md:mb-16">
-            <div className="flex items-center gap-3">
-              <div className="size-10 md:size-12 rounded-2xl bg-primary flex items-center justify-center shadow-2xl shadow-primary/20">
-                <Icon name="share" className="text-white text-xl md:text-2xl" />
+          <div className="flex items-center justify-between mb-6 md:mb-16">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="size-9 sm:size-12 rounded-xl sm:rounded-2xl bg-primary flex items-center justify-center shadow-2xl shadow-primary/20 flex-shrink-0">
+                <Icon name="share" className="text-white text-lg sm:text-2xl" />
               </div>
               <div>
-                <span className="font-black tracking-tighter text-xl md:text-2xl uppercase italic leading-none block text-slate-900">Connect</span>
-                <span className="text-[8px] md:text-[10px] font-black text-primary/40 uppercase tracking-[0.4em] mt-1 block">Protocol v2.5</span>
+                <span className="font-black tracking-tighter text-lg sm:text-2xl uppercase italic leading-none block text-slate-900">Connect</span>
+                <span className="text-[7px] sm:text-[10px] font-black text-primary/40 uppercase tracking-[0.3em] sm:tracking-[0.4em] mt-0.5 block">Protocol v2.5</span>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               {user?.isAdmin && (
                 <button 
                   onClick={() => setMode('admin')}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-50 text-amber-500 hover:bg-amber-500 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest shadow-sm border border-white"
+                  className="flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-amber-50 text-amber-500 hover:bg-amber-500 hover:text-white transition-all text-[9px] sm:text-[10px] font-black uppercase tracking-wider sm:tracking-widest shadow-sm border border-white"
                 >
-                  <Icon name="security" className="text-sm" />
-                  Admin
+                  <Icon name="security" className="text-xs sm:text-sm" />
+                  <span className="hidden sm:inline">Admin</span>
                 </button>
               )}
               {user && (
                 <button 
                   onClick={logout}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest shadow-sm border border-white"
+                  className="flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all text-[9px] sm:text-[10px] font-black uppercase tracking-wider sm:tracking-widest shadow-sm border border-white"
                 >
-                  <Icon name="logout" className="text-sm" />
-                  Logout
+                  <Icon name="logout" className="text-xs sm:text-sm" />
+                  <span className="hidden sm:inline">Logout</span>
                 </button>
               )}
             </div>
           </div>
           
-          <div className="space-y-6 md:space-y-8">
-            <h1 className="text-5xl md:text-[9rem] font-black tracking-tighter leading-[0.9] md:leading-[0.8] uppercase italic text-slate-900">
+          <div className="space-y-4 sm:space-y-8">
+            <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl 2xl:text-[9rem] font-black tracking-tighter leading-[0.9] md:leading-[0.8] uppercase italic text-slate-900">
               Direct<br />
               <span className="text-primary">Access.</span><br />
               <span className="text-slate-200">Pure P2P.</span>
             </h1>
-            <p className="text-slate-500 max-w-md text-lg md:text-xl font-medium leading-relaxed">
+            <p className="text-slate-500 max-w-md text-sm sm:text-lg md:text-xl font-medium leading-relaxed">
               A high-performance ecosystem for private communication and secure data exchange. No middleman. No limits.
             </p>
           </div>
         </div>
 
-        <div className="mt-10 md:mt-0 relative z-10">
-          <div className="flex items-center gap-4 md:gap-6">
-            <div className="flex -space-x-3 md:-space-x-4">
+        <div className="mt-6 md:mt-0 relative z-10">
+          <div className="flex items-center gap-3 sm:gap-6">
+            <div className="flex -space-x-2 sm:-space-x-4">
               {[1, 2, 3, 4].map(i => (
-                <div key={`hub-user-avatar-${i}`} className="size-10 md:size-12 rounded-xl md:rounded-2xl border-2 md:border-4 border-white overflow-hidden shadow-2xl">
+                <div key={`hub-user-avatar-${i}`} className="size-8 sm:size-12 rounded-lg sm:rounded-2xl border-2 sm:border-4 border-white overflow-hidden shadow-2xl">
                   <img 
                     src={generateInitialsAvatar(`user${i}`, `U${i}`)} 
                     className="size-full object-cover"
@@ -71,8 +71,8 @@ export const Hub = () => {
               ))}
             </div>
             <div>
-              <p className="text-[8px] md:text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Active Network</p>
-              <p className="text-[8px] md:text-[10px] font-black text-primary/40 uppercase tracking-[0.2em] mt-1">12.4k Nodes Online</p>
+              <p className="text-[7px] sm:text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Active Network</p>
+              <p className="text-[7px] sm:text-[10px] font-black text-primary/40 uppercase tracking-[0.2em] mt-0.5">12.4k Nodes Online</p>
             </div>
           </div>
         </div>
@@ -82,30 +82,30 @@ export const Hub = () => {
       </div>
 
       {/* Right Pane - Navigation Options */}
-      <div className="flex-1 p-8 pb-[max(2rem,env(safe-area-inset-bottom))] md:p-20 flex flex-col justify-center gap-6 md:gap-8 bg-white/40 backdrop-blur-sm">
-        <div className="mb-4 md:mb-8">
+      <div className="flex-1 p-4 sm:p-8 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:p-12 lg:p-20 flex flex-col justify-center gap-4 md:gap-8 bg-white/40 backdrop-blur-sm">
+        <div className="mb-2 md:mb-8">
           <h2 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.5em] text-slate-300">Select Protocol</h2>
-          <div className="h-px w-10 md:w-12 bg-primary mt-3 md:mt-4" />
+          <div className="h-px w-10 md:w-12 bg-primary mt-2 md:mt-4" />
         </div>
         
-        <div className="grid gap-4 md:gap-6">
+        <div className="grid gap-3 sm:gap-4 md:gap-6">
           <motion.button
             whileHover={{ x: 15, backgroundColor: 'rgba(255,255,255,0.8)' }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setMode('social')}
-            className="group flex items-center gap-4 md:gap-8 p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-white shadow-xl shadow-slate-200/50 transition-all text-left relative overflow-hidden bg-white/50"
+            className="group flex items-center gap-3 sm:gap-4 md:gap-8 p-3 sm:p-6 md:p-10 rounded-xl sm:rounded-[2rem] md:rounded-[3rem] border border-white shadow-xl shadow-slate-200/50 transition-all text-left relative overflow-hidden bg-white/50"
           >
             <div className="absolute top-0 right-0 p-4 md:p-8 opacity-[0.03] group-hover:opacity-[0.05] transition-opacity">
-              <Icon name="chat_bubble" className="text-7xl md:text-9xl" />
+              <Icon name="chat_bubble" className="text-5xl md:text-9xl" />
             </div>
-            <div className="size-14 md:size-20 rounded-2xl md:rounded-3xl bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all shadow-xl">
-              <Icon name="chat_bubble" className="text-2xl md:text-4xl" />
+            <div className="size-10 sm:size-14 md:size-20 rounded-xl sm:rounded-2xl md:rounded-3xl bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all shadow-xl flex-shrink-0">
+              <Icon name="chat_bubble" className="text-lg sm:text-2xl md:text-4xl" />
             </div>
-            <div className="flex-1 relative z-10">
-              <h3 className="text-xl md:text-3xl font-black tracking-tighter uppercase italic mb-1 md:mb-2 text-slate-900">Social Mode</h3>
-              <p className="text-slate-400 text-[10px] md:text-sm font-medium leading-snug max-w-[150px] md:max-w-[200px]">Encrypted messaging and real-time voice discovery.</p>
+            <div className="flex-1 relative z-10 min-w-0">
+              <h3 className="text-base sm:text-xl md:text-3xl font-black tracking-tighter uppercase italic mb-0.5 sm:mb-2 text-slate-900 truncate">Social Mode</h3>
+              <p className="text-slate-400 text-[9px] sm:text-xs md:text-sm font-medium leading-snug">Encrypted messaging & real-time discovery.</p>
             </div>
-            <Icon name="arrow_forward" className="text-slate-200 group-hover:text-primary transition-colors text-xl md:text-2xl" />
+            <Icon name="arrow_forward" className="text-slate-200 group-hover:text-primary transition-colors text-lg sm:text-xl md:text-2xl flex-shrink-0" />
           </motion.button>
 
           <motion.button

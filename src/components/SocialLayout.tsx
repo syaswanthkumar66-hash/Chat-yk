@@ -159,7 +159,9 @@ export const SocialLayout = () => {
     <div className="flex h-full bg-bg-light relative overflow-hidden font-sans">
       {/* Left Sidebar - Chat List */}
       <div className={`flex flex-col h-full bg-bg-light border-r border-primary/10 transition-all duration-500 ease-in-out relative z-20 ${
-        (activeChatId || activeRecipientId || viewingUserId) ? 'hidden md:flex md:w-80 lg:w-[400px]' : 'w-full md:w-80 lg:w-[400px]'
+        (activeChatId || activeRecipientId || viewingUserId) 
+          ? 'hidden md:flex md:w-80 lg:w-[380px] xl:w-[420px] 2xl:w-[480px] 3xl:w-[540px]' 
+          : 'w-full md:w-80 lg:w-[380px] xl:w-[420px] 2xl:w-[480px] 3xl:w-[540px]'
       }`}>
         <AnimatePresence>
           {showGlobalSearch && (
@@ -302,25 +304,25 @@ export const SocialLayout = () => {
         </AnimatePresence>
 
         {/* Header */}
-        <header className="px-6 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 flex flex-col gap-6 bg-bg-light/80 backdrop-blur-xl sticky top-0 z-30 border-b border-primary/5">
+        <header className="px-3 sm:px-6 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 sm:pb-6 flex flex-col gap-3 sm:gap-6 bg-bg-light/80 backdrop-blur-xl sticky top-0 z-30 border-b border-primary/5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4">
               <motion.button 
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => setMode('hub')} 
-                className="size-12 rounded-2xl bg-white flex items-center justify-center text-primary shadow-xl shadow-primary/10 transition-all border border-white"
+                className="size-9 sm:size-12 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center text-primary shadow-xl shadow-primary/10 transition-all border border-white flex-shrink-0"
               >
-                <Icon name="grid_view" className="text-xl" />
+                <Icon name="grid_view" className="text-lg sm:text-xl" />
               </motion.button>
-              <div className="flex flex-col">
-                <h1 className="text-2xl font-black tracking-tighter text-slate-900 uppercase italic leading-none">{activeTab}</h1>
-                <div className="flex items-center gap-3 mt-1.5">
+              <div className="flex flex-col min-w-0">
+                <h1 className="text-lg sm:text-2xl font-black tracking-tighter text-slate-900 uppercase italic leading-none truncate">{activeTab}</h1>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
                   {shouldShowSyncUI && (
                     <>
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-100 text-[9px] font-black tracking-wider uppercase text-amber-600">
-                        <div className="size-2 rounded-full bg-amber-500 animate-pulse" />
-                        <span>Mismatch Detected</span>
+                      <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-amber-50 border border-amber-100 text-[8px] sm:text-[9px] font-black tracking-wider uppercase text-amber-600">
+                        <div className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        <span>Mismatch</span>
                       </div>
                       <button 
                         onClick={() => {
@@ -329,15 +331,15 @@ export const SocialLayout = () => {
                           }
                         }}
                         disabled={wssStatus !== 'connected' || isSyncing}
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[9px] font-black tracking-wider uppercase transition-all duration-200 active:scale-95 ${
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-lg border text-[8px] sm:text-[9px] font-black tracking-wider uppercase transition-all duration-200 active:scale-95 ${
                           wssStatus === 'connected' 
                             ? 'bg-indigo-50 border-indigo-100 hover:bg-indigo-100 text-indigo-700 cursor-pointer' 
                             : 'bg-slate-50 border-slate-100 text-slate-400 cursor-not-allowed opacity-60'
                         }`}
                         title="Fetch latest data from other devices"
                       >
-                        <Icon name="sync" className={`text-[11px] ${isSyncing ? 'animate-spin' : ''}`} />
-                        <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                        <Icon name="sync" className={`text-[10px] sm:text-[11px] ${isSyncing ? 'animate-spin' : ''}`} />
+                        <span>{isSyncing ? 'Syncing' : 'Sync'}</span>
                       </button>
                     </>
                   )}
@@ -345,31 +347,31 @@ export const SocialLayout = () => {
               </div>
             </div>
             
-            <div className="flex gap-2">
+            <div className="flex gap-1 sm:gap-2 flex-shrink-0">
               {user?.isAdmin && (
                 <button 
                   onClick={() => setMode('admin')}
-                  className="size-11 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-500 hover:bg-amber-500 hover:text-white transition-all active:scale-95 border border-white shadow-sm"
+                  className="size-8 sm:size-11 rounded-xl sm:rounded-2xl bg-amber-50 flex items-center justify-center text-amber-500 hover:bg-amber-500 hover:text-white transition-all active:scale-95 border border-white shadow-sm"
                   title="Admin Panel"
                 >
-                  <Icon name="security" />
+                  <Icon name="security" className="text-sm sm:text-base" />
                 </button>
               )}
               <button 
                 onClick={() => useAppStore.getState().logout()}
-                className="size-11 rounded-2xl bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95 border border-white shadow-sm"
+                className="size-8 sm:size-11 rounded-xl sm:rounded-2xl bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95 border border-white shadow-sm"
                 title="Logout"
               >
-                <Icon name="logout" />
+                <Icon name="logout" className="text-sm sm:text-base" />
               </button>
               <button 
                 onClick={() => setShowNotifications(true)}
-                className="size-11 rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm relative"
+                className="size-8 sm:size-11 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm relative"
                 title="Notifications"
               >
-                <Icon name="notifications" />
+                <Icon name="notifications" className="text-sm sm:text-base" />
                 {notifications.filter(n => n.status !== 'read').length > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white ring-2 ring-white animate-bounce">
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500 text-[8px] sm:text-[10px] font-black text-white ring-2 ring-white animate-bounce">
                     {notifications.filter(n => n.status !== 'read').length}
                   </span>
                 )}
@@ -378,15 +380,15 @@ export const SocialLayout = () => {
                 <>
                   <button 
                     onClick={() => setShowGlobalSearch(true)}
-                    className="size-11 rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm"
+                    className="size-8 sm:size-11 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm"
                   >
-                    <Icon name="search" />
+                    <Icon name="search" className="text-sm sm:text-base" />
                   </button>
                   <button 
                     onClick={() => setShowScanner(true)}
-                    className="size-11 rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm"
+                    className="size-8 sm:size-11 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-95 border border-white shadow-sm"
                   >
-                    <Icon name="qr_code_scanner" />
+                    <Icon name="qr_code_scanner" className="text-sm sm:text-base" />
                   </button>
                 </>
               )}

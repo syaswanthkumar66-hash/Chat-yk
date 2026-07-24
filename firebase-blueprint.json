@@ -61,6 +61,20 @@
         "lastUpdated": { "type": "string" }
       },
       "required": ["lastUpdated"]
+    },
+    "DataUsage": {
+      "title": "DataUsage",
+      "description": "Network data usage statistics for chat and calls in bytes",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "chatUploadBytes": { "type": "number" },
+        "chatDownloadBytes": { "type": "number" },
+        "callUploadBytes": { "type": "number" },
+        "callDownloadBytes": { "type": "number" },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["userId", "chatUploadBytes", "chatDownloadBytes", "callUploadBytes", "callDownloadBytes"]
     }
   },
   "firestore": {
@@ -79,6 +93,10 @@
     "cloud_syncs/{userId}": {
       "schema": { "$ref": "#/entities/CloudSync" },
       "description": "Encrypted multi-device sync data"
+    },
+    "data_usage/{userId}": {
+      "schema": { "$ref": "#/entities/DataUsage" },
+      "description": "User data usage statistics for chat and calls"
     }
   }
 }

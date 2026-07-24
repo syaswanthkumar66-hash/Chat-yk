@@ -663,6 +663,11 @@ class WebRTCService {
                   transferId: message.transferId
                 }));
 
+                // Record chat download usage for received voice note
+                try {
+                  useAppStore.getState().recordDataUsage('chat_download', audioBlob.size);
+                } catch (e) {}
+
                 // Dispatch success event to let ChatDetail display the new audio message
                 window.dispatchEvent(new CustomEvent('webrtc_audio_received', {
                   detail: {
@@ -769,6 +774,9 @@ class WebRTCService {
         });
 
         console.log(`Sending audio over data channel to ${peerId} (room ${roomId}). Size: ${totalBytes} bytes. Transfer ID: ${transferId}`);
+        try {
+          useAppStore.getState().recordDataUsage('chat_upload', totalBytes);
+        } catch (e) {}
 
         try {
           // 1. Send transfer_start
@@ -1069,11 +1077,11 @@ class WebRTCService {
           if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
             activeCandidatePair = report;
           }
-          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-            audioBytesReceived = report.bytesReceived || 0;
+          if (report.type === 'inbound-rtp') {
+            audioBytesReceived += (report.bytesReceived || 0);
           }
-          if (report.type === 'outbound-rtp' && report.kind === 'audio') {
-            audioBytesSent = report.bytesSent || 0;
+          if (report.type === 'outbound-rtp') {
+            audioBytesSent += (report.bytesSent || 0);
           }
         });
 
@@ -1093,6 +1101,20 @@ class WebRTCService {
 
         const sentDelta = audioBytesSent - lastBytesSent;
         const receivedDelta = audioBytesReceived - lastBytesReceived;
+
+        // Record call upload and download usage
+        if (lastBytesSent > 0 && sentDelta > 0) {
+          try {
+            useAppStore.getState().recordDataUsage('call_upload', sentDelta);
+          } catch (e) {}
+        }
+        if (lastBytesReceived > 0 && receivedDelta > 0) {
+          try {
+            useAppStore.getState().recordDataUsage('call_download', receivedDelta);
+          } catch (e) {}
+        }
+        lastBytesSent = audioBytesSent;
+        lastBytesReceived = audioBytesReceived;
 
         // Detect if media stopped flowing after connection was established
         if (lastBytesSent > 0) {

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useSyncExternalStore, useRef } from 'react';
-import { Chat, Message, Device, Transfer, Notification } from './types';
+import { Chat, Message, Device, Transfer, Notification, DataUsage, parseFileSizeToBytes, formatBytes } from './types';
 import { io, Socket } from 'socket.io-client';
 import { BACKEND_URL } from './config';
 
@@ -253,6 +253,10 @@ interface AppState {
   isSyncing: boolean;
   performCatchUpSync: () => Promise<void>;
   onlineDevices: string[];
+  dataUsage: DataUsage;
+  recordDataUsage: (type: 'chat_upload' | 'chat_download' | 'call_upload' | 'call_download', bytes: number) => void;
+  resetDataUsage: () => void;
+  loadDataUsage: (userId: string) => Promise<void>;
   currentDeviceId: string | null;
 }
 
@@ -448,7 +452,125 @@ const cachedSentFriendRequests = cachedUser
   ? getLocalStorageJSON<string[]>(`proto_sentFriendRequests_${cachedUser.id}`, [])
   : [];
 
+let usageDebounceTimer: any = null;
+
+function syncUsageToFirestore(userId: string, usage: DataUsage) {
+  if (!userId || userId === 'u1') return;
+  if (usageDebounceTimer) clearTimeout(usageDebounceTimer);
+  usageDebounceTimer = setTimeout(() => {
+    import('./firebase').then(({ db, doc, setDoc, OperationType, handleFirestoreError }) => {
+      setDoc(doc(db, 'data_usage', userId), {
+        userId,
+        ...usage,
+        lastUpdated: new Date().toISOString()
+      }, { merge: true }).catch((err) => {
+        try {
+          handleFirestoreError(err, OperationType.WRITE, `data_usage/${userId}`);
+        } catch (e) {
+          console.warn("Firestore data_usage save error caught:", e);
+        }
+      });
+    });
+  }, 1500);
+}
+
 export const useAppStore = create<AppState>((set) => ({
+  dataUsage: cachedUser
+    ? getLocalStorageJSON<DataUsage>(`proto_data_usage_${cachedUser.id}`, {
+        chatUploadBytes: 0,
+        chatDownloadBytes: 0,
+        callUploadBytes: 0,
+        callDownloadBytes: 0
+      })
+    : {
+        chatUploadBytes: 0,
+        chatDownloadBytes: 0,
+        callUploadBytes: 0,
+        callDownloadBytes: 0
+      },
+  recordDataUsage: (type, bytes) => {
+    if (!bytes || bytes <= 0 || isNaN(bytes)) return;
+    set((state) => {
+      const current = state.dataUsage || {
+        chatUploadBytes: 0,
+        chatDownloadBytes: 0,
+        callUploadBytes: 0,
+        callDownloadBytes: 0
+      };
+      const updated: DataUsage = {
+        ...current,
+        chatUploadBytes: type === 'chat_upload' ? current.chatUploadBytes + Math.round(bytes) : current.chatUploadBytes,
+        chatDownloadBytes: type === 'chat_download' ? current.chatDownloadBytes + Math.round(bytes) : current.chatDownloadBytes,
+        callUploadBytes: type === 'call_upload' ? current.callUploadBytes + Math.round(bytes) : current.callUploadBytes,
+        callDownloadBytes: type === 'call_download' ? current.callDownloadBytes + Math.round(bytes) : current.callDownloadBytes,
+        lastUpdated: new Date().toISOString()
+      };
+      if (typeof window !== 'undefined' && state.user?.id) {
+        try {
+          safeLocalStorageSetItem(`proto_data_usage_${state.user.id}`, JSON.stringify(updated));
+        } catch (e) {}
+      }
+      if (state.user?.id) {
+        syncUsageToFirestore(state.user.id, updated);
+      }
+      return { dataUsage: updated };
+    });
+  },
+  resetDataUsage: () => {
+    set((state) => {
+      const resetUsage: DataUsage = {
+        chatUploadBytes: 0,
+        chatDownloadBytes: 0,
+        callUploadBytes: 0,
+        callDownloadBytes: 0,
+        lastUpdated: new Date().toISOString()
+      };
+      if (typeof window !== 'undefined' && state.user?.id) {
+        try {
+          localStorage.removeItem(`proto_data_usage_${state.user.id}`);
+        } catch (e) {}
+      }
+      if (state.user?.id) {
+        syncUsageToFirestore(state.user.id, resetUsage);
+      }
+      return { dataUsage: resetUsage };
+    });
+  },
+  loadDataUsage: async (userId: string) => {
+    if (!userId) return;
+    let localData: DataUsage | null = null;
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(`proto_data_usage_${userId}`);
+        if (raw) localData = JSON.parse(raw);
+      } catch (e) {}
+    }
+    if (localData) {
+      set({ dataUsage: localData });
+    }
+    try {
+      const { db, doc, getDoc } = await import('./firebase');
+      const snap = await getDoc(doc(db, 'data_usage', userId));
+      if (snap.exists()) {
+        const remoteData = snap.data() as DataUsage;
+        const merged: DataUsage = {
+          chatUploadBytes: Math.max(localData?.chatUploadBytes || 0, remoteData.chatUploadBytes || 0),
+          chatDownloadBytes: Math.max(localData?.chatDownloadBytes || 0, remoteData.chatDownloadBytes || 0),
+          callUploadBytes: Math.max(localData?.callUploadBytes || 0, remoteData.callUploadBytes || 0),
+          callDownloadBytes: Math.max(localData?.callDownloadBytes || 0, remoteData.callDownloadBytes || 0),
+          lastUpdated: remoteData.lastUpdated || new Date().toISOString()
+        };
+        set({ dataUsage: merged });
+        if (typeof window !== 'undefined') {
+          try {
+            safeLocalStorageSetItem(`proto_data_usage_${userId}`, JSON.stringify(merged));
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch data usage from firestore:", e);
+    }
+  },
   onlineUserIds: [] as string[],
   offlineMessageQueue: cachedUser ? getLocalStorageJSON<{ id: string, chatId: string | null, recipientId: string | null, text: string, type: string, fileUrl?: string, fileSize?: string, e2eData?: any }[]>(`proto_offlineMessageQueue_${cachedUser.id}`, []) : [],
   generateInitialsAvatar: generateInitialsAvatar,
@@ -725,6 +847,9 @@ export const useAppStore = create<AppState>((set) => ({
       safeLocalStorageSetItem('proto_isLoggedIn', 'true');
       safeLocalStorageSetItem('proto_authMethod', authMethod);
     }
+
+    // Load user data usage stats
+    useAppStore.getState().loadDataUsage(user.id);
 
     // Set scoped Firebase instance and register account with sessionIntegrityService asynchronously
     import('./firebase').then(({ setScopedUserInstance }) => {
@@ -1558,6 +1683,17 @@ export const useAppStore = create<AppState>((set) => ({
           isE2E: !!(data.iv || data.encryptedFileKey || (data.text && typeof data.text === 'string' && data.text.includes('"iv"'))),
           isOwn: isOwnMessage
         };
+
+        // Record chat download usage if received from remote peer
+        if (!isOwnMessage) {
+          try {
+            let downloadBytes = new Blob([decryptedText || '']).size;
+            if (resolvedFileSize) {
+              downloadBytes += parseFileSizeToBytes(resolvedFileSize);
+            }
+            state.recordDataUsage('chat_download', downloadBytes);
+          } catch (e) {}
+        }
 
         // Find chat or create one
         set((state) => {
@@ -2485,6 +2621,15 @@ export const useAppStore = create<AppState>((set) => ({
     };
   }),
   sendMessage: (chatId, recipientId, text, type = 'text', fileUrl, fileSize, e2eData?: { encryptedText: string, iv: number[], encryptedFileKey?: number[] }, isForwarded?: boolean, customId?: string) => set((state) => {
+    // Record chat upload data usage
+    try {
+      let uploadBytes = new Blob([text || '']).size;
+      if (fileSize) {
+        uploadBytes += parseFileSizeToBytes(fileSize);
+      }
+      state.recordDataUsage('chat_upload', uploadBytes);
+    } catch (e) {}
+
     const isSocketConnected = state.socket && state.socket.connected;
     let offlineMessageQueue = [...state.offlineMessageQueue];
     const newMessage: Message = {

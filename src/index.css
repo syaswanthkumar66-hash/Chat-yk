@@ -12,6 +12,10 @@
   --color-bg-dark: #2D2D2D;
   --color-card-light: #FFFFFF;
   --color-neutral-muted: #8E8E8E;
+
+  --breakpoint-xs: 320px;
+  --breakpoint-3xl: 1920px;
+  --breakpoint-4xl: 2560px;
 }
 
 /* Fix for QR Scanner full-screen view */
@@ -82,3 +86,45 @@
     animation: ring-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 }
+
+/* Smartwatch & Ultra-Small Screen Responsive Optimizations (< 320px) */
+@media (max-width: 320px) {
+  html {
+    font-size: 87.5%; /* 14px base font for tiny screens */
+  }
+
+  body {
+    overflow-x: hidden !important;
+  }
+
+  .smartwatch-compact-p {
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+
+  .smartwatch-compact-gap {
+    gap: 0.375rem !important;
+  }
+
+  /* Make sure modal overlays fit watch face */
+  .modal-overlay-watch {
+    padding: 0.25rem !important;
+  }
+
+  .modal-card-watch {
+    max-height: 96dvh !important;
+    border-radius: 1rem !important;
+  }
+}
+
+/* Widescreen & TV Display Optimizations (>= 1920px) */
+@media (min-width: 1920px) {
+  html {
+    font-size: 112.5%; /* 18px base font for TV & 4K displays */
+  }
+
+  .tv-spacious-p {
+    padding: 2.5rem !important;
+  }
+}
+

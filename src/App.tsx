@@ -1333,7 +1333,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col bg-white shadow-2xl relative overflow-hidden">
+      <div className="w-full max-w-full xl:max-w-[1600px] 2xl:max-w-[2100px] 3xl:max-w-[2560px] mx-auto flex-1 flex flex-col bg-white shadow-2xl relative overflow-hidden transition-all duration-300">
         <AnimatePresence mode="wait">
         {joinGroupId && (
           <motion.div key="join" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

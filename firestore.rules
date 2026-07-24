@@ -59,5 +59,9 @@ service cloud.firestore {
     match /cloud_syncs/{userId} {
       allow read, write: if isVerified() && request.auth.uid == userId;
     }
+
+    match /data_usage/{userId} {
+      allow read, write: if isVerified() && request.auth.uid == userId;
+    }
   }
 }

@@ -296,6 +296,44 @@ export interface Transfer {
   previewUrl?: string;
 }
 
+export interface DataUsage {
+  chatUploadBytes: number;
+  chatDownloadBytes: number;
+  callUploadBytes: number;
+  callDownloadBytes: number;
+  lastUpdated?: string;
+}
+
+export function parseFileSizeToBytes(sizeStr?: string | number): number {
+  if (!sizeStr) return 0;
+  if (typeof sizeStr === 'number') return sizeStr;
+  const clean = sizeStr.trim().toUpperCase();
+  const match = clean.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)?$/);
+  if (!match) {
+    const num = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+  }
+  const val = parseFloat(match[1]);
+  const unit = match[2] || 'B';
+  switch (unit) {
+    case 'TB': return Math.round(val * 1024 * 1024 * 1024 * 1024);
+    case 'GB': return Math.round(val * 1024 * 1024 * 1024);
+    case 'MB': return Math.round(val * 1024 * 1024);
+    case 'KB': return Math.round(val * 1024);
+    default: return Math.round(val);
+  }
+}
+
+export function formatBytes(bytes: number, decimals = 2): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const idx = Math.min(i, sizes.length - 1);
+  return parseFloat((bytes / Math.pow(k, idx)).toFixed(dm)) + ' ' + sizes[idx];
+}
+
 export interface Notification {
   id: string;
   type: 'message' | 'mention' | 'friend_request' | 'system_alert';
