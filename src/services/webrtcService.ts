@@ -1487,6 +1487,7 @@ class WebRTCService {
 
       if (this.currentRoomId === roomId) {
         this.currentRoomId = null;
+        this.localStream = null;
       }
     } else {
       console.log("Closing WebRTC session, cleaning up all peer connections.");

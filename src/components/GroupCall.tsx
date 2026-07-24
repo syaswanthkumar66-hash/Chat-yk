@@ -504,6 +504,14 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     const handleUserJoined = (data: { userId: string }) => {
       console.log('User joined call:', data.userId);
       setParticipants(prev => prev.map(p => p.id === data.userId ? { ...p, status: 'online' } : p));
+      const computedRoomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+      if (socket && user?.id) {
+        socket.emit('sfu_signal', {
+          roomId: computedRoomId,
+          from: user.id,
+          signal: { type: 'peer_joined', peerId: user.id }
+        });
+      }
     };
 
     const handleCallStats = (e: any) => {

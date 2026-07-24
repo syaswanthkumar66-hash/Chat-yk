@@ -1670,7 +1670,7 @@ export const ChatDetail = () => {
     : true;
   const canStartCalls = chat?.isGroup 
     ? (chat.canStartCall === 'everyone' || isAdmin) 
-    : isOnline;
+    : true;
 
   const typingUsersInChat = useMemo(() => {
     if (chat) {

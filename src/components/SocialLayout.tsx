@@ -281,14 +281,6 @@ export const SocialLayout = () => {
           {showNotifications && (
             <NotificationPanel onClose={() => setShowNotifications(false)} />
           )}
-          {activeGroupCall && (
-            <GroupCall 
-              groupId={activeGroupCall.groupId}
-              userId={activeGroupCall.userId}
-              type={activeGroupCall.type} 
-              onClose={() => setActiveGroupCall(null)} 
-            />
-          )}
           {activeGroupInfoId && (
             <GroupInfo onClose={() => setActiveGroupInfoId(null)} />
           )}
