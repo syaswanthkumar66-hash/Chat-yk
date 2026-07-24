@@ -3004,7 +3004,7 @@ export const flushCloudAutoSync = async () => {
     const { db, doc, setDoc, auth, handleFirestoreError, OperationType } = await import('./firebase');
     if (auth.currentUser?.uid !== userId) return;
 
-    const payload = {
+    const rawPayload = {
       chats: store.chats,
       users: getLocalStorageJSON(`proto_users_${userId}`, []),
       friendRequests: getLocalStorageJSON(`proto_friendRequests_${userId}`, []),
@@ -3017,6 +3017,8 @@ export const flushCloudAutoSync = async () => {
         userId: userId
       }
     };
+
+    const payload = JSON.parse(JSON.stringify(rawPayload));
 
     await setDoc(doc(db, 'cloud_syncs', userId), payload);
     console.log("[Auto-Sync-Flush] Successfully flushed database to Firestore.");
@@ -3059,7 +3061,7 @@ export const triggerCloudAutoSync = (userId: string) => {
       const { db, doc, setDoc, auth, handleFirestoreError, OperationType } = await import('./firebase');
       if (auth.currentUser?.uid !== userId) return;
 
-      const payload = {
+      const rawPayload = {
         chats: store.chats,
         users: getLocalStorageJSON(`proto_users_${userId}`, []),
         friendRequests: getLocalStorageJSON(`proto_friendRequests_${userId}`, []),
@@ -3072,6 +3074,10 @@ export const triggerCloudAutoSync = (userId: string) => {
           userId: userId
         }
       };
+
+      // Firestore does not support undefined values.
+      // We can serialize and deserialize via JSON to strip all undefined fields safely.
+      const payload = JSON.parse(JSON.stringify(rawPayload));
 
       await setDoc(doc(db, 'cloud_syncs', userId), payload);
       console.log("[Auto-Sync] Successfully synchronized database to Firestore.");
