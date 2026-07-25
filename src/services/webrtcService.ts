@@ -117,6 +117,11 @@ class WebRTCService {
 
     diagnosticLogger.log('media', 'local_media_ready', `Local MediaStream captured and published. Total audio tracks: ${stream.getAudioTracks().length}, video tracks: ${stream.getVideoTracks().length}`, undefined, roomId);
 
+    const socket = useAppStore.getState().socket;
+    if (socket) {
+      socket.emit('join_call', { roomId, userId: useAppStore.getState().user?.id });
+    }
+
     // Attach local tracks to all existing peer connections for this room to ensure media flow
     for (const [mapKey, pc] of this.pcs.entries()) {
       if (mapKey.startsWith(`${roomId}_`)) {
@@ -212,15 +217,15 @@ class WebRTCService {
     this.candidatesGathered.set(mapKey, 0);
     this.trackReceived.set(mapKey, false);
 
-    // Setup 15-second signaling timeout
+    // Setup 25-second signaling timeout
     const signalingTimeoutId = setTimeout(() => {
       const currentPc = this.pcs.get(mapKey);
-      if (currentPc && currentPc.iceConnectionState !== 'connected') {
-        diagnosticLogger.log('error', 'signaling_timeout', `Signaling timeout reached (15s) without successful connection`, peerId, roomId);
+      if (currentPc && currentPc.iceConnectionState !== 'connected' && currentPc.iceConnectionState !== 'completed' && currentPc.connectionState !== 'connected') {
+        diagnosticLogger.log('error', 'signaling_timeout', `Signaling timeout reached (25s) without successful connection`, peerId, roomId);
         this.dispatchCallError(CallError.SIGNALING_TIMEOUT, peerId);
         this.removePeer(peerId, roomId);
       }
-    }, 15000);
+    }, 25000);
     this.signalingTimeouts.set(mapKey, signalingTimeoutId);
 
     // Track all WebRTC state changes meticulously (Step 0 logs with precise timestamping)
@@ -229,7 +234,7 @@ class WebRTCService {
       console.log(`[Diagnostic][Step 3][${new Date().toISOString()}] ICE Connection State changed to: ${state} (peer: ${peerId}, room: ${roomId})`);
       diagnosticLogger.log('webrtc', 'ice_connection_state_changed', `ICE Connection State changed to: ${state}`, peerId, roomId, { state });
       
-      if (state === 'connected') {
+      if (state === 'connected' || state === 'completed') {
         diagnosticLogger.log('webrtc', 'ice_connected', `ICE Connection successfully established. Starting stats monitor & track audits.`, peerId, roomId);
         
         // Clear signaling timeout upon success
@@ -348,6 +353,13 @@ class WebRTCService {
       const state = pc.connectionState;
       console.log(`[Diagnostic][Step 3][${new Date().toISOString()}] PeerConnection Connection State changed to: ${state} (peer: ${peerId}, room: ${roomId})`);
       diagnosticLogger.log('webrtc', 'connection_state_changed', `PeerConnection State changed to: ${state}`, peerId, roomId, { state });
+      if (state === 'connected') {
+        const timeoutId = this.signalingTimeouts.get(mapKey);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          this.signalingTimeouts.delete(mapKey);
+        }
+      }
       if (state === 'failed') {
         diagnosticLogger.log('error', 'connection_failed', `PeerConnection reached Failed state`, peerId, roomId);
         this.dispatchCallError(CallError.CONNECTION_FAILED, peerId);
@@ -1361,16 +1373,8 @@ class WebRTCService {
 
     diagnosticLogger.log('socket', 'incoming_signal', `Received incoming socket signal of type '${signal.type}' from peer ${from}`, from, roomId, { signalType: signal.type });
 
-    // Queue incoming signals that trigger createPeerConnection until our local media is ready.
-    // (Applies only to A/V calls, not data-channel chat rooms where localStream is intentionally null)
-    if (!this.localStream && !roomId.startsWith('chat-webrtc-')) {
-      diagnosticLogger.log('signaling', 'queue_signal', `Local media stream is not ready yet. Queueing incoming signal of type '${signal.type}' from peer ${from}`, from, roomId);
-      this.pendingSignals.push({ from, signal, roomId });
-      return;
-    }
-
     if (signal.type === 'peer_joined') {
-      const peerId = signal.peerId;
+      const peerId = signal.peerId || from;
       if (peerId && peerId !== myId) {
         diagnosticLogger.log('signaling', 'peer_joined_received', `Handling 'peer_joined' signal from ${peerId}. Initializing call negotiation...`, peerId, roomId);
         const pc = this.createPeerConnection(peerId, roomId);
@@ -1413,7 +1417,7 @@ class WebRTCService {
         }
       }
     } else if (signal.type === 'offer') {
-      if (signal.to === myId) {
+      if (!signal.to || String(signal.to) === String(myId)) {
         diagnosticLogger.log('signaling', 'offer_received', `Received remote SDP Offer from peer ${from}. Beginning answer generation.`, from, roomId);
         const pc = this.createPeerConnection(from, roomId);
 
@@ -1457,7 +1461,7 @@ class WebRTCService {
         }
       }
     } else if (signal.type === 'answer') {
-      if (signal.to === myId) {
+      if (!signal.to || String(signal.to) === String(myId)) {
         diagnosticLogger.log('signaling', 'answer_received', `Received remote SDP Answer from peer ${from}. Completing handshake.`, from, roomId);
         const mapKey = this.getMapKey(from, roomId);
         const pc = this.pcs.get(mapKey);
@@ -1473,7 +1477,7 @@ class WebRTCService {
         }
       }
     } else if (signal.type === 'ice_candidate') {
-      if (signal.to === myId) {
+      if (!signal.to || String(signal.to) === String(myId)) {
         const mapKey = this.getMapKey(from, roomId);
         const pc = this.pcs.get(mapKey);
         const candidateInfo = signal.candidate ? `${signal.candidate.candidateType || 'unknown'} (${signal.candidate.protocol || 'udp'})` : 'null';

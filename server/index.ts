@@ -1520,7 +1520,21 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     socket.on("sfu_signal", (data) => {
       const { roomId, signal, from, type } = data;
-      socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
+      if (roomId) {
+        socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
+      }
+      // Also send directly to target user if specified in signal or data
+      const targetId = signal?.to || data?.to;
+      if (targetId && users.has(String(targetId))) {
+        const targetSockets = users.get(String(targetId));
+        if (targetSockets) {
+          for (const sId of targetSockets.values()) {
+            if (sId !== socket.id) {
+              io.to(sId).emit("sfu_signal", { roomId, signal, from, type });
+            }
+          }
+        }
+      }
     });
 
     socket.on("webrtc_audit", (data) => {

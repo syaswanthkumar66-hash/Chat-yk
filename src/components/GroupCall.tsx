@@ -423,11 +423,13 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
         setLocalStream(stream);
 
         const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+        if (socket && mounted) {
+          socket.emit('join_call', { roomId, userId: user?.id });
+        }
+
         await webrtcService.publishLocalStream(stream, roomId);
 
         if (socket && mounted) {
-          socket.emit('join_call', { roomId, userId: user?.id });
-          
           if (userId) {
             socket.emit('call_user', { to: userId, roomId, type, from: user?.id });
           }
