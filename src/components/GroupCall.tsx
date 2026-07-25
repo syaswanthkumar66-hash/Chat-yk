@@ -30,43 +30,67 @@ const VideoPlayer = ({
   className?: string,
   speakerMode?: 'speaker' | 'earpiece'
 }) => {
-  const videoRef = useRef<HTMLMediaElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const el = videoRef.current;
-    if (el && stream) {
-      console.log(`[Diagnostic] Setting stream on media element (isLocal: ${isLocal}). Track count: ${stream.getTracks().length}`);
-      stream.getTracks().forEach(t => console.log(`[Diagnostic] Track in VideoPlayer: kind=${t.kind}, enabled=${t.enabled}, muted=${t.muted}`));
-      el.srcObject = stream;
+    if (!el) return;
+
+    if (stream) {
+      if (el.srcObject !== stream) {
+        console.log(`[Diagnostic] Binding stream to VideoPlayer (isLocal: ${isLocal}). Tracks: ${stream.getTracks().length}`);
+        el.srcObject = stream;
+      }
       
-      // Force volume to 1.0
       el.volume = 1.0;
       
-      // Attempt explicit play (Step 2)
-      el.play()
-        .then(() => {
-          console.log(`[Diagnostic] Media element successfully playing stream! (isLocal: ${isLocal}, muted property: ${el.muted})`);
-        })
-        .catch(err => {
-          console.warn(`[Diagnostic] Autoplay prevented or failed for stream. Binding document-wide gesture listener as a fallback...`, err);
-          webrtcService.dispatchCallError(CallError.PLAYBACK_BLOCKED);
-          
-          const handleInteraction = () => {
-            el.play()
-              .then(() => {
-                console.log(`[Diagnostic] Media element successfully playing stream after user gesture interaction!`);
-                document.removeEventListener('click', handleInteraction);
-                document.removeEventListener('touchstart', handleInteraction);
-              })
-              .catch(playErr => {
-                console.error(`[Diagnostic] Explicit play failed even after user gesture:`, playErr);
-              });
-          };
-          document.addEventListener('click', handleInteraction);
-          document.addEventListener('touchstart', handleInteraction);
-        });
+      const attemptPlay = () => {
+        el.play()
+          .then(() => {
+            console.log(`[Diagnostic] VideoPlayer stream playback active (isLocal: ${isLocal}, muted: ${el.muted})`);
+            webrtcService.clearCallError(CallError.PLAYBACK_BLOCKED);
+          })
+          .catch(err => {
+            console.warn(`[Diagnostic] Autoplay prevented for stream. Attaching user gesture listener...`, err);
+            if (!isLocal) {
+              webrtcService.dispatchCallError(CallError.PLAYBACK_BLOCKED);
+            }
+            
+            const handleInteraction = () => {
+              el.play()
+                .then(() => {
+                  console.log(`[Diagnostic] VideoPlayer playing after user interaction`);
+                  webrtcService.clearCallError(CallError.PLAYBACK_BLOCKED);
+                  document.removeEventListener('click', handleInteraction);
+                  document.removeEventListener('touchstart', handleInteraction);
+                })
+                .catch(playErr => {
+                  console.error(`[Diagnostic] Explicit play failed even after gesture:`, playErr);
+                });
+            };
+            document.addEventListener('click', handleInteraction, { once: true });
+            document.addEventListener('touchstart', handleInteraction, { once: true });
+          });
+      };
+
+      attemptPlay();
+
+      const handleTrackChange = () => {
+        console.log(`[Diagnostic] Track change detected on stream in VideoPlayer. Re-triggering play...`);
+        attemptPlay();
+      };
+
+      stream.addEventListener('addtrack', handleTrackChange);
+      stream.addEventListener('removetrack', handleTrackChange);
+
+      return () => {
+        stream.removeEventListener('addtrack', handleTrackChange);
+        stream.removeEventListener('removetrack', handleTrackChange);
+      };
+    } else {
+      el.srcObject = null;
     }
-  }, [stream, isLocal]);
+  }, [stream, isLocal, isVideoOff]);
 
   useEffect(() => {
     const applyAudioSink = async () => {
@@ -94,7 +118,7 @@ const VideoPlayer = ({
               console.log(`[AudioRouting] Switching output to earpiece: ${earpiece.label} (${earpiece.deviceId})`);
               await (el as any).setSinkId(earpiece.deviceId);
             } else {
-              console.warn(`[AudioRouting] Earpiece mode selected, but no matching earpiece device found. Available outputs:`, outputs.map(o => o.label));
+              console.warn(`[AudioRouting] Earpiece mode selected, but no matching earpiece device found.`);
             }
           } else {
             console.log(`[AudioRouting] Switching output to default speaker`);
@@ -102,31 +126,24 @@ const VideoPlayer = ({
           }
         } catch (err) {
           console.error('[AudioRouting] Failed to set audio sink ID:', err);
-          webrtcService.dispatchCallError(CallError.SINK_SWITCH_FAILED);
         }
-      } else {
-        console.warn('[AudioRouting] setSinkId() is not supported on this browser/platform.');
       }
     };
 
     applyAudioSink();
   }, [speakerMode, isLocal, stream]);
 
-  return isVideoOff ? (
+  return (
     <video
-      ref={videoRef as any}
+      ref={videoRef}
       autoPlay
       playsInline
       muted={isLocal}
-      className="absolute opacity-0 pointer-events-none size-px overflow-hidden"
-    />
-  ) : (
-    <video
-      ref={videoRef as any}
-      autoPlay
-      playsInline
-      muted={isLocal}
-      className={cn("relative size-full object-cover", className)}
+      className={cn(
+        "size-full object-cover transition-opacity duration-300",
+        isVideoOff ? "opacity-0 absolute inset-0 pointer-events-none" : "relative opacity-100",
+        className
+      )}
     />
   );
 };
@@ -1463,7 +1480,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       </footer>
 
       {/* Background Audio Players for hidden/filtered participants to guarantee audio is never lost */}
-      <div className="absolute opacity-0 pointer-events-none w-px h-px overflow-hidden" aria-hidden="true">
+      <div className="absolute opacity-0 pointer-events-none w-32 h-32 -bottom-96 -right-96 overflow-hidden" aria-hidden="true">
         {backgroundRemoteParticipants.map(p => (
           <VideoPlayer 
             key={`bg-audio-${p.id}`}
