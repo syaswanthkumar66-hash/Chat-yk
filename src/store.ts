@@ -1907,6 +1907,23 @@ export const useAppStore = create<AppState>((set) => ({
           return { chats: updatedChats };
         });
 
+        // Save incoming voice notes and file attachments to local browser IndexedDB cache
+        if (newMessage.fileUrl && (newMessage.type === 'audio' || newMessage.type === 'file' || newMessage.type === 'image')) {
+          import('./services/voiceNoteCache').then(({ voiceNoteCache }) => {
+            if (newMessage.fileUrl?.startsWith('data:')) {
+              fetch(newMessage.fileUrl)
+                .then(res => res.blob())
+                .then(blob => voiceNoteCache.set(newMessage.id, blob))
+                .catch(err => console.error("Auto-caching data URL to IndexedDB failed:", err));
+            } else if (newMessage.fileUrl?.startsWith('http://') || newMessage.fileUrl?.startsWith('https://')) {
+              fetch(newMessage.fileUrl)
+                .then(res => res.ok ? res.blob() : null)
+                .then(blob => blob && voiceNoteCache.set(newMessage.id, blob))
+                .catch(err => console.error("Auto-caching HTTP file URL to IndexedDB failed:", err));
+            }
+          });
+        }
+
         // Emit real-time message status delivered/read receipts (only if it's NOT our own echoed message)
         if (!isOwnMessage && sock && sock.connected) {
           sock.emit('message_delivered', {
@@ -3012,8 +3029,8 @@ export const useAppStore = create<AppState>((set) => ({
         e2eData
       });
 
-      // Only store offline messages if they are plain text messages
-      if (type === 'text' && !fileUrl && state.authMethod !== 'local') {
+        // Store offline messages in Firestore for offline recipients or disconnected state
+        if (state.authMethod !== 'local') {
         if (isGroup && chat?.participants) {
           import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
               chat.participants.forEach(p => {

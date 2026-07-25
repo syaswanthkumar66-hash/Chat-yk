@@ -727,7 +727,7 @@ app.get(["/api/health", "/api/ping", "/ping"], (req, res) => {
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-const users = new Map<string, Map<string, string>>(); // userId -> Map<deviceId, socketId>
+const users = new Map<string, Map<string, { deviceId: string }>>(); // userId -> Map<socketId, { deviceId: string }>
 const userPublicKeys = new Map<string, string>(); // userId -> publicKey
 const tempStorage = new Map<string, any>(); // messageId -> messageData 
 const cachedUsers = new Map<string, any>(); // userId -> UserProfile object for instant central hub sync
@@ -834,7 +834,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const deviceMap = users.get(userId);
       if (!deviceMap || deviceMap.size === 0) return true;
       let allInactive = true;
-      for (const socketId of deviceMap.values()) {
+      for (const socketId of deviceMap.keys()) {
         const sock = io.sockets.sockets.get(socketId);
         if (sock && (sock as any).isVisible !== false) {
           allInactive = false;
@@ -929,7 +929,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
       const targetDevices = users.get(recipientId);
       if (targetDevices && targetDevices.size > 0) {
-        for (const sId of targetDevices.values()) {
+        for (const sId of targetDevices.keys()) {
           io.to(sId).emit("receive_notification", notification);
         }
         console.log(`Instant socket notification delivered to user ${recipientId}`);
@@ -943,7 +943,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       if (!toUserId) return;
       const targetDevices = users.get(toUserId);
       if (targetDevices && targetDevices.size > 0) {
-        for (const sId of targetDevices.values()) {
+        for (const sId of targetDevices.keys()) {
           io.to(sId).emit("friend_request_update", { fromUserId: (socket as any).userId, type, request });
         }
         console.log(`Instant friend request event (${type}) dispatched to ${toUserId}`);
@@ -969,10 +969,10 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
       let deviceMap = users.get(userId);
       if (!deviceMap) {
-        deviceMap = new Map<string, string>();
+        deviceMap = new Map<string, { deviceId: string }>();
         users.set(userId, deviceMap);
       }
-      deviceMap.set(deviceId, socket.id);
+      deviceMap.set(socket.id, { deviceId });
 
       if (profileData && typeof profileData === 'object' && profileData.displayName) {
         const existing = cachedUsers.get(userId) || {};
@@ -981,7 +981,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         cachedUsers.set(userId, { id: userId, isOnline: true });
       }
 
-      console.log(`User ${userId} registered device ${deviceId} with socket ${socket.id}`);
+      console.log(`User ${userId} registered device ${deviceId} on socket ${socket.id}`);
       
       // Broadcast online status & central user list to all connected clients instantly
       io.emit("user_status", { userId, isOnline: true, isInactive: isUserInactive(userId) });
@@ -996,9 +996,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       updateFirestorePresence(userId, true);
 
       // Broadcast devices list to all sockets of this user
-      const activeDeviceIds = Array.from(deviceMap.keys());
-      for (const [dId, sId] of deviceMap.entries()) {
-        io.to(sId).emit("devices_update", { devices: activeDeviceIds, currentDeviceId: dId });
+      const activeDeviceIds = Array.from(new Set(Array.from(deviceMap.values()).map(d => d.deviceId)));
+      for (const [sId, info] of deviceMap.entries()) {
+        io.to(sId).emit("devices_update", { devices: activeDeviceIds, currentDeviceId: info.deviceId });
       }
       
       const deliverAndCleanup = (msgId: string, msgData: any) => {
@@ -1080,7 +1080,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         } else if (data.recipientId) {
           const targetDevices = users.get(data.recipientId);
           if (targetDevices) {
-            for (const socketId of targetDevices.values()) {
+            for (const socketId of targetDevices.keys()) {
               io.to(socketId).emit("typing_stop", { senderId });
             }
           }
@@ -1097,7 +1097,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       if (senderId && recipientId) {
         const targetDevices = users.get(recipientId);
         if (targetDevices) {
-          for (const socketId of targetDevices.values()) {
+          for (const socketId of targetDevices.keys()) {
             io.to(socketId).emit("typing", { senderId, isTyping });
           }
         }
@@ -1107,12 +1107,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           clearTypingTimeout(`user-${senderId}`);
         }
 
-        // Echo typing to sender's OTHER devices as self_typing_sync
+        // Echo typing to sender's OTHER devices/tabs
         const senderDevices = users.get(senderId);
         if (senderDevices) {
-          for (const [devId, socketId] of senderDevices.entries()) {
-            if (devId !== (socket as any).deviceId) {
-              io.to(socketId).emit("self_typing_sync", { recipientId, isTyping });
+          for (const sId of senderDevices.keys()) {
+            if (sId !== socket.id) {
+              io.to(sId).emit("self_typing_sync", { recipientId, isTyping });
             }
           }
         }
@@ -1130,20 +1130,20 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       } else if (recipientId) {
         const targetDevices = users.get(recipientId);
         if (targetDevices) {
-          for (const socketId of targetDevices.values()) {
+          for (const socketId of targetDevices.keys()) {
             io.to(socketId).emit("typing_start", { senderId });
           }
         }
         startTypingTTL(senderId, data, false);
       }
 
-      // Echo typing_start to sender's OTHER devices
+      // Echo typing_start to sender's OTHER devices/tabs
       const senderDevices = users.get(senderId);
       if (senderDevices) {
-        for (const [devId, socketId] of senderDevices.entries()) {
-          if (devId !== (socket as any).deviceId) {
-            io.to(socketId).emit("typing_start", { senderId, recipientId, groupId, isOwnDeviceEcho: true });
-            io.to(socketId).emit("self_typing_sync", { recipientId: groupId || recipientId, isTyping: true });
+        for (const sId of senderDevices.keys()) {
+          if (sId !== socket.id) {
+            io.to(sId).emit("typing_start", { senderId, recipientId, groupId, isOwnDeviceEcho: true });
+            io.to(sId).emit("self_typing_sync", { recipientId: groupId || recipientId, isTyping: true });
           }
         }
       }
@@ -1162,19 +1162,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       } else if (recipientId) {
         const targetDevices = users.get(recipientId);
         if (targetDevices) {
-          for (const socketId of targetDevices.values()) {
+          for (const socketId of targetDevices.keys()) {
             io.to(socketId).emit("typing_stop", { senderId });
           }
         }
       }
 
-      // Echo typing_stop to sender's OTHER devices
+      // Echo typing_stop to sender's OTHER devices/tabs
       const senderDevices = users.get(senderId);
       if (senderDevices) {
-        for (const [devId, socketId] of senderDevices.entries()) {
-          if (devId !== (socket as any).deviceId) {
-            io.to(socketId).emit("typing_stop", { senderId, recipientId, groupId, isOwnDeviceEcho: true });
-            io.to(socketId).emit("self_typing_sync", { recipientId: groupId || recipientId, isTyping: false });
+        for (const sId of senderDevices.keys()) {
+          if (sId !== socket.id) {
+            io.to(sId).emit("typing_stop", { senderId, recipientId, groupId, isOwnDeviceEcho: true });
+            io.to(sId).emit("self_typing_sync", { recipientId: groupId || recipientId, isTyping: false });
           }
         }
       }
@@ -1200,7 +1200,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       } else if (recipientId) {
         const targetDevices = users.get(recipientId);
         if (targetDevices) {
-          for (const socketId of targetDevices.values()) {
+          for (const socketId of targetDevices.keys()) {
             io.to(socketId).emit("media_upload_progress", progressPayload);
           }
         }
@@ -1219,7 +1219,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       } else if (recipientId) {
         const targetDevices = users.get(recipientId);
         if (targetDevices) {
-          for (const socketId of targetDevices.values()) {
+          for (const socketId of targetDevices.keys()) {
             io.to(socketId).emit("message_reaction", reactionData);
           }
         }
@@ -1231,7 +1231,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       console.log(`Message delivered: ${messageId} from ${senderId} in chat ${chatId}`);
       const senderDevices = users.get(senderId);
       if (senderDevices) {
-        for (const socketId of senderDevices.values()) {
+        for (const socketId of senderDevices.keys()) {
           io.to(socketId).emit("message_status_update", {
             chatId,
             messageId,
@@ -1246,7 +1246,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       console.log(`Message read: ${messageId} from ${senderId} in chat ${chatId}`);
       const senderDevices = users.get(senderId);
       if (senderDevices) {
-        for (const socketId of senderDevices.values()) {
+        for (const socketId of senderDevices.keys()) {
           io.to(socketId).emit("message_status_update", {
             chatId,
             messageId,
@@ -1259,14 +1259,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     socket.on("sync_chat_read", (data) => {
       const { chatId, recipientId } = data;
       const senderId = (socket as any).userId;
-      const originDeviceId = (socket as any).deviceId;
       if (!senderId) return;
 
       const senderDevices = users.get(senderId);
       if (senderDevices) {
-        for (const [devId, socketId] of senderDevices.entries()) {
-          if (devId !== originDeviceId) {
-            io.to(socketId).emit("sync_chat_read", { chatId, recipientId });
+        for (const sId of senderDevices.keys()) {
+          if (sId !== socket.id) {
+            io.to(sId).emit("sync_chat_read", { chatId, recipientId });
           }
         }
       }
@@ -1274,15 +1273,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     socket.on("notify_cloud_sync", () => {
       const senderId = (socket as any).userId;
-      const originDeviceId = (socket as any).deviceId;
       if (!senderId) return;
 
       const senderDevices = users.get(senderId);
       if (senderDevices) {
-        console.log(`[notify_cloud_sync] Broadcasting cloud_sync_triggered to other devices of user ${senderId} from device ${originDeviceId}`);
-        for (const [devId, socketId] of senderDevices.entries()) {
-          if (devId !== originDeviceId) {
-            io.to(socketId).emit("cloud_sync_triggered", { lastUpdated: new Date().toISOString() });
+        for (const sId of senderDevices.keys()) {
+          if (sId !== socket.id) {
+            io.to(sId).emit("cloud_sync_triggered", { lastUpdated: new Date().toISOString() });
           }
         }
       }
@@ -1290,22 +1287,18 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     socket.on("report_fingerprint", (data: { fingerprint: string }) => {
       const senderId = (socket as any).userId;
-      const originDeviceId = (socket as any).deviceId;
       if (!senderId) return;
 
       (socket as any).fingerprint = data.fingerprint;
-      console.log(`[report_fingerprint] User ${senderId} device ${originDeviceId} reported fingerprint: ${data.fingerprint}`);
 
       const senderDevices = users.get(senderId);
       if (senderDevices && senderDevices.size > 1) {
         const fingerprints = new Map<string, string>();
-        const socketIds = new Map<string, string>();
 
-        for (const [devId, socketId] of senderDevices.entries()) {
-          const s = io.sockets.sockets.get(socketId);
+        for (const sId of senderDevices.keys()) {
+          const s = io.sockets.sockets.get(sId);
           if (s && (s as any).fingerprint) {
-            fingerprints.set(devId, (s as any).fingerprint);
-            socketIds.set(devId, socketId);
+            fingerprints.set(sId, (s as any).fingerprint);
           }
         }
 
@@ -1314,18 +1307,15 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           const uniqueFps = new Set(fps);
 
           if (uniqueFps.size > 1) {
-            console.log(`[sync_check] Fingerprint mismatch detected for user ${senderId}:`, Array.from(fingerprints.entries()));
-            for (const socketId of senderDevices.values()) {
+            for (const socketId of senderDevices.keys()) {
               io.to(socketId).emit("sync_check_result", { status: "mismatch" });
             }
           } else {
-            console.log(`[sync_check] All active devices of user ${senderId} are fully in sync.`);
-            for (const socketId of senderDevices.values()) {
+            for (const socketId of senderDevices.keys()) {
               io.to(socketId).emit("sync_check_result", { status: "synced" });
             }
           }
         } else {
-          // Tell this socket we don't have enough reports yet, so keep quiet
           socket.emit("sync_check_result", { status: "no_peer" });
         }
       } else {
@@ -1335,7 +1325,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     socket.on("send_message", async (data) => {
       const { recipientId, groupId, recipientIds, text, type, fileUrl, fileSize, messageId, encryptedFileKey, iv } = data;
-      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, deviceMap]) => Array.from(deviceMap.values()).includes(socket.id))?.[0];
+      const senderId = (socket as any).userId || Array.from(users.entries()).find(([_, deviceMap]) => deviceMap.has(socket.id))?.[0];
 
       if (!senderId) return;
 
@@ -1435,7 +1425,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             let shouldPush = true;
 
             if (targetDevices && targetDevices.size > 0) {
-              for (const socketId of targetDevices.values()) {
+              for (const socketId of targetDevices.keys()) {
                 const targetSocket = io.sockets.sockets.get(socketId);
                 if (targetSocket) {
                   const isTabVisible = (targetSocket as any).isVisible !== false;
@@ -1540,7 +1530,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         let shouldPush = true;
 
         if (targetDevices && targetDevices.size > 0) {
-          for (const socketId of targetDevices.values()) {
+          for (const socketId of targetDevices.keys()) {
             io.to(socketId).emit("receive_message", messageData);
             console.log(`Message sent from ${senderId} to ${recipientId} on socket ${socketId}`);
 
@@ -1579,12 +1569,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           }
         }
 
-        // Echo the direct message to the sender's OTHER devices so they are in sync
+        // Echo the direct message to the sender's OTHER sockets/tabs so they are in sync
         const senderDevices = users.get(senderId);
         if (senderDevices) {
-          for (const [devId, socketId] of senderDevices.entries()) {
-            if (devId !== (socket as any).deviceId) {
-              io.to(socketId).emit("receive_message", { ...messageData, recipientId });
+          for (const sId of senderDevices.keys()) {
+            if (sId !== socket.id) {
+              io.to(sId).emit("receive_message", { ...messageData, recipientId });
             }
           }
         }
@@ -1612,16 +1602,15 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const { roomId, signal, from, type } = data;
       if (roomId) {
         socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
-      } else {
-        // Only route directly by target user if no roomId is specified
-        const targetId = signal?.to || data?.to;
-        if (targetId && users.has(String(targetId))) {
-          const targetSockets = users.get(String(targetId));
-          if (targetSockets) {
-            for (const sId of targetSockets.values()) {
-              if (sId !== socket.id) {
-                io.to(sId).emit("sfu_signal", { roomId, signal, from, type });
-              }
+      }
+      // Also route directly by target user if signal.to or data.to is specified to ensure delivery
+      const targetId = signal?.to || data?.to;
+      if (targetId && String(targetId) !== String(from) && users.has(String(targetId))) {
+        const targetSockets = users.get(String(targetId));
+        if (targetSockets) {
+          for (const sId of targetSockets.keys()) {
+            if (sId !== socket.id) {
+              io.to(sId).emit("sfu_signal", { roomId, signal, from, type });
             }
           }
         }
@@ -1639,7 +1628,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const { to, roomId, type, from } = data;
       const targetDevices = users.get(to);
       if (targetDevices) {
-        for (const socketId of targetDevices.values()) {
+        for (const socketId of targetDevices.keys()) {
           io.to(socketId).emit("incoming_call", { roomId, type, from });
         }
       }
@@ -1650,7 +1639,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       if (to) {
         const targetDevices = users.get(to);
         if (targetDevices) {
-          for (const socketId of targetDevices.values()) {
+          for (const socketId of targetDevices.keys()) {
             io.to(socketId).emit("call_ended", data);
           }
         }
@@ -1690,47 +1679,36 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     socket.on("disconnect", () => {
       const senderId = (socket as any).userId;
-      const deviceId = (socket as any).deviceId;
       
       if (senderId) {
-        const previousInactive = isUserInactive(senderId);
         const deviceMap = users.get(senderId);
         
         if (deviceMap) {
-          // Remove this specific socket/device connection
-          if (deviceId) {
-            deviceMap.delete(deviceId);
-          } else {
-            // Fallback: find by socket.id and remove
-            for (const [dId, sId] of deviceMap.entries()) {
-              if (sId === socket.id) {
-                deviceMap.delete(dId);
-              }
-            }
-          }
+          // Remove this specific socket connection
+          deviceMap.delete(socket.id);
 
-          // If no active devices are left for this user, they are truly offline!
+          // If no active sockets left for this user, they are truly offline!
           if (deviceMap.size === 0) {
             users.delete(senderId);
             clearTypingTimeout(`user-${senderId}`);
             io.emit("user_status", { userId: senderId, isOnline: false });
             io.emit("online_users", getOnlineUsersPayload());
+            io.emit("all_users_data", getAllUsersPayload());
             // Sync with Firestore
             updateFirestorePresence(senderId, false);
-            console.log(`User ${senderId} has disconnected all devices. Broadcasted offline.`);
+            console.log(`User ${senderId} has disconnected all sockets. Broadcasted offline.`);
           } else {
-            console.log(`User ${senderId} disconnected device ${deviceId}. ${deviceMap.size} devices still active.`);
+            console.log(`Socket ${socket.id} for user ${senderId} disconnected. ${deviceMap.size} sockets still active.`);
             
             const newInactive = isUserInactive(senderId);
-            if (previousInactive !== newInactive) {
-              io.emit("user_status", { userId: senderId, isOnline: true, isInactive: newInactive });
-              io.emit("online_users", getOnlineUsersPayload());
-            }
+            io.emit("user_status", { userId: senderId, isOnline: true, isInactive: newInactive });
+            io.emit("online_users", getOnlineUsersPayload());
+            io.emit("all_users_data", getAllUsersPayload());
 
             // Broadcast remaining devices list to all remaining active sockets of this user
-            const activeDeviceIds = Array.from(deviceMap.keys());
-            for (const [dId, sId] of deviceMap.entries()) {
-              io.to(sId).emit("devices_update", { devices: activeDeviceIds, currentDeviceId: dId });
+            const activeDeviceIds = Array.from(new Set(Array.from(deviceMap.values()).map(d => d.deviceId)));
+            for (const [sId, info] of deviceMap.entries()) {
+              io.to(sId).emit("devices_update", { devices: activeDeviceIds, currentDeviceId: info.deviceId });
             }
           }
         }

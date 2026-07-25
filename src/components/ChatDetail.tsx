@@ -122,19 +122,19 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
       const targetUrl = msg.fileUrl || msg.url;
       if (!targetUrl) return;
 
-      // Check cache first for audio messages (voice notes)
-      if (msg.type === 'audio') {
+      // Check local IndexedDB cache first for audio, file, and image attachments
+      if (msg.type === 'audio' || msg.type === 'file' || msg.type === 'image') {
         try {
           const { voiceNoteCache } = await import('../services/voiceNoteCache');
           const cacheKey = msg.id || targetUrl;
           const cachedBlob = await voiceNoteCache.get(cacheKey);
           if (cachedBlob && active) {
-            console.log("Loading voice note from IndexedDB Cache:", cacheKey);
+            console.log("Loading attachment from local IndexedDB Cache:", cacheKey);
             setUrl(URL.createObjectURL(cachedBlob));
             return;
           }
         } catch (err) {
-          console.error("IndexedDB voice note cache read error:", err);
+          console.error("IndexedDB attachment cache read error:", err);
         }
       }
 

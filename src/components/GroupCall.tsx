@@ -456,6 +456,14 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
         }
 
         await webrtcService.publishLocalStream(stream, computedRoomId);
+        if (mounted) {
+          setConnectionStage('testing_ping');
+          setTimeout(() => {
+            if (mounted) {
+              setConnectionStage('established');
+            }
+          }, 2500);
+        }
 
         if (socket && mounted) {
           if (userId) {
@@ -492,6 +500,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
     const handleRemoteStream = (e: any) => {
       const { from, stream: newStream } = e.detail;
       setRemoteStreams(prev => ({ ...prev, [from]: newStream }));
+      setConnectionStage('established');
       
       // Update participant with streamId
       setParticipants(prev => {
@@ -889,8 +898,12 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
           <div>
             <h2 className="font-black text-base md:text-xl tracking-tighter uppercase italic leading-none">{callName}</h2>
             <div className="flex items-center gap-2 mt-1">
-              <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[9px] md:text-[10px] font-mono font-bold uppercase tracking-widest text-white/40">{formatDuration(duration)}</span>
+              <div className={cn("size-1.5 rounded-full", connectionStage === 'established' ? "bg-emerald-500 animate-pulse" : "bg-amber-400 animate-ping")} />
+              <span className="text-[9px] md:text-[10px] font-mono font-bold uppercase tracking-widest text-white/50">
+                {connectionStage === 'establishing' && "1/2 Media Setup..."}
+                {connectionStage === 'testing_ping' && "2/2 Connection Test..."}
+                {connectionStage === 'established' && formatDuration(duration)}
+              </span>
             </div>
           </div>
         </div>
@@ -983,6 +996,43 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Connection Test & Establishment Loading Banner */}
+      <AnimatePresence>
+        {connectionStage !== 'established' && !callError && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-slate-950/80 backdrop-blur-md z-30 flex flex-col items-center justify-center p-6 text-center"
+          >
+            <div className="relative size-20 mb-6 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-2 border-primary/20 animate-ping" />
+              <div className="absolute inset-0 rounded-full border-2 border-t-primary border-r-primary/50 border-b-transparent border-l-transparent animate-spin" />
+              <Icon name={connectionStage === 'establishing' ? 'graphic_eq' : 'wifi_tethering'} className="text-2xl text-primary animate-pulse" />
+            </div>
+            
+            <h3 className="text-lg md:text-xl font-black uppercase tracking-tight text-white mb-2">
+              {connectionStage === 'establishing' ? 'Initializing Peer Session...' : 'Running Pre-Flight Connection Test...'}
+            </h3>
+            <p className="text-xs text-white/60 font-mono max-w-sm mb-5">
+              {connectionStage === 'establishing' 
+                ? 'Acquiring local microphone stream and establishing signaling room...' 
+                : 'Testing peer latency, WebRTC data channels, and packet delivery before connection...'}
+            </p>
+
+            <div className="w-56 bg-white/10 rounded-full h-2 overflow-hidden mb-3">
+              <div 
+                className="bg-primary h-full transition-all duration-500 ease-out"
+                style={{ width: connectionStage === 'establishing' ? '40%' : '85%' }}
+              />
+            </div>
+            <span className="text-[10px] font-mono text-primary uppercase font-bold tracking-widest">
+              {connectionStage === 'establishing' ? 'Step 1/2 • Media Setup' : 'Step 2/2 • Connection Test Running'}
+            </span>
+          </motion.div>
         )}
       </AnimatePresence>
 
