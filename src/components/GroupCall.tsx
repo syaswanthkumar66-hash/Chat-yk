@@ -1057,79 +1057,110 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       <main className="flex-1 relative overflow-y-auto no-scrollbar py-4 md:py-8 px-4 md:px-8">
         {isOneOnOne ? (
           /* One-on-One View */
-          <div className="min-h-full flex flex-col items-center justify-center gap-12 md:gap-20 relative">
-            <div className="relative">
-              {/* Pulse Rings */}
-              <AnimatePresence>
-                {showRings && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <motion.div 
-                      initial={{ scale: 1, opacity: 0 }}
-                      animate={{ scale: [1, 1.5], opacity: [0.3, 0] }}
-                      exit={{ opacity: 0 }}
-                      transition={{ repeat: Infinity, duration: 2 }}
-                      className="absolute size-48 rounded-full border border-primary/30"
-                    />
-                    <motion.div 
-                      initial={{ scale: 1, opacity: 0 }}
-                      animate={{ scale: [1, 2], opacity: [0.2, 0] }}
-                      exit={{ opacity: 0 }}
-                      transition={{ repeat: Infinity, duration: 2, delay: 0.5 }}
-                      className="absolute size-48 rounded-full border border-primary/20"
-                    />
-                  </div>
-                )}
-              </AnimatePresence>
-
-              <motion.div 
-                animate={{ y: [0, -10, 0] }}
-                transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
-                className="size-40 md:size-56 rounded-[3rem] overflow-hidden border-4 border-white/10 p-2 bg-slate-900 shadow-2xl relative z-10 flex items-center justify-center"
-              >
+          <div className="min-h-full flex flex-col items-center justify-center gap-6 md:gap-12 relative w-full">
+            {type === 'video' ? (
+              /* Video Call - Main Stage View */
+              <div className="w-full max-w-4xl aspect-[4/3] sm:aspect-video rounded-3xl md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 bg-slate-900 shadow-2xl relative flex items-center justify-center">
                 {participants[1] && (
                   <div className="size-full relative flex items-center justify-center">
                     <VideoPlayer 
                       stream={participants[1] ? (remoteStreams[participants[1].streamId] || remoteStreams[participants[1].id] || null) : null} 
-                      className="size-full rounded-[2.5rem] object-cover" 
+                      className="size-full object-cover" 
                       speakerMode={speakerMode}
-                      isVideoOff={participants[1].isVideoOff || type === 'voice'}
+                      isVideoOff={participants[1].isVideoOff}
                     />
-                    {(participants[1].isVideoOff || type === 'voice') && (
-                      <img 
-                        src={participants[1]?.avatar || generateInitialsAvatar(participants[1]?.id || 'user', participants[1]?.name || 'User')} 
-                        className="size-full rounded-[2.5rem] object-cover absolute inset-0" 
-                        referrerPolicy="no-referrer"
-                      />
+                    {participants[1].isVideoOff && (
+                      <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center gap-4 p-4">
+                        <Avatar 
+                          src={participants[1]?.avatar || generateInitialsAvatar(participants[1]?.id || 'user', participants[1]?.name || 'User')} 
+                          className="size-24 sm:size-32 shadow-2xl" 
+                          fallbackName={participants[1]?.name}
+                        />
+                        <span className="font-bold text-white/80 text-sm sm:text-base uppercase tracking-wide">{participants[1]?.name}</span>
+                      </div>
                     )}
                   </div>
                 )}
-              </motion.div>
-              
-              <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 z-20">
-                {participants[1] && (peerStats[participants[1].id]?.inboundStalled || peerStats[participants[1].id]?.remoteOutboundStalled) ? (
-                  <div className="bg-red-950/90 border border-red-500/30 px-6 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2 animate-bounce">
-                    <div className="size-2 rounded-full bg-red-500 animate-ping" />
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-red-400">🔇 VOICE STALLED (WS Audit)</span>
+                <div className="absolute top-4 left-4 z-20">
+                  <div className="bg-slate-900/80 backdrop-blur-md border border-white/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded-xl shadow-xl flex items-center gap-2">
+                    <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-white/80">{participants[1]?.name || 'Connected'}</span>
                   </div>
-                ) : (
-                  <div className="bg-slate-900 border border-white/10 px-6 py-2 rounded-2xl shadow-2xl flex items-center gap-2">
-                    <div className="size-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                    <span className="text-[10px] font-black uppercase tracking-widest italic">Connected</span>
-                  </div>
-                )}
+                </div>
               </div>
-            </div>
+            ) : (
+              /* Voice Call - Central Ring View */
+              <div className="relative flex flex-col items-center my-auto">
+                {/* Pulse Rings */}
+                <AnimatePresence>
+                  {showRings && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <motion.div 
+                        initial={{ scale: 1, opacity: 0 }}
+                        animate={{ scale: [1, 1.5], opacity: [0.3, 0] }}
+                        exit={{ opacity: 0 }}
+                        transition={{ repeat: Infinity, duration: 2 }}
+                        className="absolute size-44 sm:size-60 rounded-full border border-primary/30"
+                      />
+                      <motion.div 
+                        initial={{ scale: 1, opacity: 0 }}
+                        animate={{ scale: [1, 2], opacity: [0.2, 0] }}
+                        exit={{ opacity: 0 }}
+                        transition={{ repeat: Infinity, duration: 2, delay: 0.5 }}
+                        className="absolute size-44 sm:size-60 rounded-full border border-primary/20"
+                      />
+                    </div>
+                  )}
+                </AnimatePresence>
 
-            <div className="text-center space-y-4 md:space-y-6 relative z-10">
-              <h1 className="text-4xl md:text-6xl font-black italic uppercase tracking-tighter leading-none">{participants[1]?.name}</h1>
+                <motion.div 
+                  animate={{ y: [0, -8, 0] }}
+                  transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                  className="size-36 sm:size-48 md:size-56 rounded-[2.5rem] md:rounded-[3rem] overflow-hidden border-4 border-white/10 p-2 bg-slate-900 shadow-2xl relative z-10 flex items-center justify-center"
+                >
+                  {participants[1] && (
+                    <div className="size-full relative flex items-center justify-center">
+                      <VideoPlayer 
+                        stream={participants[1] ? (remoteStreams[participants[1].streamId] || remoteStreams[participants[1].id] || null) : null} 
+                        className="size-full rounded-[2rem] md:rounded-[2.5rem] object-cover" 
+                        speakerMode={speakerMode}
+                        isVideoOff={true}
+                      />
+                      <Avatar 
+                        src={participants[1]?.avatar || generateInitialsAvatar(participants[1]?.id || 'user', participants[1]?.name || 'User')} 
+                        className="size-full rounded-[2rem] md:rounded-[2.5rem]" 
+                        fallbackName={participants[1]?.name}
+                      />
+                    </div>
+                  )}
+                </motion.div>
+                
+                <div className="mt-6 z-20">
+                  {participants[1] && (peerStats[participants[1].id]?.inboundStalled || peerStats[participants[1].id]?.remoteOutboundStalled) ? (
+                    <div className="bg-red-950/90 border border-red-500/30 px-5 py-2 rounded-2xl shadow-2xl flex items-center gap-2 animate-bounce">
+                      <div className="size-2 rounded-full bg-red-500 animate-ping" />
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-red-400">🔇 VOICE STALLED</span>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-900 border border-white/10 px-5 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2">
+                      <div className="size-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                      <span className="text-[10px] font-black uppercase tracking-widest italic text-white/90">Connected</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="text-center space-y-2 sm:space-y-4 relative z-10">
+              <h1 className="text-3xl sm:text-5xl md:text-6xl font-black italic uppercase tracking-tighter leading-none">{participants[1]?.name}</h1>
               <div className="flex flex-col items-center justify-center gap-2">
                 {participants[1] && (peerStats[participants[1].id]?.inboundStalled || peerStats[participants[1].id]?.remoteOutboundStalled) ? (
                   <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-red-400 bg-red-500/10 px-4 py-1.5 rounded-xl border border-red-500/10">
-                    Warning: Audio stream has stalled. Local/Remote WebRTC state is active but no audio bytes are flowing.
+                    Warning: Audio stream has stalled.
                   </span>
                 ) : (
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-white/30">
-                    {type === 'voice' ? 'Encrypted Audio Connection Active' : 'Voice & Video Stream Active'}
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-white/40">
+                    {type === 'voice' ? 'Encrypted Audio Active' : 'Voice & Video Stream Active'}
                   </span>
                 )}
               </div>
@@ -1139,9 +1170,9 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
             <motion.div 
               drag
               dragConstraints={{ left: -200, right: 200, top: -200, bottom: 200 }}
-              className="absolute bottom-4 md:bottom-8 right-4 md:right-8 size-24 md:size-40 rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900 group cursor-move z-30"
+              className="absolute bottom-2 md:bottom-8 right-2 md:right-8 size-24 sm:size-32 md:size-40 rounded-2xl sm:rounded-[2rem] md:rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900 group cursor-move z-30"
             >
-              <div className="size-full relative">
+              <div className="size-full relative flex items-center justify-center">
                 <VideoPlayer 
                   stream={localStream} 
                   isLocal={true} 
@@ -1149,17 +1180,17 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
                   isVideoOff={participants[0]?.isVideoOff || type === 'voice'}
                 />
                 {(participants[0]?.isVideoOff || type === 'voice') && (
-                  <img 
+                  <Avatar 
                     src={participants[0]?.avatar || generateInitialsAvatar(user?.id || 'me', user?.displayName || 'You')} 
-                    className="size-full object-cover opacity-80 group-hover:opacity-100 transition-opacity absolute inset-0 bg-slate-900" 
-                    referrerPolicy="no-referrer" 
+                    className="size-full opacity-80 group-hover:opacity-100 transition-opacity absolute inset-0 bg-slate-900" 
+                    fallbackName={user?.displayName || 'You'}
                   />
                 )}
               </div>
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
-              <div className="absolute bottom-2 md:bottom-3 left-3 md:left-4 flex items-center gap-2 pointer-events-none">
-                <div className="size-1 md:size-1.5 rounded-full bg-primary" />
-                <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-70">You</span>
+              <div className="absolute bottom-2 left-2.5 sm:left-4 flex items-center gap-1.5 pointer-events-none z-10">
+                <div className="size-1.5 rounded-full bg-primary" />
+                <span className="text-[8px] font-black uppercase tracking-widest opacity-80 text-white">You</span>
               </div>
             </motion.div>
           </div>
@@ -1367,30 +1398,30 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       </main>
 
       {/* Footer Controls */}
-      <footer className="p-6 md:p-10 z-30 shrink-0 flex justify-center">
-        <div className="bg-slate-900/40 backdrop-blur-3xl px-5 py-3 md:px-8 md:py-4 rounded-full border border-white/10 shadow-2xl flex items-center gap-5 md:gap-12">
+      <footer className="p-3 sm:p-6 md:p-8 z-30 shrink-0 flex justify-center w-full max-w-full overflow-hidden">
+        <div className="bg-slate-900/80 backdrop-blur-3xl px-3 sm:px-6 py-2.5 sm:py-3.5 rounded-full border border-white/10 shadow-2xl flex items-center gap-2 sm:gap-4 md:gap-8 overflow-x-auto max-w-full no-scrollbar shrink-0">
           <button 
             onClick={() => setIsMuted(!isMuted)}
             className={cn(
-              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
+              "size-9 sm:size-11 md:size-14 rounded-full flex items-center justify-center transition-all shrink-0",
               isMuted ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-white/5 text-white hover:bg-white/10'
             )}
             title="Mute/Unmute Mic"
           >
-            <Icon name={isMuted ? 'mic_off' : 'mic'} className="text-lg md:text-2xl" />
+            <Icon name={isMuted ? 'mic_off' : 'mic'} className="text-base sm:text-lg md:text-2xl" />
           </button>
 
           <button 
             onClick={togglePTT}
             className={cn(
-              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all relative select-none",
+              "size-9 sm:size-11 md:size-14 rounded-full flex items-center justify-center transition-all relative select-none shrink-0",
               isRecordingPTT 
                 ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 ring-4 ring-emerald-500/20 animate-pulse' 
                 : 'bg-white/5 text-white hover:bg-white/10'
             )}
             title="Send Live Voice over P2P Data Channel (Walkie-Talkie)"
           >
-            <Icon name="graphic_eq" className={cn("text-lg md:text-2xl", isRecordingPTT && "animate-bounce")} />
+            <Icon name="graphic_eq" className={cn("text-base sm:text-lg md:text-2xl", isRecordingPTT && "animate-bounce")} />
             {isRecordingPTT && (
               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -1403,78 +1434,78 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
             <button 
               onClick={() => setIsVideoOff(!isVideoOff)}
               className={cn(
-                "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
+                "size-9 sm:size-11 md:size-14 rounded-full flex items-center justify-center transition-all shrink-0",
                 isVideoOff ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-white/5 text-white hover:bg-white/10'
               )}
             >
-              <Icon name={isVideoOff ? 'videocam_off' : 'videocam'} className="text-lg md:text-2xl" />
+              <Icon name={isVideoOff ? 'videocam_off' : 'videocam'} className="text-base sm:text-lg md:text-2xl" />
             </button>
           )}
           
           <button 
             onClick={onClose}
-            className="size-14 md:size-20 rounded-full bg-red-600 text-white flex items-center justify-center shadow-2xl shadow-red-600/40 active:scale-90 hover:scale-105 hover:brightness-110 transition-all"
+            className="size-12 sm:size-16 md:size-20 rounded-full bg-red-600 text-white flex items-center justify-center shadow-2xl shadow-red-600/40 active:scale-90 hover:scale-105 hover:brightness-110 transition-all shrink-0"
           >
-            <Icon name="call_end" className="text-2xl md:text-4xl" />
+            <Icon name="call_end" className="text-xl sm:text-2xl md:text-4xl" />
           </button>
 
           <button 
             onClick={() => setShowAddFriend(true)}
-            className="size-10 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all"
+            className="size-9 sm:size-11 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all shrink-0"
           >
-            <Icon name="person_add" className="text-lg md:text-2xl" />
+            <Icon name="person_add" className="text-base sm:text-lg md:text-2xl" />
           </button>
 
           {chat?.isGroup && (
             <button 
               onClick={ringAllMembers}
-              className="size-10 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all"
+              className="size-9 sm:size-11 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all shrink-0"
               title="Ring All Members"
             >
-              <Icon name="stream" className="text-lg md:text-2xl" />
+              <Icon name="stream" className="text-base sm:text-lg md:text-2xl" />
             </button>
           )}
 
           <button 
             onClick={() => setSpeakerMode(speakerMode === 'speaker' ? 'earpiece' : 'speaker')}
             className={cn(
-              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
+              "size-9 sm:size-11 md:size-14 rounded-full flex items-center justify-center transition-all shrink-0",
               speakerMode === 'speaker' ? 'bg-primary/20 text-primary' : 'bg-white/5 text-white hover:bg-white/10'
             )}
           >
-            <Icon name={speakerMode === 'speaker' ? 'volume_up' : 'hearing'} className="text-lg md:text-2xl" />
+            <Icon name={speakerMode === 'speaker' ? 'volume_up' : 'hearing'} className="text-base sm:text-lg md:text-2xl" />
           </button>
 
           <button 
             onClick={() => setPingSoundsEnabled(!pingSoundsEnabled)}
             className={cn(
-              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
+              "size-9 sm:size-11 md:size-14 rounded-full flex items-center justify-center transition-all shrink-0",
               pingSoundsEnabled ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50' : 'bg-white/5 text-white hover:bg-white/10'
             )}
             title="Toggle Ping Sounds"
           >
-            <Icon name={pingSoundsEnabled ? 'notifications_active' : 'notifications_off'} className="text-lg md:text-2xl" />
+            <Icon name={pingSoundsEnabled ? 'notifications_active' : 'notifications_off'} className="text-base sm:text-lg md:text-2xl" />
           </button>
 
           {pingSoundsEnabled && (
             <button 
               onClick={sendPing}
-              className="size-10 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all hover:text-yellow-400 active:scale-90"
+              className="size-9 sm:size-11 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all hover:text-yellow-400 active:scale-90 shrink-0"
               title="Send Ping"
             >
-              <Icon name="vibration" className="text-lg md:text-2xl" />
+              <Icon name="vibration" className="text-base sm:text-lg md:text-2xl" />
             </button>
           )}
 
           <button 
             onClick={() => setShowDiagnostics(!showDiagnostics)}
             className={cn(
-              "size-10 md:size-14 rounded-full flex items-center justify-center transition-all",
+              "size-9 sm:size-11 md:size-14 rounded-full flex items-center justify-center transition-all shrink-0",
               showDiagnostics ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-white/5 text-white hover:bg-white/10'
             )}
             title="Toggle Diagnostics Log"
           >
-            <Icon name="terminal" className="text-lg md:text-2xl" />
+            <Icon name="terminal" className="text-base sm:text-lg md:text-2xl" />
           </button>
         </div>
       </footer>

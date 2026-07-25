@@ -65,42 +65,72 @@ export const Avatar = ({
   src, 
   className, 
   status, 
-  onClick 
+  onClick,
+  fallbackName
 }: { 
-  src: string; 
+  src?: string; 
   className?: string; 
   status?: 'online' | 'offline' | 'away'; 
   onClick?: () => void; 
+  fallbackName?: string;
 }) => {
   const [isLoaded, setIsLoaded] = React.useState(false);
+  const [hasError, setHasError] = React.useState(false);
+  const imgRef = React.useRef<HTMLImageElement>(null);
 
   React.useEffect(() => {
-    setIsLoaded(false);
+    setHasError(false);
+    if (!src) {
+      setIsLoaded(false);
+      return;
+    }
+    
+    // Check if cached or data URL that loaded synchronously
+    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+      setIsLoaded(true);
+    } else {
+      setIsLoaded(false);
+    }
   }, [src]);
+
+  const initials = fallbackName
+    ? fallbackName
+        .trim()
+        .split(/\s+/)
+        .map(p => p[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : null;
 
   return (
     <div className={cn('relative shrink-0 transition-transform active:scale-95', className)} onClick={onClick}>
-      <div className="size-full rounded-[35%] overflow-hidden bg-primary/10 border-2 border-white dark:border-slate-800 shadow-sm">
-        {src ? (
+      <div className="size-full rounded-[35%] overflow-hidden bg-primary/10 border-2 border-white dark:border-slate-800 shadow-sm flex items-center justify-center relative">
+        {src && !hasError ? (
           <img 
+            ref={imgRef}
             src={src} 
             alt="avatar" 
             onLoad={() => setIsLoaded(true)}
+            onError={() => setHasError(true)}
             className={cn(
-              "size-full object-cover transition-opacity duration-300",
+              "size-full object-cover transition-opacity duration-200",
               isLoaded ? "opacity-100" : "opacity-0"
             )} 
             referrerPolicy="no-referrer" 
           />
-        ) : (
-          <div className="size-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-            <Icon name="person" className="text-lg opacity-60" />
+        ) : null}
+
+        {(!src || hasError || !isLoaded) && (
+          <div className="absolute inset-0 bg-primary/20 flex items-center justify-center text-primary font-bold uppercase text-xs">
+            {initials ? initials : <Icon name="person" className="text-lg opacity-60" />}
           </div>
         )}
       </div>
+
       {status && (
         <div className={cn(
-          "absolute -bottom-1 -right-1 size-4 rounded-full border-2 border-white dark:border-slate-800 shadow-sm",
+          "absolute -bottom-1 -right-1 size-4 rounded-full border-2 border-white dark:border-slate-800 shadow-sm z-10",
           status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-yellow-500' : 'bg-slate-400'
         )} />
       )}

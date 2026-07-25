@@ -288,9 +288,14 @@ export const generateInitialsAvatar = (id: string, name: string): string => {
   ];
   const color = colors[Math.abs(hash) % colors.length];
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="${color}" /><text x="50%" y="54%" font-family="&apos;Inter&apos;, system-ui, sans-serif" font-size="38" font-weight="600" fill="#ffffff" dominant-baseline="middle" text-anchor="middle">${initials}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="${color}" /><text x="50%" y="54%" font-family="system-ui, sans-serif" font-size="38" font-weight="700" fill="#ffffff" dominant-baseline="middle" text-anchor="middle">${initials}</text></svg>`;
 
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  try {
+    const base64 = typeof window !== 'undefined' ? btoa(unescape(encodeURIComponent(svg))) : Buffer.from(svg).toString('base64');
+    return `data:image/svg+xml;base64,${base64}`;
+  } catch (e) {
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
 };
 
 // Throttled presence updates & debounced typing updates variables
