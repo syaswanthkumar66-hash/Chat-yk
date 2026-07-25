@@ -11,7 +11,8 @@ export const createPrioritizedPeerConnection = (
   const pc = new RTCPeerConnection({
     iceServers: iceServers,
     rtcpMuxPolicy: 'require',
-    bundlePolicy: 'max-bundle'
+    bundlePolicy: 'max-bundle',
+    iceCandidatePoolSize: 10
   });
 
   // Log ICE Gathering

@@ -21,32 +21,32 @@ class WebRTCService {
   private pcs: Map<string, RTCPeerConnection> = new Map();
   private localStream: MediaStream | null = null;
   private iceServers: any[] = [
-    // STUN servers allow direct peer-to-peer connections for most NAT types
-    // with zero relay cost. Always prioritize STUN to avoid unnecessary latency.
+    // 1. Light-weight public discovery
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:free.expressturn.com:3478' },
     
-    // TURN relays are used ONLY when direct connection fails (symmetric NAT, strict firewalls).
-    // The server will provide the real credentials via /api/webrtc/config.
-    // WARNING: Free public TURN relays (like metered.ca openrelay) are shared, 
-    // rate-limited, best-effort services and are NOT reliable for production load.
+    // 2. Primary ExpressTURN Routing Engine (Standard UDP Port)
     { 
-      urls: 'turn:openrelay.metered.ca:80?transport=udp', 
-      username: 'openrelayproject', 
-      credential: 'openrelayproject' 
+      urls: 'turn:free.expressturn.com:3478', 
+      username: '000000002100245221', 
+      credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
+    },
+    
+    // 3. Ultra-Restrictive Network Fallbacks (ExpressTURN TCP Port Overrides)
+    { 
+      urls: 'turn:free.expressturn.com:3478?transport=tcp', 
+      username: '000000002100245221', 
+      credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
     },
     { 
-      urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
-      username: 'openrelayproject', 
-      credential: 'openrelayproject' 
+      urls: 'turn:free.expressturn.com:80?transport=tcp', 
+      username: '000000002100245221', 
+      credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
     },
     { 
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp', 
-      username: 'openrelayproject', 
-      credential: 'openrelayproject' 
+      urls: 'turn:free.expressturn.com:443?transport=tcp', 
+      username: '000000002100245221', 
+      credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
     }
   ];
   private currentRoomId: string | null = null;

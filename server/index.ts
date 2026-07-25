@@ -2241,14 +2241,25 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     res.json({
       iceServers: [
-        // STUN servers allow direct peer-to-peer connections for most NAT types
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:free.expressturn.com:3478' },
         {
           urls: turnUrl,
+          username: turnUser,
+          credential: turnPass
+        },
+        {
+          urls: turnUrl.includes('?') ? turnUrl : `${turnUrl}?transport=tcp`,
+          username: turnUser,
+          credential: turnPass
+        },
+        {
+          urls: 'turn:free.expressturn.com:80?transport=tcp',
+          username: turnUser,
+          credential: turnPass
+        },
+        {
+          urls: 'turn:free.expressturn.com:443?transport=tcp',
           username: turnUser,
           credential: turnPass
         }

@@ -251,25 +251,30 @@ async function handleApiFallback(urlStr: string, init?: RequestInit): Promise<Re
 
   // 7. WebRTC ICE Config
   if (path === '/api/webrtc/config') {
-    console.log(`[Client Fallback API] Dispensing public fallback ICE servers for WebRTC`);
+    console.log(`[Client Fallback API] Dispensing ExpressTURN ICE servers for WebRTC`);
     return jsonResponse({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:openrelay.metered.ca:80' },
+        { urls: 'stun:free.expressturn.com:3478' },
         { 
-          urls: 'turn:openrelay.metered.ca:80?transport=udp', 
-          username: 'openrelayproject', 
-          credential: 'openrelayproject' 
+          urls: 'turn:free.expressturn.com:3478', 
+          username: '000000002100245221', 
+          credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
         },
         { 
-          urls: 'turn:openrelay.metered.ca:80?transport=tcp', 
-          username: 'openrelayproject', 
-          credential: 'openrelayproject' 
+          urls: 'turn:free.expressturn.com:3478?transport=tcp', 
+          username: '000000002100245221', 
+          credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
         },
         { 
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp', 
-          username: 'openrelayproject', 
-          credential: 'openrelayproject' 
+          urls: 'turn:free.expressturn.com:80?transport=tcp', 
+          username: '000000002100245221', 
+          credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
+        },
+        { 
+          urls: 'turn:free.expressturn.com:443?transport=tcp', 
+          username: '000000002100245221', 
+          credential: 'tSLm3kXJjgjn59xHqOmR8TvGo+4=' 
         }
       ]
     });
