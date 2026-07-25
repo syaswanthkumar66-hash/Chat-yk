@@ -1510,6 +1510,7 @@ export const useAppStore = create<AppState>((set) => ({
           return newState;
         });
         startHeartbeat();
+        sock.emit('get_online_users');
         const activeState = useAppStore.getState();
         const { cryptoService } = await import('./services/cryptoService');
         const publicKey = await cryptoService.getMyPublicKeyBase64(uid);
@@ -1636,6 +1637,7 @@ export const useAppStore = create<AppState>((set) => ({
         const isInactive = data.isInactive;
         const nowIso = new Date().toISOString();
 
+        let userFound = false;
         set((currentState) => {
           let nextOnline = [...currentState.onlineUserIds];
           if (isOnline) {
@@ -1646,6 +1648,7 @@ export const useAppStore = create<AppState>((set) => ({
 
           const updatedUsers = currentState.users.map(u => {
             if (u.id === targetUid) {
+              userFound = true;
               const wasOnline = u.isOnline;
               return {
                 ...u,
@@ -1680,6 +1683,10 @@ export const useAppStore = create<AppState>((set) => ({
           };
         });
 
+        if (!userFound && isOnline) {
+          sock.emit('get_online_users');
+        }
+
         // Fast background Firestore presence sync (<1ms local priority)
         if (useAppStore.getState().authMethod !== 'local') {
           import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
@@ -1698,20 +1705,41 @@ export const useAppStore = create<AppState>((set) => ({
       // 5a. all_users_data
       sock.off('all_users_data').on('all_users_data', (allUsers: any[]) => {
         set((state) => {
-          const onlineUserIds = state.onlineUserIds || [];
+          const currentOnlineIds = state.onlineUserIds || [];
           const mergedUsers = allUsers.map((u: any) => {
-            const isOnline = onlineUserIds.includes(u.id);
+            const isOnline = Boolean(u.isOnline || currentOnlineIds.includes(u.id));
             return {
               ...u,
               isOnline
             };
           });
           
+          const updatedOnlineIds = Array.from(new Set([
+            ...currentOnlineIds,
+            ...mergedUsers.filter(u => u.isOnline).map(u => u.id)
+          ]));
+
+          const updatedChats = state.chats.map(c => ({
+            ...c,
+            participants: c.participants.map(p => {
+              const isOnline = Boolean(updatedOnlineIds.includes(p.id) || mergedUsers.find(u => u.id === p.id)?.isOnline);
+              return {
+                ...p,
+                isOnline,
+                lastSeen: isOnline ? undefined : p.lastSeen
+              };
+            })
+          }));
+
           if (state.user?.id) {
             safeLocalStorageSetItem(`proto_users_${state.user.id}`, JSON.stringify(mergedUsers));
           }
           
-          return { users: mergedUsers };
+          return { 
+            users: mergedUsers,
+            onlineUserIds: updatedOnlineIds,
+            chats: updatedChats
+          };
         });
       });
 
@@ -2464,7 +2492,17 @@ export const useAppStore = create<AppState>((set) => ({
   groupJoinRequests: [],
   setGroupJoinRequests: (requests) => set({ groupJoinRequests: requests }),
   chats: cachedChats,
-  setChats: (chats) => set({ chats }),
+  setChats: (chats) => set((state) => {
+    const onlineIds = state.onlineUserIds || [];
+    const syncedChats = chats.map(c => ({
+      ...c,
+      participants: c.participants.map(p => {
+        const isOnline = onlineIds.includes(p.id) || p.isOnline;
+        return { ...p, isOnline };
+      })
+    }));
+    return { chats: syncedChats };
+  }),
   typingUsers: {},
   setTypingUser: (userId, isTyping) => set(state => ({ typingUsers: { ...state.typingUsers, [userId]: isTyping } })),
   incomingMediaUploads: {},

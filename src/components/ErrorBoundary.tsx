@@ -31,30 +31,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error caught by ErrorBoundary:", error, errorInfo);
-    
-    // Auto recover DOM/translation errors or transient state errors smoothly
-    if (this.state.isDOMError) {
-      console.warn("Detected browser translation / DOM node reconciliation error. Auto-recovering immediately...");
-      requestAnimationFrame(() => {
-        this.setState({ hasError: false, error: null, isDOMError: false });
-      });
-    } else {
-      // Auto-retry transient component rendering errors after 1 second
-      setTimeout(() => {
-        if (this.state.hasError) {
-          console.log("Auto-recovering from transient component render issue...");
-          this.setState({ hasError: false, error: null, isDOMError: false });
-        }
-      }, 1000);
-    }
+    console.warn("Caught error in ErrorBoundary:", error, errorInfo);
   }
 
   public override render() {
     if (this.state.hasError) {
-      // If it's a transient DOM / translation error, render children directly or a transparent retry shell
       if (this.state.isDOMError) {
-        return <div key={Date.now()}>{this.props.children}</div>;
+        return <React.Fragment>{this.props.children}</React.Fragment>;
       }
 
       if (this.props.fallback) {
@@ -68,7 +51,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
           </div>
           <h2 className="text-lg font-black text-slate-800 uppercase italic tracking-tight">Sync Recovery Protocol</h2>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Layout sync was momentarily paused due to DOM translation. Re-establishing live view...
+            Connection view was temporarily paused. Click below to reconnect your session.
           </p>
           <button
             onClick={() => this.setState({ hasError: false, error: null, isDOMError: false })}

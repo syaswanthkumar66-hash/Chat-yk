@@ -851,6 +851,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }));
     };
 
+    const getAllUsersPayload = () => {
+      return Array.from(cachedUsers.values()).map(u => {
+        const isConnected = users.has(u.id) && (users.get(u.id)?.size || 0) > 0;
+        return {
+          ...u,
+          isOnline: isConnected
+        };
+      });
+    };
+
     socket.on("ping_server", (data, callback) => {
       if (typeof callback === 'function') {
         callback({ status: "pong", timestamp: new Date().toISOString() });
@@ -863,7 +873,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       socket.emit("online_users", getOnlineUsersPayload());
       
       if (cachedUsers.size > 0) {
-        socket.emit("all_users_data", Array.from(cachedUsers.values()));
+        socket.emit("all_users_data", getAllUsersPayload());
       }
 
       // Send all users data from Firestore & merge into cache
@@ -874,10 +884,15 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           allUsers.forEach((u: any) => {
             if (u.id) {
               const existing = cachedUsers.get(u.id) || {};
-              cachedUsers.set(u.id, { ...existing, ...u });
+              const isCurrentlyConnected = users.has(u.id) && (users.get(u.id)?.size || 0) > 0;
+              cachedUsers.set(u.id, { 
+                ...existing, 
+                ...u, 
+                isOnline: isCurrentlyConnected 
+              });
             }
           });
-          socket.emit("all_users_data", Array.from(cachedUsers.values()));
+          socket.emit("all_users_data", getAllUsersPayload());
         } catch (e: any) {
           console.warn("Firebase users fetch notice (using memory/client fallback):", e?.message || e);
         }
@@ -892,7 +907,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       cachedUsers.set(user.id, updated);
       
       io.emit("user_profile_updated", updated);
-      io.emit("all_users_data", Array.from(cachedUsers.values()));
+      io.emit("all_users_data", getAllUsersPayload());
       console.log(`User ${user.id} profile update broadcasted across central hub.`);
     });
 
@@ -971,7 +986,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       // Broadcast online status & central user list to all connected clients instantly
       io.emit("user_status", { userId, isOnline: true, isInactive: isUserInactive(userId) });
       io.emit("online_users", getOnlineUsersPayload());
-      io.emit("all_users_data", Array.from(cachedUsers.values()));
+      io.emit("all_users_data", getAllUsersPayload());
+
+      // Send immediate direct state to registering socket
+      socket.emit("online_users", getOnlineUsersPayload());
+      socket.emit("all_users_data", getAllUsersPayload());
 
       // Sync with Firestore
       updateFirestorePresence(userId, true);
