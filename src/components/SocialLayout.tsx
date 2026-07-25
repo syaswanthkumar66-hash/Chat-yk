@@ -158,6 +158,22 @@ export const SocialLayout = () => {
 
 
 
+  const parseMessageTime = (msg: any): number => {
+    if (!msg) return 0;
+    if (typeof msg.createdAt === 'number' && msg.createdAt > 0) return msg.createdAt;
+    if (typeof msg.createdAt === 'string' && msg.createdAt) {
+      const t = new Date(msg.createdAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (typeof msg.rawTimestamp === 'number' && msg.rawTimestamp > 0) return msg.rawTimestamp;
+    if (typeof msg.timestamp === 'number' && msg.timestamp > 0) return msg.timestamp;
+    if (typeof msg.timestamp === 'string' && msg.timestamp) {
+      const parsed = Date.parse(msg.timestamp);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return 0;
+  };
+
   const filteredChats = chats.filter(chat => {
     // Filter out blocked users
     if (!chat.isGroup && chat.participants.some(p => blockedUserIds.includes(p.id))) {
@@ -167,6 +183,13 @@ export const SocialLayout = () => {
     if (chatFilter === 'groups') return chat.isGroup;
     if (chatFilter === 'individuals') return !chat.isGroup;
     return true;
+  }).sort((a, b) => {
+    const lastMsgA = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1] : null;
+    const lastMsgB = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1] : null;
+    const tA = lastMsgA ? parseMessageTime(lastMsgA) : (a.updatedAt ? new Date(a.updatedAt).getTime() : 0);
+    const tB = lastMsgB ? parseMessageTime(lastMsgB) : (b.updatedAt ? new Date(b.updatedAt).getTime() : 0);
+    if (tB !== tA) return tB - tA; // Highest/latest timestamp first
+    return b.id.localeCompare(a.id);
   });
 
   return (
@@ -1052,7 +1075,7 @@ export const SocialLayout = () => {
       </div>
 
       {/* Right Content - Chat Detail or Profile */}
-      <div className={`flex-1 h-full bg-bg-light relative transition-all duration-500 ease-in-out ${
+      <div className={`flex-1 min-w-0 max-w-full h-full bg-bg-light relative overflow-hidden transition-all duration-500 ease-in-out ${
         !(activeChatId || activeRecipientId || viewingUserId) ? 'hidden md:flex items-center justify-center' : 'flex'
       }`}>
         <AnimatePresence mode="wait">
@@ -1062,7 +1085,7 @@ export const SocialLayout = () => {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              className="size-full"
+              className="size-full min-w-0 max-w-full overflow-hidden"
             >
               <UserProfileView userId={viewingUserId} onBack={() => setViewingUserId(null)} />
             </motion.div>
@@ -1072,7 +1095,7 @@ export const SocialLayout = () => {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              className="size-full"
+              className="size-full min-w-0 max-w-full overflow-hidden"
             >
               <ChatDetail />
             </motion.div>

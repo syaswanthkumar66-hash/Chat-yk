@@ -250,6 +250,13 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
       } catch (e: any) {
         if (active) {
           setDownloadProgress(null);
+
+          if (targetUrl && (targetUrl.startsWith('http') || targetUrl.startsWith('data:') || targetUrl.startsWith('blob:'))) {
+            console.warn("Decryption failed, using direct unencrypted URL fallback for attachment:", targetUrl);
+            setUrl(targetUrl);
+            setLoadError(null);
+            return;
+          }
           
           let errorCode = FileTransferError.UNKNOWN_ERROR;
           if (e.message === 'DECRYPT_KEY_MISSING') {
@@ -2537,19 +2544,19 @@ export const ChatDetail = () => {
             </motion.div>
           )}
         </AnimatePresence>
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          <div className="flex items-center gap-0.5 sm:gap-1">
+        <div className="flex items-center gap-1.5 sm:gap-2 w-full max-w-full min-w-0 box-border overflow-x-hidden">
+          <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
             <button 
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              disabled={!canSendMessages}
-              className={`size-9 sm:size-10 rounded-full flex items-center justify-center transition-colors ${!canSendMessages ? 'opacity-50 grayscale cursor-not-allowed' : showEmojiPicker ? 'text-primary bg-primary/10' : 'text-neutral-muted hover:bg-slate-50'}`}
+              disabled={!canSendMessages || isRecording}
+              className={`size-9 sm:size-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${!canSendMessages || isRecording ? 'opacity-50 grayscale cursor-not-allowed' : showEmojiPicker ? 'text-primary bg-primary/10' : 'text-neutral-muted hover:bg-slate-50'}`}
             >
               <Icon name="mood" />
             </button>
-            {!messageText && canSendMessages && (
+            {!messageText && !isRecording && canSendMessages && (
               <button 
                 onClick={() => cameraInputRef.current?.click()}
-                className="size-9 sm:size-10 rounded-full flex items-center justify-center text-neutral-muted hover:bg-slate-50 transition-colors"
+                className="size-9 sm:size-10 rounded-full flex items-center justify-center text-neutral-muted hover:bg-slate-50 transition-colors shrink-0"
               >
                 <Icon name="photo_camera" />
                 <input 
@@ -2563,23 +2570,46 @@ export const ChatDetail = () => {
               </button>
             )}
           </div>
-          <div className="flex-1 bg-white rounded-xl sm:rounded-2xl px-2.5 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 shadow-sm border border-white">
+          <div className="flex-1 min-w-0 bg-white rounded-xl sm:rounded-2xl px-2.5 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 shadow-sm border border-white">
             {!canSendMessages ? (
-              <p className="flex-1 text-xs text-neutral-muted text-center py-2 font-bold uppercase tracking-widest">Only admins can send messages</p>
+              <p className="flex-1 min-w-0 text-xs text-neutral-muted text-center py-2 font-bold uppercase tracking-widest">Only admins can send messages</p>
+            ) : isRecording ? (
+              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 py-0.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="size-2.5 rounded-full bg-red-500 animate-ping shrink-0" />
+                  <span className="text-xs font-mono font-bold text-red-600 shrink-0">
+                    {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
+                  </span>
+                  <div className="hidden sm:flex items-center gap-0.5 h-4 shrink-0">
+                    <span className="w-1 h-3 bg-red-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-1 h-4 bg-red-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-1 h-2 bg-red-400 rounded-full animate-bounce" />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button 
+                    type="button" 
+                    onClick={stopRecording} 
+                    className="p-1.5 text-neutral-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors text-xs font-bold"
+                    title="Cancel recording"
+                  >
+                    <Icon name="delete" className="text-base" />
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 <input 
                   type="text" 
-                  placeholder={isRecording ? "Recording..." : "Message..."}
-                  disabled={isRecording}
+                  placeholder="Message..."
                   value={messageText}
                   onChange={(e) => handleTyping(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                  className="flex-1 bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-xs sm:text-sm" 
+                  className="flex-1 min-w-0 bg-transparent border-none outline-none focus:ring-0 focus:outline-none text-xs sm:text-sm" 
                 />
                 <button 
                   onClick={() => fileInputRef.current?.click()} 
-                  className="text-neutral-muted hover:text-primary transition-colors flex-shrink-0"
+                  className="text-neutral-muted hover:text-primary transition-colors shrink-0"
                 >
                   <Icon name="attach_file" />
                   <input 
@@ -2618,7 +2648,7 @@ export const ChatDetail = () => {
                 id="chat-send-btn"
                 onClick={handleSend}
                 disabled={isRecording}
-                className="size-10 sm:size-12 rounded-xl sm:rounded-2xl bg-primary text-white flex-shrink-0 flex items-center justify-center shadow-xl shadow-primary/30 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                className="size-10 sm:size-12 rounded-xl sm:rounded-2xl bg-primary text-white shrink-0 flex items-center justify-center shadow-xl shadow-primary/30 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
               >
                 <Icon name="send" />
               </button>
@@ -2630,7 +2660,7 @@ export const ChatDetail = () => {
                 onContextMenu={(e) => e.preventDefault()}
                 onDragStart={(e) => e.preventDefault()}
                 style={{ touchAction: 'none' }}
-                className={`size-10 sm:size-12 rounded-xl sm:rounded-2xl flex-shrink-0 flex items-center justify-center transition-all ${isRecording ? 'text-white bg-red-500 scale-110 shadow-lg shadow-red-500/30' : 'text-white bg-primary shadow-xl shadow-primary/30 hover:brightness-110'}`}
+                className={`size-10 sm:size-12 rounded-xl sm:rounded-2xl shrink-0 flex items-center justify-center transition-all ${isRecording ? 'text-white bg-red-500 scale-105 shadow-lg shadow-red-500/30' : 'text-white bg-primary shadow-xl shadow-primary/30 hover:brightness-110'}`}
               >
                 <Icon name={isRecording ? "stop" : "mic"} />
               </button>

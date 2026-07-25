@@ -120,7 +120,18 @@ class WebRTCService {
 
     const activeSocket = useAppStore.getState().socket;
     if (activeSocket) {
-      activeSocket.emit('join_call', { roomId, userId: useAppStore.getState().user?.id });
+      const myId = useAppStore.getState().user?.id;
+      activeSocket.emit('join_call', { roomId, userId: myId });
+      activeSocket.emit('sfu_signal', {
+        roomId,
+        from: myId,
+        signal: { type: 'peer_joined', peerId: myId }
+      });
+      activeSocket.emit('sfu_signal', {
+        roomId,
+        from: myId,
+        signal: { type: 'request_tracks' }
+      });
     }
 
     // Attach local tracks to all existing peer connections for this room to ensure media flow
