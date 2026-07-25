@@ -2179,6 +2179,97 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
   });
 
+  app.post("/api/delete-account", async (req, res) => {
+    try {
+      const { userId, email } = req.body || {};
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId parameter" });
+      }
+
+      console.log(`[Backend Delete Account] Initiating total account wipe for user: ${userId} (${email || 'No Email'})`);
+
+      // 1. Remove memory push subscriptions
+      memorySubscriptions.delete(userId);
+
+      if (db) {
+        try {
+          // Delete push subscriptions document
+          await db.collection('pushSubscriptions').doc(userId).delete().catch(() => {});
+
+          // Delete user document from users collection
+          await db.collection('users').doc(userId).delete().catch(() => {});
+
+          // Delete friend requests where sender or receiver is userId
+          const frSnap1 = await db.collection('friendRequests').where('senderId', '==', userId).get().catch(() => null);
+          if (frSnap1) {
+            for (const d of frSnap1.docs) {
+              await d.ref.delete().catch(() => {});
+            }
+          }
+          const frSnap2 = await db.collection('friendRequests').where('receiverId', '==', userId).get().catch(() => null);
+          if (frSnap2) {
+            for (const d of frSnap2.docs) {
+              await d.ref.delete().catch(() => {});
+            }
+          }
+
+          // Delete user notifications
+          const notifSnap = await db.collection('notifications').where('userId', '==', userId).get().catch(() => null);
+          if (notifSnap) {
+            for (const d of notifSnap.docs) {
+              await d.ref.delete().catch(() => {});
+            }
+          }
+
+          // Delete offline messages sent by user
+          const msgSnap = await db.collection('offline_messages').where('senderId', '==', userId).get().catch(() => null);
+          if (msgSnap) {
+            for (const d of msgSnap.docs) {
+              await d.ref.delete().catch(() => {});
+            }
+          }
+
+          // Scrub user reference from all other users' friend/blocked/removed lists
+          const allUsersSnap = await db.collection('users').get().catch(() => null);
+          if (allUsersSnap) {
+            for (const uDoc of allUsersSnap.docs) {
+              if (uDoc.id === userId) continue;
+              const uData = uDoc.data();
+              let modified = false;
+              const updatePayload: any = {};
+
+              if (Array.isArray(uData.friends) && uData.friends.includes(userId)) {
+                updatePayload.friends = uData.friends.filter((id: string) => id !== userId);
+                modified = true;
+              }
+              if (Array.isArray(uData.blockedUserIds) && uData.blockedUserIds.includes(userId)) {
+                updatePayload.blockedUserIds = uData.blockedUserIds.filter((id: string) => id !== userId);
+                modified = true;
+              }
+              if (Array.isArray(uData.removedFriendIds) && uData.removedFriendIds.includes(userId)) {
+                updatePayload.removedFriendIds = uData.removedFriendIds.filter((id: string) => id !== userId);
+                modified = true;
+              }
+
+              if (modified) {
+                await uDoc.ref.update(updatePayload).catch(() => {});
+              }
+            }
+          }
+
+          console.log(`[Backend Delete Account] Complete server & Firestore purge finished for user: ${userId}`);
+        } catch (dbErr: any) {
+          console.warn("[Backend Delete Account] Firestore cleanup warning:", dbErr?.message);
+        }
+      }
+
+      res.json({ success: true, message: "Account and associated details deleted completely from server and friends lists." });
+    } catch (err: any) {
+      console.error("Error in /api/delete-account:", err);
+      res.status(500).json({ error: err.message || "Failed to delete account" });
+    }
+  });
+
   app.post("/api/send-test-push", async (req, res) => {
     try {
       const { userId, title, body } = req.body;

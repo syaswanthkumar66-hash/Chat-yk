@@ -89,7 +89,7 @@ class WebRTCService {
     this.fetchIceConfig();
   }
 
-  private async fetchIceConfig(retries = 5, delay = 1000) {
+  async fetchIceConfig(retries = 5, delay = 1000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const response = await fetch(`${BACKEND_URL}/api/webrtc/config`);

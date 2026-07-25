@@ -37,6 +37,8 @@ export const Settings = ({ onClose, initialView }: { onClose: () => void; initia
     feedback,
     addFeedback,
     logout,
+    deleteAccountPermanently,
+    deleteBrowserCacheOnly,
     users,
     wssStatus,
     wssMessage,
@@ -63,6 +65,8 @@ export const Settings = ({ onClose, initialView }: { onClose: () => void; initia
     feedback: s.feedback,
     addFeedback: s.addFeedback,
     logout: s.logout,
+    deleteAccountPermanently: s.deleteAccountPermanently,
+    deleteBrowserCacheOnly: s.deleteBrowserCacheOnly,
     users: s.users,
     wssStatus: s.wssStatus,
     wssMessage: s.wssMessage,
@@ -130,6 +134,13 @@ export const Settings = ({ onClose, initialView }: { onClose: () => void; initia
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const [callSettingsNotice, setCallSettingsNotice] = useState<string | null>(null);
+
+  // Deletion Options State
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [showClearCacheModal, setShowClearCacheModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [deletionNotice, setDeletionNotice] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (activeView === 'call-settings' && typeof navigator !== 'undefined' && navigator.mediaDevices) {
@@ -1575,6 +1586,73 @@ export const Settings = ({ onClose, initialView }: { onClose: () => void; initia
                 <div className="p-3 bg-emerald-500/10 text-emerald-800 rounded-xl flex items-center gap-2 text-xs font-semibold">
                   <Icon name="lock" className="text-emerald-600 shrink-0" />
                   <span>Only your authenticated Google login can decrypt and access your E2EE key database.</span>
+                </div>
+              </div>
+
+              {/* ACCOUNT DELETION & CACHE MANAGEMENT OPTIONS */}
+              <div className="pt-6 border-t border-slate-200/80 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 italic">Data & Account Deletion Options</h4>
+                  <span className="text-[10px] bg-slate-200/60 text-slate-700 font-bold px-2.5 py-1 rounded-full">2 Options Available</span>
+                </div>
+
+                {deletionNotice && (
+                  <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 rounded-xl flex items-center gap-2.5 text-xs font-bold animate-fadeIn">
+                    <Icon name="check_circle" className="text-emerald-600 text-lg shrink-0" />
+                    <span>{deletionNotice}</span>
+                  </div>
+                )}
+
+                {/* Option 1: Complete Account Delete */}
+                <div className="p-5 rounded-2xl bg-gradient-to-br from-red-50/90 via-rose-50/50 to-red-50/30 border border-red-200/90 space-y-3.5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="size-10 rounded-xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-red-600/20">
+                      <Icon name="delete_forever" className="text-xl" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h5 className="text-sm font-black text-slate-800 uppercase italic tracking-tight">Option 1: Complete Account Delete</h5>
+                        <span className="text-[9px] bg-red-600 text-white font-black uppercase tracking-widest px-2 py-0.5 rounded-md">Permanent Server Wipe</span>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Deletes all account details from Gmail link, user profile, messages, and completely purges your account references from all your friends' accounts as well.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setShowDeleteAccountModal(true)}
+                    className="w-full py-3 px-4 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-red-600/25 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Icon name="delete_forever" className="text-base" />
+                    <span>Option 1: Delete Entire Account Permanently</span>
+                  </button>
+                </div>
+
+                {/* Option 2: Delete Browser Cached Data Only */}
+                <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-50/90 via-orange-50/50 to-amber-50/30 border border-amber-200/90 space-y-3.5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="size-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-500/20">
+                      <Icon name="cleaning_services" className="text-xl" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h5 className="text-sm font-black text-slate-800 uppercase italic tracking-tight">Option 2: Clear Browser Cached Data</h5>
+                        <span className="text-[9px] bg-amber-600 text-white font-black uppercase tracking-widest px-2 py-0.5 rounded-md">Local Device Only</span>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Permanently deletes all browser cached data (IndexedDB voice notes, media blobs, storage cache) on this device. Your account details and friends list stay active on the server.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setShowClearCacheModal(true)}
+                    className="w-full py-3 px-4 bg-amber-600 hover:bg-amber-700 active:scale-[0.99] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-600/25 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Icon name="delete_sweep" className="text-base" />
+                    <span>Option 2: Delete Browser Cached Data Permanently</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -3960,6 +4038,174 @@ export const Settings = ({ onClose, initialView }: { onClose: () => void; initia
                 </AnimatePresence>
               </div>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Option 1: Complete Account Delete Confirmation Modal */}
+        <AnimatePresence>
+          {showDeleteAccountModal && (
+            <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => !isDeletingAccount && setShowDeleteAccountModal(false)}
+                className="absolute inset-0 bg-black/70 backdrop-blur-md"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="relative bg-slate-900 border border-red-500/30 w-full max-w-md rounded-[2rem] p-6 shadow-2xl text-white space-y-6 overflow-hidden z-10"
+              >
+                <div className="size-16 rounded-2xl bg-red-600/20 border border-red-500/30 text-red-500 flex items-center justify-center mx-auto shadow-inner">
+                  <Icon name="report_problem" className="text-3xl animate-bounce" />
+                </div>
+
+                <div className="text-center space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-red-400">Irreversible Action</span>
+                  <h3 className="text-xl font-black italic uppercase tracking-tight text-white">Permanently Delete Account?</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed pt-1">
+                    This will permanently wipe <strong className="text-white">{user?.displayName || 'your account'}</strong> (<span className="text-red-400 font-mono">{user?.email || 'authenticated-user'}</span>) from the database, erase all conversations, and remove your account references from all your friends' accounts as well.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-red-950/60 border border-red-500/20 rounded-xl space-y-1.5 text-[11px] text-red-200">
+                  <div className="flex items-center gap-1.5 font-bold text-red-400 uppercase tracking-wider text-[9px]">
+                    <Icon name="info" className="text-xs" />
+                    <span>What will be deleted:</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-0.5 text-slate-300 text-[10px]">
+                    <li>Gmail profile links and auth credentials</li>
+                    <li>User profile record from database & friends lists</li>
+                    <li>All offline messages, friend requests & notifications</li>
+                    <li>Browser cached voice notes, media blobs & IndexedDB</li>
+                  </ul>
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <Button
+                    disabled={isDeletingAccount}
+                    onClick={() => setShowDeleteAccountModal(false)}
+                    variant="ghost"
+                    className="flex-1 h-12 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white hover:bg-white/5"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={isDeletingAccount}
+                    onClick={async () => {
+                      setIsDeletingAccount(true);
+                      try {
+                        await deleteAccountPermanently();
+                        setIsDeletingAccount(false);
+                        setShowDeleteAccountModal(false);
+                        onClose();
+                      } catch (err) {
+                        console.error("Account deletion failed:", err);
+                        setIsDeletingAccount(false);
+                      }
+                    }}
+                    className="flex-1 h-12 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-red-600/30 flex items-center justify-center gap-2"
+                  >
+                    {isDeletingAccount ? (
+                      <>
+                        <div className="size-4 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+                        <span>Deleting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="delete_forever" className="text-sm" />
+                        <span>Yes, Delete Account</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Option 2: Clear Browser Cached Data Confirmation Modal */}
+        <AnimatePresence>
+          {showClearCacheModal && (
+            <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => !isClearingCache && setShowClearCacheModal(false)}
+                className="absolute inset-0 bg-black/70 backdrop-blur-md"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="relative bg-slate-900 border border-amber-500/30 w-full max-w-md rounded-[2rem] p-6 shadow-2xl text-white space-y-6 overflow-hidden z-10"
+              >
+                <div className="size-16 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+                  <Icon name="cleaning_services" className="text-3xl" />
+                </div>
+
+                <div className="text-center space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">Local Cache Cleanup</span>
+                  <h3 className="text-xl font-black italic uppercase tracking-tight text-white">Delete Browser Cached Data?</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed pt-1">
+                    This will permanently clear local browser storage, cached voice notes, and media blobs on this device.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-amber-950/60 border border-amber-500/20 rounded-xl space-y-1.5 text-[11px] text-amber-200">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-400 uppercase tracking-wider text-[9px]">
+                    <Icon name="verified" className="text-xs" />
+                    <span>Your Account is Safe:</span>
+                  </div>
+                  <p className="text-[10px] text-slate-300 leading-normal">
+                    Your account profile, Gmail linkage, friends list, and server database messages will remain completely intact and active on the server.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <Button
+                    disabled={isClearingCache}
+                    onClick={() => setShowClearCacheModal(false)}
+                    variant="ghost"
+                    className="flex-1 h-12 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white hover:bg-white/5"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={isClearingCache}
+                    onClick={async () => {
+                      setIsClearingCache(true);
+                      try {
+                        await deleteBrowserCacheOnly();
+                        setIsClearingCache(false);
+                        setShowClearCacheModal(false);
+                        setDeletionNotice("Browser cached data cleared permanently! Device storage freed.");
+                        setTimeout(() => setDeletionNotice(null), 5000);
+                      } catch (err) {
+                        console.error("Cache purge failed:", err);
+                        setIsClearingCache(false);
+                      }
+                    }}
+                    className="flex-1 h-12 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-600/30 flex items-center justify-center gap-2"
+                  >
+                    {isClearingCache ? (
+                      <>
+                        <div className="size-4 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+                        <span>Purging Cache...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="delete_sweep" className="text-sm" />
+                        <span>Clear Browser Cache</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
       </motion.div>

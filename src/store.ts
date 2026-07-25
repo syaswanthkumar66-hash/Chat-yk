@@ -101,6 +101,8 @@ interface AppState {
   updateUser: (data: Partial<UserProfile>) => void;
   login: (userData?: UserProfile, authMethod?: 'google' | 'local') => void;
   logout: () => void;
+  deleteAccountPermanently: () => Promise<void>;
+  deleteBrowserCacheOnly: () => Promise<void>;
   authMethod: 'google' | 'local' | null;
   wssStatus: 'disconnected' | 'connecting' | 'connected';
   isWssConnected: boolean;
@@ -969,6 +971,153 @@ export const useAppStore = create<AppState>((set) => ({
     import('./services/deviceSyncService').then(({ deviceSyncService }) => {
       deviceSyncService.cleanup();
     });
+  },
+  deleteAccountPermanently: async () => {
+    const state = useAppStore.getState();
+    const userId = state.user?.id;
+    const email = state.user?.email;
+
+    if (!userId) {
+      state.logout();
+      return;
+    }
+
+    try {
+      console.log(`[Store Delete Account] Initiating permanent deletion for user: ${userId}`);
+
+      // 1. Call backend delete account endpoint to wipe server & friend references
+      await fetch(`${BACKEND_URL}/api/delete-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, email })
+      }).catch(err => console.warn("[Store Delete Account] Backend call warning:", err));
+
+      // 2. Client-side Firestore doc cleanup
+      try {
+        const { db, deleteDoc, doc, collection, query, where, getDocs } = await import('./firebase');
+        await deleteDoc(doc(db, 'users', userId)).catch(() => {});
+
+        const notifQuery = query(collection(db, 'notifications'), where('userId', '==', userId));
+        const notifDocs = await getDocs(notifQuery).catch(() => null);
+        if (notifDocs) {
+          for (const d of notifDocs.docs) {
+            await deleteDoc(doc(db, 'notifications', d.id)).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn("[Store Delete Account] Client Firestore deletion fallback warning:", e);
+      }
+
+      // 3. Purge IndexedDB databases
+      if (typeof window !== 'undefined' && window.indexedDB) {
+        try {
+          indexedDB.deleteDatabase(`audio-storage-db_${userId}`);
+          indexedDB.deleteDatabase(`voice-note-cache-db_${userId}`);
+          indexedDB.deleteDatabase(`audio-storage-db`);
+          indexedDB.deleteDatabase(`voice-note-cache-db`);
+        } catch (idbErr) {
+          console.warn("[Store Delete Account] IndexedDB purge warning:", idbErr);
+        }
+      }
+
+      // 4. Purge Cache Storage API
+      if (typeof window !== 'undefined' && 'caches' in window) {
+        try {
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.map(name => caches.delete(name)));
+        } catch (cErr) {
+          console.warn("[Store Delete Account] Caches API purge warning:", cErr);
+        }
+      }
+
+      // 5. Clear localStorage and sessionStorage
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch (sErr) {
+          console.warn("[Store Delete Account] Web storage clear warning:", sErr);
+        }
+      }
+
+      // 6. Complete logout and reset
+      state.logout();
+    } catch (err) {
+      console.error("Error during deleteAccountPermanently:", err);
+      state.logout();
+    }
+  },
+  deleteBrowserCacheOnly: async () => {
+    const state = useAppStore.getState();
+    const userId = state.user?.id;
+
+    console.log(`[Store Cache Purge] Purging browser cached data permanently...`);
+
+    // 1. Purge IndexedDB databases
+    if (typeof window !== 'undefined' && window.indexedDB) {
+      try {
+        if (userId) {
+          indexedDB.deleteDatabase(`audio-storage-db_${userId}`);
+          indexedDB.deleteDatabase(`voice-note-cache-db_${userId}`);
+        }
+        indexedDB.deleteDatabase(`audio-storage-db`);
+        indexedDB.deleteDatabase(`voice-note-cache-db`);
+      } catch (idbErr) {
+        console.warn("[Store Cache Purge] IndexedDB purge warning:", idbErr);
+      }
+    }
+
+    // 2. Purge Cache Storage API
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      try {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map(name => caches.delete(name)));
+      } catch (cErr) {
+        console.warn("[Store Cache Purge] Caches API purge warning:", cErr);
+      }
+    }
+
+    // 3. Clear temporary cached voice notes, blobs, and cached data from localStorage & sessionStorage
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.clear();
+
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (
+            key.startsWith('voice_note_') ||
+            key.startsWith('cached_media_') ||
+            key.startsWith('audio_') ||
+            key.startsWith('proto_chats_') ||
+            key.startsWith('proto_users_') ||
+            key.startsWith('proto_friendRequests_') ||
+            key.startsWith('pending_profile_sync_')
+          )) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+      } catch (sErr) {
+        console.warn("[Store Cache Purge] Web storage cache clear warning:", sErr);
+      }
+    }
+
+    // 4. Re-sync user data from Firestore so active account session stays alive seamlessly
+    if (userId) {
+      try {
+        const { db, doc, getDoc } = await import('./firebase');
+        const userSnap = await getDoc(doc(db, 'users', userId)).catch(() => null);
+        if (userSnap && userSnap.exists()) {
+          const freshData = userSnap.data();
+          if (freshData) {
+            state.updateUser(freshData);
+          }
+        }
+      } catch (e) {
+        console.warn("[Store Cache Purge] Re-sync notice:", e);
+      }
+    }
   },
   switchAccount: async (userId) => {
     const { sessionIntegrityService } = await import('./services/sessionIntegrityService');
