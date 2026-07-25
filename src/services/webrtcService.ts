@@ -117,9 +117,9 @@ class WebRTCService {
 
     diagnosticLogger.log('media', 'local_media_ready', `Local MediaStream captured and published. Total audio tracks: ${stream.getAudioTracks().length}, video tracks: ${stream.getVideoTracks().length}`, undefined, roomId);
 
-    const socket = useAppStore.getState().socket;
-    if (socket) {
-      socket.emit('join_call', { roomId, userId: useAppStore.getState().user?.id });
+    const activeSocket = useAppStore.getState().socket;
+    if (activeSocket) {
+      activeSocket.emit('join_call', { roomId, userId: useAppStore.getState().user?.id });
     }
 
     // Attach local tracks to all existing peer connections for this room to ensure media flow
@@ -138,9 +138,8 @@ class WebRTCService {
             
             this.flushPendingLocalCandidates(mapKey, peerId, roomId);
 
-            const socket = useAppStore.getState().socket;
-            if (socket) {
-              socket.emit('sfu_signal', {
+            if (activeSocket) {
+              activeSocket.emit('sfu_signal', {
                 roomId,
                 from: useAppStore.getState().user?.id,
                 signal: {
@@ -174,10 +173,9 @@ class WebRTCService {
 
     diagnosticLogger.log('socket', 'emit_presence', `Broadcasting 'peer_joined' presence to room ${roomId}`, undefined, roomId);
 
-    const socket = useAppStore.getState().socket;
-    if (socket) {
+    if (activeSocket) {
       // Announce our presence to everyone in the room
-      socket.emit('sfu_signal', {
+      activeSocket.emit('sfu_signal', {
         roomId,
         from: useAppStore.getState().user?.id,
         signal: {

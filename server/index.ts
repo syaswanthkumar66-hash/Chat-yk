@@ -867,8 +867,8 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           const snapshot = await db.collection('users').get();
           const allUsers = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
           socket.emit("all_users_data", allUsers);
-        } catch (e) {
-          console.error("Failed to fetch all users:", e);
+        } catch (e: any) {
+          console.warn("Firebase users fetch notice (using memory/client fallback):", e?.message || e);
         }
       }
     });
