@@ -694,6 +694,9 @@ export const useAppStore = create<AppState>((set) => ({
         });
       });
     }
+    if (state.socket && state.socket.connected && updatedUser) {
+      state.socket.emit('broadcast_user_profile', { user: updatedUser });
+    }
     return { user: updatedUser };
   }),
   authMethod: cachedAuthMethod as any,
@@ -1507,13 +1510,25 @@ export const useAppStore = create<AppState>((set) => ({
           return newState;
         });
         startHeartbeat();
+        const activeState = useAppStore.getState();
         const { cryptoService } = await import('./services/cryptoService');
         const publicKey = await cryptoService.getMyPublicKeyBase64(uid);
         const deviceId = getOrCreateDeviceId();
-        sock.emit('register', { userId: uid, publicKey, deviceId });
+        const appUser = activeState.user;
+        sock.emit('register', { 
+          userId: uid, 
+          publicKey, 
+          deviceId,
+          displayName: appUser?.displayName,
+          username: appUser?.username,
+          avatar: appUser?.avatar,
+          description: appUser?.description
+        });
+        if (appUser) {
+          sock.emit('broadcast_user_profile', { user: appUser });
+        }
         
         // Auto join group rooms on connect
-        const activeState = useAppStore.getState();
         activeState.chats.forEach(c => {
           if (c.isGroup) {
             sock.emit('join_group', c.id);
@@ -2074,6 +2089,76 @@ export const useAppStore = create<AppState>((set) => ({
           }
         }
       });
+
+      // 19. receive_notification
+      sock.off('receive_notification').on('receive_notification', (notification: any) => {
+        if (!notification || !notification.id) return;
+        const state = useAppStore.getState();
+        if (state.blockedUserIds.includes(notification.senderId || '')) return;
+
+        state.addNotification(notification);
+
+        const userSettings = state.user?.notificationSettings;
+        if (userSettings?.pushEnabled !== false) {
+          if (userSettings?.soundEnabled !== false) {
+            try {
+              const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
+              audio.volume = 0.5;
+              audio.play().catch(() => {});
+            } catch (e) {}
+          }
+          if (userSettings?.vibrateEnabled !== false && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+            try { navigator.vibrate([200, 100, 200]); } catch (e) {}
+          }
+          const bodyText = userSettings?.previewEnabled !== false ? notification.body : "New Notification received";
+          state.addInAppToast({
+            title: notification.title,
+            body: bodyText,
+            avatar: notification.senderAvatar || generateInitialsAvatar(notification.senderId || 'sys', notification.title || 'Notification'),
+            chatId: notification.chatId || ''
+          });
+        }
+      });
+
+      // 20. user_profile_updated
+      sock.off('user_profile_updated').on('user_profile_updated', (updatedUserData: any) => {
+        if (!updatedUserData || !updatedUserData.id) return;
+        set((state) => {
+          const existingIdx = state.users.findIndex(u => u.id === updatedUserData.id);
+          let updatedUsers = [...state.users];
+          if (existingIdx >= 0) {
+            updatedUsers[existingIdx] = { ...updatedUsers[existingIdx], ...updatedUserData };
+          } else {
+            updatedUsers.push(updatedUserData);
+          }
+
+          const updatedChats = state.chats.map(chat => ({
+            ...chat,
+            participants: chat.participants.map(p => p.id === updatedUserData.id ? { ...p, ...updatedUserData } : p)
+          }));
+
+          return { users: updatedUsers, chats: updatedChats };
+        });
+      });
+
+      // 21. friend_request_update
+      sock.off('friend_request_update').on('friend_request_update', (data: { fromUserId: string, type: string, request: any }) => {
+        const { fromUserId, type, request } = data || {};
+        const state = useAppStore.getState();
+        if (type === 'sent' && request) {
+          const exists = state.friendRequests.some(r => r.id === request.id);
+          if (!exists) {
+            state.setFriendRequests([request, ...state.friendRequests]);
+          }
+        } else if (type === 'accepted') {
+          const updatedReqs = state.friendRequests.filter(r => r.userId !== fromUserId && r.id !== request?.id);
+          const updatedRemoved = state.removedFriendIds.filter(id => id !== fromUserId);
+          useAppStore.setState({ friendRequests: updatedReqs, removedFriendIds: updatedRemoved });
+        } else if (type === 'rejected' || type === 'canceled') {
+          const updatedReqs = state.friendRequests.filter(r => r.userId !== fromUserId && r.id !== request?.id);
+          useAppStore.setState({ friendRequests: updatedReqs });
+        }
+      });
     };
 
     setupSocketListeners(socket, userId);
@@ -2147,8 +2232,9 @@ export const useAppStore = create<AppState>((set) => ({
   friendRequests: cachedFriendRequests,
   setFriendRequests: (requests) => set({ friendRequests: requests }),
   acceptFriendRequest: async (requestId) => {
+    const currentState = useAppStore.getState();
+    const request = currentState.friendRequests.find(r => r.id === requestId);
     set((state) => {
-      const request = state.friendRequests.find(r => r.id === requestId);
       if (!request) return state;
       
       const newRequests = state.friendRequests.filter(r => r.id !== requestId);
@@ -2156,6 +2242,29 @@ export const useAppStore = create<AppState>((set) => ({
       return { friendRequests: newRequests, removedFriendIds: newRemoved };
     });
     
+    if (request && currentState.socket && currentState.socket.connected && currentState.user) {
+      currentState.socket.emit('friend_request_event', {
+        toUserId: request.userId,
+        type: 'accepted',
+        request
+      });
+      currentState.socket.emit('send_notification', {
+        recipientId: request.userId,
+        notification: {
+          id: `notif-accept-${Date.now()}`,
+          type: 'system',
+          senderId: currentState.user.id,
+          senderName: currentState.user.displayName || currentState.user.username,
+          senderAvatar: currentState.user.avatar || '',
+          recipientId: request.userId,
+          title: 'Friend Request Accepted',
+          body: `${currentState.user.displayName || currentState.user.username} accepted your friend request! 🎉`,
+          status: 'created',
+          createdAt: new Date().toISOString()
+        }
+      });
+    }
+
     try {
       const { db, updateDoc, doc, handleFirestoreError, OperationType } = await import('./firebase');
       await updateDoc(doc(db, 'friendRequests', requestId), { status: 'accepted' }).catch((err) => {
@@ -2210,9 +2319,9 @@ export const useAppStore = create<AppState>((set) => ({
           // Create persistent notification record
           const notifId = `notif-friend-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
           const notifRef = doc(db, 'notifications', notifId);
-          await setDoc(notifRef, {
+          const notificationData = {
             id: notifId,
-            type: 'friend_request',
+            type: 'friend_request' as const,
             senderId: state.user.id,
             senderName: state.user.displayName || state.user.username,
             senderAvatar: state.user.avatar || '',
@@ -2220,9 +2329,28 @@ export const useAppStore = create<AppState>((set) => ({
             title: 'New Friend Request',
             body: `${state.user.displayName || state.user.username} sent you a friend request.`,
             requestId: docRef.id,
-            status: 'created',
+            status: 'created' as const,
             createdAt: new Date().toISOString()
-          }).catch((err) => {
+          };
+
+          if (state.socket && state.socket.connected) {
+            state.socket.emit('friend_request_event', {
+              toUserId: userId,
+              type: 'sent',
+              request: {
+                id: docRef.id,
+                userId: state.user.id,
+                createdAt: new Date().toISOString(),
+                user: state.user
+              }
+            });
+            state.socket.emit('send_notification', {
+              recipientId: userId,
+              notification: notificationData
+            });
+          }
+
+          await setDoc(notifRef, notificationData).catch((err) => {
             handleFirestoreError(err, OperationType.CREATE, `notifications/${notifId}`);
           });
         }

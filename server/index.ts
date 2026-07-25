@@ -730,6 +730,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 const users = new Map<string, Map<string, string>>(); // userId -> Map<deviceId, socketId>
 const userPublicKeys = new Map<string, string>(); // userId -> publicKey
 const tempStorage = new Map<string, any>(); // messageId -> messageData 
+const cachedUsers = new Map<string, any>(); // userId -> UserProfile object for instant central hub sync
 
 // File Upload Endpoint
 app.post("/api/upload", upload.single("file"), async (req, res) => {
@@ -861,21 +862,82 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     socket.on("get_online_users", async () => {
       socket.emit("online_users", getOnlineUsersPayload());
       
-      // Send all users data
+      if (cachedUsers.size > 0) {
+        socket.emit("all_users_data", Array.from(cachedUsers.values()));
+      }
+
+      // Send all users data from Firestore & merge into cache
       if (db) {
         try {
           const snapshot = await db.collection('users').get();
-          const allUsers = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-          socket.emit("all_users_data", allUsers);
+          const allUsers = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+          allUsers.forEach((u: any) => {
+            if (u.id) {
+              const existing = cachedUsers.get(u.id) || {};
+              cachedUsers.set(u.id, { ...existing, ...u });
+            }
+          });
+          socket.emit("all_users_data", Array.from(cachedUsers.values()));
         } catch (e: any) {
           console.warn("Firebase users fetch notice (using memory/client fallback):", e?.message || e);
         }
       }
     });
 
+    socket.on("broadcast_user_profile", (data: { user: any }) => {
+      const { user } = data || {};
+      if (!user || !user.id) return;
+      const existing = cachedUsers.get(user.id) || {};
+      const updated = { ...existing, ...user, isOnline: true };
+      cachedUsers.set(user.id, updated);
+      
+      io.emit("user_profile_updated", updated);
+      io.emit("all_users_data", Array.from(cachedUsers.values()));
+      console.log(`User ${user.id} profile update broadcasted across central hub.`);
+    });
+
+    socket.on("send_notification", async (data: { recipientId: string, notification: any }) => {
+      const { recipientId, notification } = data || {};
+      if (!recipientId || !notification) return;
+
+      if (db) {
+        try {
+          await db.collection('notifications').doc(notification.id).set({
+            ...notification,
+            status: notification.status || 'created',
+            createdAt: notification.createdAt || new Date().toISOString()
+          });
+        } catch (e: any) {
+          console.warn("Notice saving socket notification:", e?.message || e);
+        }
+      }
+
+      const targetDevices = users.get(recipientId);
+      if (targetDevices && targetDevices.size > 0) {
+        for (const sId of targetDevices.values()) {
+          io.to(sId).emit("receive_notification", notification);
+        }
+        console.log(`Instant socket notification delivered to user ${recipientId}`);
+      } else {
+        console.log(`Recipient ${recipientId} offline for instant socket notification. Saved in DB.`);
+      }
+    });
+
+    socket.on("friend_request_event", (data: { toUserId: string, type: string, request: any }) => {
+      const { toUserId, type, request } = data || {};
+      if (!toUserId) return;
+      const targetDevices = users.get(toUserId);
+      if (targetDevices && targetDevices.size > 0) {
+        for (const sId of targetDevices.values()) {
+          io.to(sId).emit("friend_request_update", { fromUserId: (socket as any).userId, type, request });
+        }
+        console.log(`Instant friend request event (${type}) dispatched to ${toUserId}`);
+      }
+    });
+
     socket.on("register", async (data) => {
       // Graceful handling if data is just string (old logic) or object (new E2EE logic)
-      let userId, publicKey, deviceId;
+      let userId, publicKey, deviceId, profileData;
       if (typeof data === 'string') {
         userId = data;
         deviceId = 'default';
@@ -883,6 +945,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         userId = data.userId;
         publicKey = data.publicKey;
         deviceId = data.deviceId || 'default';
+        profileData = data.profile || data;
         if (publicKey) userPublicKeys.set(userId, publicKey);
       }
       
@@ -896,11 +959,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       }
       deviceMap.set(deviceId, socket.id);
 
+      if (profileData && typeof profileData === 'object' && profileData.displayName) {
+        const existing = cachedUsers.get(userId) || {};
+        cachedUsers.set(userId, { ...existing, id: userId, isOnline: true, ...profileData });
+      } else if (!cachedUsers.has(userId)) {
+        cachedUsers.set(userId, { id: userId, isOnline: true });
+      }
+
       console.log(`User ${userId} registered device ${deviceId} with socket ${socket.id}`);
       
-      // Broadcast online status
+      // Broadcast online status & central user list to all connected clients instantly
       io.emit("user_status", { userId, isOnline: true, isInactive: isUserInactive(userId) });
       io.emit("online_users", getOnlineUsersPayload());
+      io.emit("all_users_data", Array.from(cachedUsers.values()));
 
       // Sync with Firestore
       updateFirestorePresence(userId, true);
@@ -1522,15 +1593,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       const { roomId, signal, from, type } = data;
       if (roomId) {
         socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
-      }
-      // Also send directly to target user if specified in signal or data
-      const targetId = signal?.to || data?.to;
-      if (targetId && users.has(String(targetId))) {
-        const targetSockets = users.get(String(targetId));
-        if (targetSockets) {
-          for (const sId of targetSockets.values()) {
-            if (sId !== socket.id) {
-              io.to(sId).emit("sfu_signal", { roomId, signal, from, type });
+      } else {
+        // Only route directly by target user if no roomId is specified
+        const targetId = signal?.to || data?.to;
+        if (targetId && users.has(String(targetId))) {
+          const targetSockets = users.get(String(targetId));
+          if (targetSockets) {
+            for (const sId of targetSockets.values()) {
+              if (sId !== socket.id) {
+                io.to(sId).emit("sfu_signal", { roomId, signal, from, type });
+              }
             }
           }
         }

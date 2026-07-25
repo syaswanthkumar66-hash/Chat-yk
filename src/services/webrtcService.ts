@@ -205,7 +205,12 @@ class WebRTCService {
   private createPeerConnection(peerId: string, roomId: string): RTCPeerConnection {
     const mapKey = this.getMapKey(peerId, roomId);
     if (this.pcs.has(mapKey)) {
-      return this.pcs.get(mapKey)!;
+      const existingPc = this.pcs.get(mapKey)!;
+      if (existingPc.connectionState !== 'closed' && existingPc.connectionState !== 'failed' && existingPc.iceConnectionState !== 'failed') {
+        return existingPc;
+      }
+      try { existingPc.close(); } catch (_) {}
+      this.pcs.delete(mapKey);
     }
 
     diagnosticLogger.log('webrtc', 'create_peer_connection', `Initiating RTCPeerConnection creation for peer ${peerId}. ICE servers configured count: ${this.iceServers.length}`, peerId, roomId, { iceServers: this.iceServers });
@@ -1420,6 +1425,17 @@ class WebRTCService {
         const pc = this.createPeerConnection(from, roomId);
 
         try {
+          const offerCollision = pc.signalingState !== 'stable';
+          const isPolite = myId ? String(myId) < String(from) : false;
+          if (offerCollision) {
+            if (!isPolite) {
+              diagnosticLogger.log('webrtc', 'glare_ignored', `Impolite peer ignoring colliding offer in signaling state: ${pc.signalingState}`, from, roomId);
+              return;
+            }
+            diagnosticLogger.log('webrtc', 'glare_rollback', `Polite peer rolling back local offer to accept incoming offer from ${from}`, from, roomId);
+            await pc.setLocalDescription({ type: 'rollback' });
+          }
+
           // Set remote description FIRST
           diagnosticLogger.log('webrtc', 'set_remote_description_offer', `Setting remote description with received SDP Offer from peer ${from}`, from, roomId);
           await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
