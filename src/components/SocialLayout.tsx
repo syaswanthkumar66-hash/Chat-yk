@@ -606,7 +606,31 @@ export const SocialLayout = () => {
                         <h3 className="font-black text-slate-900 truncate tracking-tight">
                           {chat.isGroup ? chat.name : (partner?.name || '')}
                         </h3>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{chat.lastMessage?.timestamp}</span>
+                        {(() => {
+                          if (!chat.isGroup && partner) {
+                            const isOnline = isUserOnline(partner.id);
+                            if (isOnline) {
+                              return (
+                                <span className="text-[10px] font-black text-emerald-600 uppercase tracking-wider flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60 shadow-xs">
+                                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                  Online
+                                </span>
+                              );
+                            } else {
+                              const pLastSeen = getUserLastSeen(partner.id) || partner.lastSeen;
+                              return (
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                                  {pLastSeen ? formatLastSeen(pLastSeen) : (chat.lastMessage?.timestamp || 'Offline')}
+                                </span>
+                              );
+                            }
+                          }
+                          return (
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                              {chat.lastMessage?.timestamp}
+                            </span>
+                          );
+                        })()}
                       </div>
                     <p className="text-sm text-slate-500 truncate leading-tight flex items-center min-h-[1.25rem]">
                       {(() => {

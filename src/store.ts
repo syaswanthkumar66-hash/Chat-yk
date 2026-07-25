@@ -440,7 +440,7 @@ const cachedRemovedFriendIds = cachedUser
   ? getLocalStorageJSON<string[]>(`proto_removedFriendIds_${cachedUser.id}`, [])
   : [];
 const cachedUsers = cachedUser 
-  ? getLocalStorageJSON<any[]>(`proto_users_${cachedUser.id}`, [])
+  ? getLocalStorageJSON<any[]>(`proto_users_${cachedUser.id}`, []).map(u => ({ ...u, isOnline: false }))
   : [];
 const cachedChats = cachedUser 
   ? getLocalStorageJSON<any[]>(`proto_chats_${cachedUser.id}`, [])
@@ -1687,18 +1687,15 @@ export const useAppStore = create<AppState>((set) => ({
           sock.emit('get_online_users');
         }
 
-        // Fast background Firestore presence sync (<1ms local priority)
-        if (useAppStore.getState().authMethod !== 'local') {
-          import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
-            setDoc(doc(db, 'users', targetUid), { 
+        // Fast background Firestore presence sync for current user only
+        const currentUserId = useAppStore.getState().user?.id;
+        if (useAppStore.getState().authMethod !== 'local' && currentUserId && targetUid === currentUserId) {
+          import('./firebase').then(({ db, doc, setDoc }) => {
+            setDoc(doc(db, 'users', currentUserId), { 
               isOnline, 
               lastSeen: nowIso 
-            }, { merge: true }).catch((err) => {
-              try {
-                handleFirestoreError(err, OperationType.WRITE, `users/${targetUid}`);
-              } catch (e) {}
-            });
-          });
+            }, { merge: true }).catch(() => {});
+          }).catch(() => {});
         }
       });
 

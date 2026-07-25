@@ -132,20 +132,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const code = (error && typeof error === 'object' && 'code' in error) ? String(error.code).toLowerCase() : '';
   const isPermission = msg.includes('permission') || msg.includes('denied') || code.includes('permission-denied');
 
-  import('./store').then(({ useAppStore }) => {
-    useAppStore.getState().addInAppToast({
-      title: "Sync Error",
-      body: isPermission ? "Access denied. Action could not be saved." : "Database error. Action may not have been saved.",
-      avatar: "⚠️",
-      chatId: "system"
-    });
-  }).catch(console.warn);
-
   if (isPermission) {
-    console.error('Firestore Error (Permission Denied): ', JSON.stringify(errInfo));
-    throw new Error(JSON.stringify(errInfo));
+    console.warn('Firestore Permission Notice (handshake/background fallback):', path, errInfo.error);
   } else {
-    console.warn('Firestore Warning (Transient/Offline): ', JSON.stringify(errInfo));
+    console.warn('Firestore Notice (Transient/Offline):', path, errInfo.error);
   }
 }
 
