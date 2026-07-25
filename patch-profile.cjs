@@ -1,28 +1,7 @@
 const fs = require('fs');
-let viewFile = fs.readFileSync('src/components/UserProfileView.tsx', 'utf8');
-
-const targetStr = `function formatLastSeen(lastSeen?: string | null): string {
-  if (!lastSeen) return 'Offline';
-  try {
-    const date = new Date(lastSeen);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    if (diffMs < 5000) {
-       return 'just now';
-    }
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();`;
-
-const replaceStr = `function formatLastSeen(lastSeen?: string | null): string {
-  if (!lastSeen) return 'Offline';
-  try {
-    const date = new Date(lastSeen);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    if (diffMs < 5000) {
-       return 'Just now';
-    }`;
-
-viewFile = viewFile.replace(targetStr, replaceStr);
-
-fs.writeFileSync('src/components/UserProfileView.tsx', viewFile);
+let file = fs.readFileSync('src/components/ProfileView.tsx', 'utf8');
+file = file.replace(
+  /status=\{\(friend\.isOnline \? \(friend\.isInactive \? 'away' : 'online'\) : 'offline'\)\}/g,
+  "status={((friend.isOnline || (typeof onlineUserIds !== 'undefined' && onlineUserIds.includes(friend.id))) ? (friend.isInactive ? 'away' : 'online') : 'offline')}"
+);
+fs.writeFileSync('src/components/ProfileView.tsx', file);

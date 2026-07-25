@@ -903,7 +903,7 @@ export const SocialLayout = () => {
                   <Avatar 
                     src={user.avatar} 
                     className="size-14 cursor-pointer hover:scale-105 transition-transform" 
-                    status={user.isOnline ? (user.isInactive ? 'away' : 'online') : 'offline'}
+                    status={isUserOnline(user.id) ? (user.isInactive ? 'away' : 'online') : 'offline'}
                     onClick={() => setViewingUserId(user.id)}
                   />
                   <div className="flex-1">
