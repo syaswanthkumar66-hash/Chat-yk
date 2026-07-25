@@ -172,6 +172,7 @@ interface AppState {
   removeChatMember: (chatId: string, userId: string) => void;
   toggleChatAdmin: (chatId: string, userId: string) => void;
   deleteChat: (chatId: string) => void;
+  clearChatMessages: (chatId: string) => void;
   leaveChat: (chatId: string, userId: string) => void;
   createGroup: (data: { name: string, members: string[], avatar?: string, creatorId: string }) => string;
   tickets: SupportTicket[];
@@ -2896,6 +2897,36 @@ export const useAppStore = create<AppState>((set) => ({
       chats: state.chats.filter(c => c.id !== chatId),
       activeChatId: state.activeChatId === chatId ? null : state.activeChatId
     }));
+  },
+  clearChatMessages: (chatId) => {
+    set((state) => {
+      const updatedChats = state.chats.map(c => {
+        if (c.id === chatId || (c.participants && c.participants.some(p => p.id === chatId))) {
+          return {
+            ...c,
+            messages: [],
+            lastMessage: undefined
+          };
+        }
+        return c;
+      });
+
+      // Purge local/firestore cached offline messages asynchronously
+      try {
+        import('./firebase').then(({ db, collection, query, where, getDocs, deleteDoc, doc }) => {
+          const q = query(collection(db, 'offline_messages'), where('chatId', '==', chatId));
+          getDocs(q).then(snapshot => {
+            snapshot.forEach(d => {
+              deleteDoc(doc(db, 'offline_messages', d.id)).catch(() => {});
+            });
+          }).catch(() => {});
+        }).catch(() => {});
+      } catch (e) {
+        console.warn('Firestore offline messages purge notice:', e);
+      }
+
+      return { chats: updatedChats };
+    });
   },
   leaveChat: (chatId, userId) => {
     const state = useAppStore.getState();

@@ -752,7 +752,8 @@ export const ChatDetail = () => {
     deletedMsgIds,
     globallyDeletedIds,
     deleteMessageLocally,
-    deleteMessageGlobally
+    deleteMessageGlobally,
+    clearChatMessages
   } = useStore(s => ({
     user: s.user,
     activeChatId: s.activeChatId,
@@ -776,7 +777,8 @@ export const ChatDetail = () => {
     deletedMsgIds: s.deletedMsgIds,
     globallyDeletedIds: s.globallyDeletedIds,
     deleteMessageLocally: s.deleteMessageLocally,
-    deleteMessageGlobally: s.deleteMessageGlobally
+    deleteMessageGlobally: s.deleteMessageGlobally,
+    clearChatMessages: s.clearChatMessages
   }), shallowEqual);
   const [showMenu, setShowMenu] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -2012,6 +2014,10 @@ export const ChatDetail = () => {
                   variant="primary" 
                   className="flex-1 bg-red-500 hover:bg-red-600 shadow-red-500/20" 
                   onClick={() => {
+                    const targetId = chat?.id || activeChatId || activeRecipientId;
+                    if (targetId) {
+                      clearChatMessages(targetId);
+                    }
                     setCleared(true);
                     setShowClearConfirm(false);
                   }}
