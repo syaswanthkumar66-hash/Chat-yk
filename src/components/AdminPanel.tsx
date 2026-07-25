@@ -618,7 +618,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
     users.slice(0, 3).forEach((u, idx) => {
       logs.push({
         icon: u.isAdmin ? 'verified_user' : 'person_add',
-        text: `${u.isAdmin ? 'Admin' : 'User'} ${u.displayName} active on network`,
+        text: `${u.isAdmin ? 'Admin' : 'User'} ${u?.displayName || u?.username || 'Member'} active on network`,
         time: u.lastSeen ? new Date(u.lastSeen).toLocaleTimeString() : `${idx * 15 + 5}m ago`,
         color: u.isOnline ? 'text-emerald-500' : 'text-slate-500',
         bg: u.isOnline ? 'bg-emerald-50' : 'bg-slate-50'
@@ -644,7 +644,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
     if (user) {
       logs.push({
         event: 'Admin Session',
-        user: user.username || user.displayName.toLowerCase().replace(/\s+/g, '_') || 'admin',
+        user: user.username || (user.displayName ? user.displayName.toLowerCase().replace(/\s+/g, '_') : 'admin'),
         ip: '127.0.0.1 (Local)',
         status: 'success' as const,
         time: 'Now',
@@ -656,7 +656,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
     users.forEach((u) => {
       logs.push({
         event: u.isBanned ? 'Access Revoked' : (u.isAdmin ? 'Admin Session' : 'User Auth Session'),
-        user: u.username || u.displayName.toLowerCase().replace(/\s+/g, '_'),
+        user: u.username || (u.displayName ? u.displayName.toLowerCase().replace(/\s+/g, '_') : 'user'),
         ip: u.isOnline ? 'Active Connection' : 'Offline',
         status: u.isBanned ? ('failed' as const) : ('success' as const),
         time: u.lastSeen ? new Date(u.lastSeen).toLocaleDateString() : (u.joinDate || 'Recently'),
@@ -1562,7 +1562,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                 <AnimatePresence mode="popLayout">
                   {tickets
                     .filter(t => (ticketFilter === 'all' || t.status === ticketFilter))
-                    .filter(t => t.description.toLowerCase().includes(ticketSearchQuery.toLowerCase()) || t.id.toLowerCase().includes(ticketSearchQuery.toLowerCase()))
+                    .filter(t => (t.description || '').toLowerCase().includes((ticketSearchQuery || '').toLowerCase()) || (t.id || '').toLowerCase().includes((ticketSearchQuery || '').toLowerCase()))
                     .filter(t => {
                       const u = users.find(user => user.id === t.userId);
                       if (statusFilter === 'all') return true;
@@ -1795,7 +1795,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
 
                   return true;
                 })
-                .filter(t => t.description.toLowerCase().includes(ticketSearchQuery.toLowerCase()) || t.category.toLowerCase().includes(ticketSearchQuery.toLowerCase()))
+                .filter(t => (t.description || '').toLowerCase().includes((ticketSearchQuery || '').toLowerCase()) || (t.category || '').toLowerCase().includes((ticketSearchQuery || '').toLowerCase()))
                 .length === 0 ? (
                 <div className="h-64 flex flex-col items-center justify-center text-slate-300 gap-2">
                   <Icon name="support_agent" className="text-4xl" />
@@ -1816,7 +1816,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
 
                     return true;
                   })
-                  .filter(t => t.description.toLowerCase().includes(ticketSearchQuery.toLowerCase()) || t.category.toLowerCase().includes(ticketSearchQuery.toLowerCase()))
+                  .filter(t => (t.description || '').toLowerCase().includes((ticketSearchQuery || '').toLowerCase()) || (t.category || '').toLowerCase().includes((ticketSearchQuery || '').toLowerCase()))
                   .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Oldest tickets first
                   .map((ticket) => {
                     const ticketUser = users.find(u => u.id === ticket.userId);
@@ -2065,7 +2065,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                   </thead>
                   <tbody className="divide-y divide-primary/5">
                     {users
-                      .filter(u => u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) || u.username.toLowerCase().includes(searchQuery.toLowerCase()))
+                      .filter(u => (u.displayName || '').toLowerCase().includes((searchQuery || '').toLowerCase()) || (u.username || '').toLowerCase().includes((searchQuery || '').toLowerCase()))
                       .filter(u => {
                         if (statusFilter === 'all') return true;
                         if (statusFilter === 'online') return u.isOnline;
@@ -2200,7 +2200,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
               {/* Mobile Card View */}
               <div className="md:hidden divide-y divide-primary/5">
                 {users
-                  .filter(u => u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) || u.username.toLowerCase().includes(searchQuery.toLowerCase()))
+                  .filter(u => (u.displayName || '').toLowerCase().includes((searchQuery || '').toLowerCase()) || (u.username || '').toLowerCase().includes((searchQuery || '').toLowerCase()))
                   .filter(u => {
                     if (statusFilter === 'all') return true;
                     if (statusFilter === 'online') return u.isOnline;
@@ -2367,7 +2367,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                   </thead>
                   <tbody className="divide-y divide-primary/5">
                     {teamMembers
-                      .filter(m => m.displayName.toLowerCase().includes(teamSearchQuery.toLowerCase()) || m.username.toLowerCase().includes(teamSearchQuery.toLowerCase()))
+                      .filter(m => (m.displayName || '').toLowerCase().includes((teamSearchQuery || '').toLowerCase()) || (m.username || '').toLowerCase().includes((teamSearchQuery || '').toLowerCase()))
                       .filter(m => {
                         if (teamCategoryFilter === 'all') return true;
                         if (teamCategoryFilter === 'admins') return m.isAdmin;
@@ -2443,7 +2443,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
               {/* Mobile Card View */}
               <div className="md:hidden divide-y divide-primary/5">
                 {teamMembers
-                  .filter(m => m.displayName.toLowerCase().includes(teamSearchQuery.toLowerCase()) || m.username.toLowerCase().includes(teamSearchQuery.toLowerCase()))
+                  .filter(m => (m.displayName || '').toLowerCase().includes((teamSearchQuery || '').toLowerCase()) || (m.username || '').toLowerCase().includes((teamSearchQuery || '').toLowerCase()))
                   .filter(m => {
                     if (teamCategoryFilter === 'all') return true;
                     if (teamCategoryFilter === 'admins') return m.isAdmin;
@@ -3921,7 +3921,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                           <div className="absolute z-20 w-full bg-white border border-primary/5 rounded-xl overflow-hidden max-h-40 overflow-y-auto shadow-xl mt-1">
                             {users.filter(u => 
                               !(u.isAdmin || u.allowedTabs?.length) && 
-                              (u.displayName.toLowerCase().includes(userSearchQuery.toLowerCase()) || u.username.toLowerCase().includes(userSearchQuery.toLowerCase()))
+                              ((u.displayName || '').toLowerCase().includes((userSearchQuery || '').toLowerCase()) || (u.username || '').toLowerCase().includes((userSearchQuery || '').toLowerCase()))
                             ).map(u => (
                               <button
                                 key={`search-user-${u.id}`}

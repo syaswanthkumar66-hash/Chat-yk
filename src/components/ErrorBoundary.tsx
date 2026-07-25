@@ -33,12 +33,20 @@ export class ErrorBoundary extends React.Component<Props, State> {
   public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error caught by ErrorBoundary:", error, errorInfo);
     
-    // Auto recover DOM/translation errors immediately without disrupting user
+    // Auto recover DOM/translation errors or transient state errors smoothly
     if (this.state.isDOMError) {
       console.warn("Detected browser translation / DOM node reconciliation error. Auto-recovering immediately...");
       requestAnimationFrame(() => {
         this.setState({ hasError: false, error: null, isDOMError: false });
       });
+    } else {
+      // Auto-retry transient component rendering errors after 1 second
+      setTimeout(() => {
+        if (this.state.hasError) {
+          console.log("Auto-recovering from transient component render issue...");
+          this.setState({ hasError: false, error: null, isDOMError: false });
+        }
+      }, 1000);
     }
   }
 
