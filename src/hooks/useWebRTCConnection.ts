@@ -29,11 +29,12 @@ export const createPrioritizedPeerConnection = (
   });
 
 
-  // Ensure audio transceiver is present for incoming and outgoing voice
+  // Ensure audio and video transceivers are present for incoming and outgoing voice and video
   try {
     pc.addTransceiver('audio', { direction: 'sendrecv' });
+    pc.addTransceiver('video', { direction: 'sendrecv' });
   } catch (e) {
-    onLog(`[WebRTC] Failed to add audio transceiver: ${e}`);
+    onLog(`[WebRTC] Failed to add audio/video transceivers: ${e}`);
   }
 
   return pc;

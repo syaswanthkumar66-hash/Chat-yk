@@ -19,6 +19,7 @@ class WebRTCService {
   }
 
   private pcs: Map<string, RTCPeerConnection> = new Map();
+  private remoteStreams: Map<string, MediaStream> = new Map();
   private localStream: MediaStream | null = null;
   private iceServers: any[] = [
     // 1. Light-weight public discovery
@@ -132,25 +133,49 @@ class WebRTCService {
         // If the peer connection is active and not closed, trigger renegotiation so the remote peer receives our audio/video tracks
         if (pc.signalingState !== 'closed') {
           try {
-            console.log(`[Diagnostic] Renegotiating: creating and sending new SDP Offer to peer ${peerId} (room ${roomId})`);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            
-            this.flushPendingLocalCandidates(mapKey, peerId, roomId);
+            if (pc.signalingState === 'stable') {
+              console.log(`[Diagnostic] Renegotiating: creating and sending new SDP Offer to peer ${peerId} (room ${roomId})`);
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              
+              this.flushPendingLocalCandidates(mapKey, peerId, roomId);
 
-            if (activeSocket) {
-              activeSocket.emit('sfu_signal', {
-                roomId,
-                from: useAppStore.getState().user?.id,
-                signal: {
-                  type: 'offer',
-                  sdp: offer.sdp,
-                  to: peerId
-                }
-              });
+              if (activeSocket) {
+                activeSocket.emit('sfu_signal', {
+                  roomId,
+                  from: useAppStore.getState().user?.id,
+                  signal: {
+                    type: 'offer',
+                    sdp: offer.sdp,
+                    to: peerId
+                  }
+                });
+              }
+            } else if (pc.signalingState === 'have-remote-offer') {
+              console.log(`[Diagnostic] Have remote offer during stream publish: creating and sending SDP Answer to peer ${peerId}`);
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+
+              this.flushPendingLocalCandidates(mapKey, peerId, roomId);
+
+              if (activeSocket) {
+                activeSocket.emit('sfu_signal', {
+                  roomId,
+                  from: useAppStore.getState().user?.id,
+                  signal: {
+                    type: 'answer',
+                    sdp: answer.sdp,
+                    to: peerId
+                  }
+                });
+              }
+            } else {
+              console.log(`[Diagnostic] Connection state '${pc.signalingState}' busy for offer generation. Queuing renegotiation for stable state.`);
+              (pc as any).__needsRenegotiation = true;
             }
           } catch (err: any) {
             console.warn(`[Diagnostic] Failed to renegotiate on new local stream publish for peer ${peerId}:`, err);
+            (pc as any).__needsRenegotiation = true;
           }
         }
       }
@@ -369,10 +394,35 @@ class WebRTCService {
       }
     };
 
-    pc.onsignalingstatechange = () => {
+    pc.onsignalingstatechange = async () => {
       const state = pc.signalingState;
       console.log(`[Diagnostic][Step 3][${new Date().toISOString()}] Signaling State changed to: ${state} (peer: ${peerId}, room: ${roomId})`);
       diagnosticLogger.log('webrtc', 'signaling_state_changed', `Signaling State changed to: ${state}`, peerId, roomId, { state });
+
+      if (state === 'stable' && (pc as any).__needsRenegotiation) {
+        (pc as any).__needsRenegotiation = false;
+        try {
+          console.log(`[Diagnostic] Executing queued renegotiation for peer ${peerId} (room ${roomId})`);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          this.flushPendingLocalCandidates(mapKey, peerId, roomId);
+
+          const activeSocket = useAppStore.getState().socket;
+          if (activeSocket) {
+            activeSocket.emit('sfu_signal', {
+              roomId,
+              from: useAppStore.getState().user?.id,
+              signal: {
+                type: 'offer',
+                sdp: offer.sdp,
+                to: peerId
+              }
+            });
+          }
+        } catch (err) {
+          console.warn(`[Diagnostic] Failed queued renegotiation for peer ${peerId}:`, err);
+        }
+      }
     };
 
     let iceGatheringAttempts = 0;
@@ -450,14 +500,26 @@ class WebRTCService {
     // Handle remote stream tracks being added
     pc.ontrack = (event) => {
       const track = event.track;
-      const stream = event.streams[0];
+      let stream = event.streams && event.streams[0];
+      
+      if (!stream) {
+        let existing = this.remoteStreams.get(mapKey);
+        if (!existing) {
+          existing = new MediaStream();
+          this.remoteStreams.set(mapKey, existing);
+        }
+        if (!existing.getTracks().some(t => t.id === track.id)) {
+          existing.addTrack(track);
+        }
+        stream = existing;
+      } else {
+        this.remoteStreams.set(mapKey, stream);
+      }
 
       // Step 4: Diagnostic logging on pc.ontrack firing
       console.log(`[Diagnostic][Step 4][${new Date().toISOString()}] pc.ontrack FIRED! Kind: "${track?.kind}", ID: "${track?.id}", readyState: "${track?.readyState}", enabled: ${track?.enabled}`);
       if (stream) {
         console.log(`[Diagnostic][Step 4] pc.ontrack received MediaStream: total tracks = ${stream.getTracks().length}, audio tracks = ${stream.getAudioTracks().length}`);
-      } else {
-        console.log(`[Diagnostic][Step 4] WARNING: pc.ontrack stream array or first stream is null.`);
       }
 
       this.trackReceived.set(mapKey, true);

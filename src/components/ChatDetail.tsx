@@ -28,7 +28,10 @@ function formatLastSeen(lastSeen?: string | null): string {
 }
 
 const fetchWithProgress = async (url: string, onProgress: (percent: number) => void): Promise<Blob> => {
-  const response = await fetch(url).catch(() => {
+  const fullUrl = (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:'))
+    ? url
+    : `${BACKEND_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  const response = await fetch(fullUrl).catch(() => {
     throw new Error('DOWNLOAD_NETWORK_ERROR');
   });
   if (!response.ok) {
@@ -138,9 +141,9 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
         }
       }
 
-      // If it is a local blob URL or not encrypted, set the URL directly and bypass decryption
-      if (targetUrl.startsWith('blob:') || !msg.isE2E) {
-        if (msg.type === 'audio' && !targetUrl.startsWith('blob:')) {
+      // If it is a local blob URL, data URL, or not encrypted, set the URL directly and bypass decryption
+      if (targetUrl.startsWith('blob:') || targetUrl.startsWith('data:') || !msg.isE2E) {
+        if ((msg.type === 'audio' || msg.type === 'file' || msg.type === 'image') && !targetUrl.startsWith('blob:') && !targetUrl.startsWith('data:')) {
           try {
             const { voiceNoteCache } = await import('../services/voiceNoteCache');
             const cacheKey = msg.id || targetUrl;
@@ -152,7 +155,7 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
             if (active) setUrl(URL.createObjectURL(blob));
             return;
           } catch (err) {
-            console.error("Failed to fetch and cache unencrypted audio:", err);
+            console.error("Failed to fetch and cache unencrypted media attachment:", err);
             if (active) setDownloadProgress(null);
           }
         }
@@ -231,15 +234,15 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
           throw new Error('DECOMPRESS_FAILED');
         }
         
-        // Cache newly decrypted audio voice note
-        if (msg.type === 'audio') {
+        // Cache newly decrypted media attachment in local IndexedDB
+        if (msg.type === 'audio' || msg.type === 'file' || msg.type === 'image') {
           try {
             const { voiceNoteCache } = await import('../services/voiceNoteCache');
             const cacheKey = msg.id || targetUrl;
             await voiceNoteCache.set(cacheKey, decompressed);
-            console.log("Cached decrypted voice note successfully:", cacheKey);
+            console.log("Cached decrypted media attachment successfully:", cacheKey);
           } catch (cacheErr) {
-            console.error("Failed to cache decrypted voice note in IndexedDB:", cacheErr);
+            console.error("Failed to cache decrypted media attachment in IndexedDB:", cacheErr);
           }
         }
 

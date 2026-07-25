@@ -1054,8 +1054,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       console.log(`Socket ${socket.id} left group room group-${groupId}`);
     });
 
-    socket.on("get_public_key", ({ userId }, callback) => {
-      callback(userPublicKeys.get(userId));
+    socket.on("get_public_key", async ({ userId }, callback) => {
+      if (typeof callback !== 'function') return;
+      let key = userPublicKeys.get(userId);
+      if (!key && db && userId) {
+        try {
+          const userDoc = await db.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            key = userDoc.data()?.publicKey;
+            if (key) userPublicKeys.set(userId, key);
+          }
+        } catch (e) {}
+      }
+      callback(key || null);
     });
 
     const typingTimeouts = new Map<string, NodeJS.Timeout>();
