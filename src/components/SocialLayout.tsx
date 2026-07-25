@@ -15,6 +15,7 @@ import { GroupInfo } from './GroupInfo';
 import { DeviceSyncFlow } from './DeviceSyncFlow';
 import { IncomingCallOverlay } from './IncomingCallOverlay';
 import { motion, AnimatePresence } from 'motion/react';
+import { generateCallId } from '../services/webrtcService';
 import { db, collection, query, where, getDocs, getDoc, doc } from '../firebase';
 
 function formatLastSeen(lastSeen?: string | null): string {
@@ -47,6 +48,7 @@ export const SocialLayout = () => {
   const [showFabMenu, setShowFabMenu] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsInitialView, setSettingsInitialView] = useState<any>('main');
   const [showNotifications, setShowNotifications] = useState(false);
   const [showDevicesDropdown, setShowDevicesDropdown] = useState(false);
   const [showDeviceSyncFlow, setShowDeviceSyncFlow] = useState(false);
@@ -288,7 +290,7 @@ export const SocialLayout = () => {
             />
           )}
           {showSettings && (
-            <Settings onClose={() => setShowSettings(false)} />
+            <Settings initialView={settingsInitialView} onClose={() => setShowSettings(false)} />
           )}
           {showNotifications && (
             <NotificationPanel onClose={() => setShowNotifications(false)} />
@@ -789,7 +791,7 @@ export const SocialLayout = () => {
                                 <button 
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setActiveGroupCall({ type: 'voice', userId: loopUser.id });
+                                    setActiveGroupCall({ type: 'voice', userId: loopUser.id, callId: generateCallId('call_p2p') });
                                   }}
                                   className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm border border-slate-100"
                                   title="Voice Call"
@@ -799,7 +801,7 @@ export const SocialLayout = () => {
                                 <button 
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setActiveGroupCall({ type: 'video', userId: loopUser.id });
+                                    setActiveGroupCall({ type: 'video', userId: loopUser.id, callId: generateCallId('call_p2p') });
                                   }}
                                   className="size-9 rounded-xl bg-white flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all active:scale-90 shadow-sm border border-slate-100"
                                   title="Video Call"
@@ -932,7 +934,10 @@ export const SocialLayout = () => {
             </div>
           )}
           {activeTab === 'profile' && (
-            <ProfileView onSettingsClick={() => setShowSettings(true)} />
+            <ProfileView onSettingsClick={(view) => {
+              setSettingsInitialView(view || 'main');
+              setShowSettings(true);
+            }} />
           )}
           {activeTab === 'browser' && (
             <WebBrowser onClose={() => setActiveTab('chats')} />

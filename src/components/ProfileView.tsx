@@ -8,7 +8,7 @@ import { sessionIntegrityService } from '../services/sessionIntegrityService';
 import { QRScanner } from './QRScanner';
 
 interface ProfileViewProps {
-  onSettingsClick: () => void;
+  onSettingsClick: (view?: any) => void;
 }
 
 const generateMediaPlaceholder = (seed: string): string => {
@@ -665,8 +665,29 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
 
   return (
     <div className="flex flex-col h-full bg-bg-light">
+      {/* Sticky Top Header on Me Page */}
+      <div className="sticky top-0 z-20 bg-bg-light/80 backdrop-blur-xl border-b border-primary/5 px-6 py-3.5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="size-9 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-black">
+            <Icon name="person" className="text-lg" />
+          </div>
+          <div className="flex flex-col text-left">
+            <h1 className="text-lg font-black text-slate-900 uppercase italic tracking-tight">Me</h1>
+            <span className="text-[9px] text-neutral-muted font-bold uppercase tracking-widest">Profile & Account Settings</span>
+          </div>
+        </div>
+
+        <button 
+          onClick={() => onSettingsClick('main')}
+          className="size-10 rounded-2xl bg-white border border-primary/10 text-slate-700 shadow-sm flex items-center justify-center hover:bg-primary hover:text-white transition-all active:scale-95 group cursor-pointer"
+          title="Open Settings"
+        >
+          <Icon name="settings" className="text-xl group-hover:rotate-45 transition-transform duration-300" />
+        </button>
+      </div>
+
       {/* Profile Content */}
-      <div className="p-6 space-y-8">
+      <div className="p-6 space-y-8 overflow-y-auto">
         {/* Avatar Section */}
         <div className="flex flex-col items-center gap-6">
           <div className="relative group">
@@ -1193,22 +1214,64 @@ export const ProfileView = ({ onSettingsClick }: ProfileViewProps) => {
           )}
         </section>
 
-        {/* Action List */}
-        <div className="space-y-3">
+        {/* Full Settings & Preferences Hub Card */}
+        <section className="space-y-3 text-left">
+          <div className="flex items-center justify-between px-2">
+            <h4 className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted">App Settings & Preferences</h4>
+            <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100 uppercase tracking-wider">
+              Control Hub
+            </span>
+          </div>
+
           <button 
-            onClick={onSettingsClick}
-            className="w-full flex items-center gap-4 p-4 bg-white rounded-3xl border border-primary/5 shadow-sm hover:shadow-md transition-all group"
+            onClick={() => onSettingsClick('main')}
+            className="w-full p-5 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl shadow-xl hover:shadow-2xl hover:scale-[1.01] transition-all group text-left cursor-pointer border border-slate-700/60 relative overflow-hidden"
           >
-            <div className="size-12 rounded-2xl bg-primary/5 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
-              <Icon name="settings" />
+            {/* Background Decorative Blur */}
+            <div className="absolute -right-8 -bottom-8 size-32 bg-primary/20 rounded-full blur-2xl pointer-events-none" />
+
+            <div className="flex items-center gap-4 relative z-10">
+              <div className="size-12 rounded-2xl bg-white/10 text-white border border-white/20 flex items-center justify-center shrink-0 group-hover:rotate-45 transition-transform duration-300 shadow-inner">
+                <Icon name="settings" className="text-2xl" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-base text-white uppercase italic tracking-tight">Full System Settings Hub</h3>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Manage Call & Media, Notifications, Privacy, Data Usage, Sync & Network Diagnostics
+                </p>
+              </div>
+              <div className="size-9 rounded-full bg-white/10 group-hover:bg-primary flex items-center justify-center text-white transition-colors shrink-0">
+                <Icon name="arrow_forward" className="text-lg group-hover:translate-x-0.5 transition-transform" />
+              </div>
             </div>
-            <div className="flex-1 text-left">
-              <p className="font-bold text-slate-800">Settings</p>
-              <p className="text-[10px] text-neutral-muted">Privacy, security, and more</p>
+
+            {/* Feature Pills */}
+            <div className="mt-4 pt-3.5 border-t border-slate-700/80 flex flex-wrap gap-1.5 relative z-10">
+              <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 text-slate-300 text-[10px] font-semibold border border-slate-700 flex items-center gap-1">
+                <Icon name="call" className="text-xs text-emerald-400" />
+                Mic & Speaker
+              </span>
+              <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 text-slate-300 text-[10px] font-semibold border border-slate-700 flex items-center gap-1">
+                <Icon name="notifications" className="text-xs text-amber-400" />
+                Notifications
+              </span>
+              <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 text-slate-300 text-[10px] font-semibold border border-slate-700 flex items-center gap-1">
+                <Icon name="lock" className="text-xs text-blue-400" />
+                Privacy & Keys
+              </span>
+              <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 text-slate-300 text-[10px] font-semibold border border-slate-700 flex items-center gap-1">
+                <Icon name="data_usage" className="text-xs text-rose-400" />
+                Data Saver
+              </span>
+              <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 text-slate-300 text-[10px] font-semibold border border-slate-700 flex items-center gap-1">
+                <Icon name="devices" className="text-xs text-sky-400" />
+                Multi-Device Sync
+              </span>
             </div>
-            <Icon name="chevron_right" className="text-neutral-muted" />
           </button>
-        </div>
+        </section>
       </div>
       <AnimatePresence>
         {showGroupsList && (

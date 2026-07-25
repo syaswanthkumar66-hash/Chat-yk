@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import { useStore, useAppStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { BACKEND_URL } from '../config';
-import { webrtcService } from '../services/webrtcService';
+import { webrtcService, generateCallId } from '../services/webrtcService';
 import { Icon, Avatar, Button, Card, cn } from './UI';
 import { motion, AnimatePresence } from 'motion/react';
 import { GroupInfo } from './GroupInfo';
@@ -2143,10 +2143,10 @@ export const ChatDetail = () => {
                       onClick={() => {
                         if (!canStartCalls) return;
                         if (chat?.isGroup) {
-                          setActiveGroupCall({ type: 'voice', groupId: chat.id });
+                          setActiveGroupCall({ type: 'voice', groupId: chat.id, callId: generateCallId('call_group') });
                         } else {
                           const userId = otherParticipantId;
-                          if (userId) setActiveGroupCall({ type: 'voice', userId });
+                          if (userId) setActiveGroupCall({ type: 'voice', userId, callId: generateCallId('call_p2p') });
                         }
                       }}
                       disabled={!canStartCalls}
@@ -2158,10 +2158,10 @@ export const ChatDetail = () => {
                       onClick={() => {
                         if (!canStartCalls) return;
                         if (chat?.isGroup) {
-                          setActiveGroupCall({ type: 'video', groupId: chat.id });
+                          setActiveGroupCall({ type: 'video', groupId: chat.id, callId: generateCallId('call_group') });
                         } else {
                           const userId = otherParticipantId;
-                          if (userId) setActiveGroupCall({ type: 'video', userId });
+                          if (userId) setActiveGroupCall({ type: 'video', userId, callId: generateCallId('call_p2p') });
                         }
                       }}
                       disabled={!canStartCalls}

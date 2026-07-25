@@ -1,4 +1,4 @@
-import { WebRTCConnectivityTester } from './WebRTCConnectivityTester';
+import { WebRTCConnectivityTester, Admin1On1CallTester } from './WebRTCConnectivityTester';
 import { useState, useEffect, useMemo } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'motion/react';
@@ -3852,6 +3852,12 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                 </Card>
               </div>
             )}
+
+            {/* Embedded 1-on-1 Call Tester and ICE Connectivity Tester */}
+            <div className="space-y-8 pt-6 border-t border-slate-200/60">
+              <Admin1On1CallTester />
+              <WebRTCConnectivityTester />
+            </div>
           </motion.div>
         )}
         </main>

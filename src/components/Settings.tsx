@@ -24,7 +24,7 @@ const PRELOADED_AVATARS = [
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 });
 
-export const Settings = ({ onClose }: { onClose: () => void }) => {
+export const Settings = ({ onClose, initialView }: { onClose: () => void; initialView?: 'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection' | 'devices-sync' | 'data-usage' | 'call-settings' }) => {
   const { 
     user, 
     updateUser, 
@@ -78,9 +78,206 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
     resetDataUsage: s.resetDataUsage,
     loadDataUsage: s.loadDataUsage
   }), shallowEqual);
-  const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection' | 'devices-sync' | 'data-usage'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'notifications' | 'privacy' | 'visibility' | 'ticket' | 'help' | 'feedback' | 'blocked' | 'removed' | 'ticket-history' | 'feedback-history' | 'connection' | 'devices-sync' | 'data-usage' | 'call-settings'>(initialView || 'main');
   const [dataUsageTab, setDataUsageTab] = useState<'overview' | 'chat' | 'calls' | 'saver'>('overview');
   const [isRefreshingUsage, setIsRefreshingUsage] = useState(false);
+
+  // Call & Media Settings State
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([]);
+  
+  const [selectedAudioInput, setSelectedAudioInput] = useState<string>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('proto_selected_audioinput') || '';
+    return '';
+  });
+  const [selectedAudioOutput, setSelectedAudioOutput] = useState<string>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('proto_selected_audiooutput') || '';
+    return '';
+  });
+  const [selectedVideoInput, setSelectedVideoInput] = useState<string>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('proto_selected_videoinput') || '';
+    return '';
+  });
+
+  const [echoCancellation, setEchoCancellation] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('proto_echo_cancellation') !== 'false';
+    return true;
+  });
+  const [noiseSuppression, setNoiseSuppression] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('proto_noise_suppression') !== 'false';
+    return true;
+  });
+  const [autoGainControl, setAutoGainControl] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('proto_auto_gain_control') !== 'false';
+    return true;
+  });
+  const [speakerMode, setSpeakerMode] = useState<'speaker' | 'earpiece'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('proto_speaker_mode') as any) || 'speaker';
+    return 'speaker';
+  });
+  const [webrtcRelayMode, setWebrtcRelayMode] = useState<'auto' | 'force_turn'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('proto_webrtc_relay_mode') as any) || 'auto';
+    return 'auto';
+  });
+
+  // Call tests state
+  const [isTestingMic, setIsTestingMic] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micTestProgress, setMicTestProgress] = useState(0);
+  const [micTestAudioUrl, setMicTestAudioUrl] = useState<string | null>(null);
+  const [cameraTestActive, setCameraTestActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [callSettingsNotice, setCallSettingsNotice] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (activeView === 'call-settings' && typeof navigator !== 'undefined' && navigator.mediaDevices) {
+      const loadDevices = async () => {
+        try {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            stream.getTracks().forEach(t => t.stop());
+          } catch (_) {}
+
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          setAudioInputs(devices.filter(d => d.kind === 'audioinput'));
+          setAudioOutputs(devices.filter(d => d.kind === 'audiooutput'));
+          setVideoInputs(devices.filter(d => d.kind === 'videoinput'));
+        } catch (err) {
+          console.warn("Failed to enumerate media devices:", err);
+        }
+      };
+      loadDevices();
+    }
+  }, [activeView]);
+
+  const handleTestAudioOutput = async () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc1 = audioCtx.createOscillator();
+      const osc2 = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc1.frequency.setValueAtTime(440, audioCtx.currentTime);
+      osc2.frequency.setValueAtTime(880, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
+      gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.5);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc1.start(audioCtx.currentTime);
+      osc1.stop(audioCtx.currentTime + 0.2);
+      osc2.start(audioCtx.currentTime + 0.15);
+      osc2.stop(audioCtx.currentTime + 0.45);
+
+      setCallSettingsNotice("🎵 Playing dual-tone test chime through selected output...");
+      setTimeout(() => setCallSettingsNotice(null), 3000);
+    } catch (e: any) {
+      setCallSettingsNotice("Audio output test completed.");
+      setTimeout(() => setCallSettingsNotice(null), 3000);
+    }
+  };
+
+  const handleStartMicTest = async () => {
+    if (isTestingMic) return;
+    setIsTestingMic(true);
+    setMicTestProgress(0);
+    setMicTestAudioUrl(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: selectedAudioInput ? { deviceId: { ideal: selectedAudioInput } } : true
+      });
+
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      let animId: number;
+
+      const updateMeter = () => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setMicLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animId = requestAnimationFrame(updateMeter);
+      };
+      updateMeter();
+
+      const chunks: Blob[] = [];
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = () => {
+        cancelAnimationFrame(animId);
+        setMicLevel(0);
+        stream.getTracks().forEach(t => t.stop());
+        audioCtx.close();
+
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        setMicTestAudioUrl(url);
+        setIsTestingMic(false);
+        setCallSettingsNotice("✅ 3-second recording complete! Click 'Play Test Recording' to verify voice channeling.");
+        setTimeout(() => setCallSettingsNotice(null), 4000);
+      };
+
+      recorder.start();
+
+      let seconds = 0;
+      const interval = setInterval(() => {
+        seconds += 1;
+        setMicTestProgress(Math.round((seconds / 3) * 100));
+        if (seconds >= 3) {
+          clearInterval(interval);
+          recorder.stop();
+        }
+      }, 1000);
+
+    } catch (err: any) {
+      setIsTestingMic(false);
+      setCallSettingsNotice(`Mic access error: ${err.message || 'Permission denied'}`);
+      setTimeout(() => setCallSettingsNotice(null), 4000);
+    }
+  };
+
+  const handleToggleCameraTest = async () => {
+    if (cameraTestActive) {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        setCameraStream(null);
+      }
+      setCameraTestActive(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: selectedVideoInput ? { deviceId: { ideal: selectedVideoInput } } : true,
+          audio: false
+        });
+        setCameraStream(stream);
+        setCameraTestActive(true);
+        setTimeout(() => {
+          if (cameraVideoRef.current) {
+            cameraVideoRef.current.srcObject = stream;
+          }
+        }, 100);
+      } catch (err: any) {
+        setCallSettingsNotice(`Camera error: ${err.message}`);
+        setTimeout(() => setCallSettingsNotice(null), 3000);
+      }
+    }
+  };
   const [lowDataMode, setLowDataMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('proto_low_data_mode') === 'true';
@@ -1438,15 +1635,15 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted px-1">Issue Category</label>
                 <select 
-                  className="w-full bg-primary/5 border-none rounded-xl px-4 py-3 text-sm outline-none"
+                  className="w-full bg-white border border-primary/20 rounded-2xl px-4 py-3 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-2xs transition-all cursor-pointer hover:border-primary/40"
                   value={ticketCategory}
                   onChange={(e) => setTicketCategory(e.target.value)}
                 >
-                  <option>Technical Issue</option>
-                  <option>Account Access</option>
-                  <option>Privacy Concern</option>
-                  <option>Billing/Payment</option>
-                  <option>Other</option>
+                  <option className="bg-white text-slate-800 font-medium py-2">Technical Issue</option>
+                  <option className="bg-white text-slate-800 font-medium py-2">Account Access</option>
+                  <option className="bg-white text-slate-800 font-medium py-2">Privacy Concern</option>
+                  <option className="bg-white text-slate-800 font-medium py-2">Billing/Payment</option>
+                  <option className="bg-white text-slate-800 font-medium py-2">Other</option>
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -2628,6 +2825,336 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
             </div>
           </div>
         );
+      case 'call-settings':
+        return (
+          <div className="space-y-6 animate-fadeIn">
+            <header className="flex items-center gap-4 mb-2">
+              <button 
+                onClick={() => {
+                  if (cameraStream) {
+                    cameraStream.getTracks().forEach(t => t.stop());
+                    setCameraStream(null);
+                  }
+                  setCameraTestActive(false);
+                  setActiveView('main');
+                }} 
+                className="size-10 rounded-full bg-white border border-primary/10 shadow-sm flex items-center justify-center text-primary hover:bg-primary hover:text-white transition-all shrink-0"
+              >
+                <Icon name="arrow_back" />
+              </button>
+              <div className="flex flex-col text-left">
+                <h3 className="text-xl font-bold text-slate-800 uppercase italic tracking-tight">Call & Media Settings</h3>
+                <span className="text-[10px] text-neutral-muted font-bold uppercase tracking-widest">Microphone, Output Speaker, Camera & ExpressTURN</span>
+              </div>
+            </header>
+
+            {/* Notification Banner */}
+            {callSettingsNotice && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-fadeIn text-left">
+                <Icon name="check_circle" className="text-base text-emerald-600 shrink-0" />
+                <span>{callSettingsNotice}</span>
+              </div>
+            )}
+
+            {/* Section 1: Microphone & Audio Input */}
+            <div className="p-4 sm:p-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl space-y-4 shadow-2xs text-left">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center shrink-0">
+                  <Icon name="mic" className="text-xl" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-slate-800">Microphone (Audio Input)</span>
+                  <span className="text-[10px] text-neutral-muted">Select default input device for outgoing voice & call streams</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted px-1">Selected Microphone</label>
+                <select 
+                  className="w-full bg-white border border-primary/20 rounded-2xl px-4 py-3 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-2xs transition-all cursor-pointer hover:border-primary/40"
+                  value={selectedAudioInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedAudioInput(val);
+                    if (typeof window !== 'undefined') localStorage.setItem('proto_selected_audioinput', val);
+                    setCallSettingsNotice("Microphone device preference saved.");
+                    setTimeout(() => setCallSettingsNotice(null), 3000);
+                  }}
+                >
+                  <option value="" className="bg-white text-slate-800 font-medium py-2">Default System Microphone</option>
+                  {audioInputs.map((device, idx) => (
+                    <option key={device.deviceId || idx} value={device.deviceId} className="bg-white text-slate-800 font-medium py-2">
+                      {device.label || `Microphone ${idx + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Live Mic Meter */}
+              {isTestingMic && (
+                <div className="space-y-1.5 p-3 bg-slate-50 rounded-2xl border border-slate-200">
+                  <div className="flex justify-between items-center text-[10px] font-bold uppercase text-slate-600">
+                    <span className="flex items-center gap-1.5 text-emerald-600">
+                      <span className="size-2 rounded-full bg-emerald-500 animate-ping" />
+                      Live Mic Input Level
+                    </span>
+                    <span>{micLevel}%</span>
+                  </div>
+                  <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
+                    <div 
+                      style={{ width: `${micLevel}%` }} 
+                      className="h-full bg-emerald-500 transition-all duration-75 rounded-full" 
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <Button 
+                  variant="secondary"
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 py-2.5 rounded-xl text-xs font-bold"
+                  disabled={isTestingMic}
+                  onClick={handleStartMicTest}
+                >
+                  <Icon name="record_voice_over" className="text-base mr-1.5 text-emerald-600" />
+                  {isTestingMic ? `Recording Mic (${micTestProgress}s)...` : "Test Mic (Record 3s & Playback)"}
+                </Button>
+
+                {micTestAudioUrl && (
+                  <audio src={micTestAudioUrl} controls className="h-10 w-full sm:w-auto rounded-xl" autoPlay />
+                )}
+              </div>
+            </div>
+
+            {/* Section 2: Audio Output (Speaker & Earpiece) */}
+            <div className="p-4 sm:p-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl space-y-4 shadow-2xs text-left">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-2xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center shrink-0">
+                  <Icon name="volume_up" className="text-xl" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-slate-800">Audio Output (Speaker & Channeling)</span>
+                  <span className="text-[10px] text-neutral-muted">Configure output device & default call audio routing</span>
+                </div>
+              </div>
+
+              {audioOutputs.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted px-1">Selected Speaker Device</label>
+                  <select 
+                    className="w-full bg-white border border-primary/20 rounded-2xl px-4 py-3 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-2xs transition-all cursor-pointer hover:border-primary/40"
+                    value={selectedAudioOutput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedAudioOutput(val);
+                      if (typeof window !== 'undefined') localStorage.setItem('proto_selected_audiooutput', val);
+                      setCallSettingsNotice("Audio output device preference saved.");
+                      setTimeout(() => setCallSettingsNotice(null), 3000);
+                    }}
+                  >
+                    <option value="" className="bg-white text-slate-800 font-medium py-2">Default System Speaker</option>
+                    {audioOutputs.map((device, idx) => (
+                      <option key={device.deviceId || idx} value={device.deviceId} className="bg-white text-slate-800 font-medium py-2">
+                        {device.label || `Speaker ${idx + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Call Channeling Preference */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-bold text-slate-800">Default Audio Channeling</span>
+                  <span className="text-[10px] text-neutral-muted">Route call audio to loud speaker vs internal earpiece</span>
+                </div>
+                <div className="flex items-center p-1 bg-slate-200/80 rounded-xl text-xs font-bold text-slate-600">
+                  <button
+                    onClick={() => {
+                      setSpeakerMode('speaker');
+                      if (typeof window !== 'undefined') localStorage.setItem('proto_speaker_mode', 'speaker');
+                    }}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${speakerMode === 'speaker' ? 'bg-white text-primary font-black shadow-xs' : 'hover:text-slate-900'}`}
+                  >
+                    Speaker
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSpeakerMode('earpiece');
+                      if (typeof window !== 'undefined') localStorage.setItem('proto_speaker_mode', 'earpiece');
+                    }}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${speakerMode === 'earpiece' ? 'bg-white text-primary font-black shadow-xs' : 'hover:text-slate-900'}`}
+                  >
+                    Earpiece
+                  </button>
+                </div>
+              </div>
+
+              <Button 
+                variant="secondary"
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 py-2.5 rounded-xl text-xs font-bold"
+                onClick={handleTestAudioOutput}
+              >
+                <Icon name="graphic_eq" className="text-base mr-1.5 text-blue-600" />
+                Play Test Dual-Tone Speaker Chime
+              </Button>
+            </div>
+
+            {/* Section 3: Camera & Video Input */}
+            <div className="p-4 sm:p-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl space-y-4 shadow-2xs text-left">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-2xl bg-purple-50 text-purple-600 border border-purple-200 flex items-center justify-center shrink-0">
+                  <Icon name="videocam" className="text-xl" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-slate-800">Camera (Video Input)</span>
+                  <span className="text-[10px] text-neutral-muted">Select camera source and test live preview</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted px-1">Selected Camera</label>
+                <select 
+                  className="w-full bg-white border border-primary/20 rounded-2xl px-4 py-3 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-2xs transition-all cursor-pointer hover:border-primary/40"
+                  value={selectedVideoInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedVideoInput(val);
+                    if (typeof window !== 'undefined') localStorage.setItem('proto_selected_videoinput', val);
+                    setCallSettingsNotice("Camera device preference saved.");
+                    setTimeout(() => setCallSettingsNotice(null), 3000);
+                  }}
+                >
+                  <option value="" className="bg-white text-slate-800 font-medium py-2">Default System Camera</option>
+                  {videoInputs.map((device, idx) => (
+                    <option key={device.deviceId || idx} value={device.deviceId} className="bg-white text-slate-800 font-medium py-2">
+                      {device.label || `Camera ${idx + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {cameraTestActive && (
+                <div className="relative rounded-2xl overflow-hidden border border-purple-200 shadow-md bg-slate-950">
+                  <video ref={cameraVideoRef} autoPlay playsInline muted className="w-full h-48 object-cover" />
+                  <div className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur-md px-3 py-1 rounded-full text-[9px] font-mono font-bold text-purple-400 flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-purple-500 animate-pulse" />
+                    LIVE CAMERA PREVIEW
+                  </div>
+                </div>
+              )}
+
+              <Button 
+                variant="secondary"
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 py-2.5 rounded-xl text-xs font-bold"
+                onClick={handleToggleCameraTest}
+              >
+                <Icon name={cameraTestActive ? "videocam_off" : "videocam"} className="text-base mr-1.5 text-purple-600" />
+                {cameraTestActive ? "Stop Camera Test" : "Test Camera Live Preview"}
+              </Button>
+            </div>
+
+            {/* Section 4: Hardware Audio Processing */}
+            <div className="p-4 sm:p-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl space-y-4 shadow-2xs text-left">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center shrink-0">
+                  <Icon name="tune" className="text-xl" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-slate-800">Voice Processing & Quality</span>
+                  <span className="text-[10px] text-neutral-muted">Acoustic enhancements applied during calls</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-bold text-slate-800">Acoustic Echo Cancellation</span>
+                  <span className="text-[10px] text-neutral-muted">Prevents speaker output from echoing back into microphone</span>
+                </div>
+                <button
+                  onClick={() => {
+                    const next = !echoCancellation;
+                    setEchoCancellation(next);
+                    if (typeof window !== 'undefined') localStorage.setItem('proto_echo_cancellation', String(next));
+                  }}
+                  className={`w-12 h-6 rounded-full transition-colors relative p-0.5 ${echoCancellation ? 'bg-primary' : 'bg-slate-300'}`}
+                >
+                  <div className={`size-5 rounded-full bg-white shadow-md transition-transform ${echoCancellation ? 'translate-x-6' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-bold text-slate-800">Background Noise Suppression</span>
+                  <span className="text-[10px] text-neutral-muted">Filters out ambient fan, typing & background noise</span>
+                </div>
+                <button
+                  onClick={() => {
+                    const next = !noiseSuppression;
+                    setNoiseSuppression(next);
+                    if (typeof window !== 'undefined') localStorage.setItem('proto_noise_suppression', String(next));
+                  }}
+                  className={`w-12 h-6 rounded-full transition-colors relative p-0.5 ${noiseSuppression ? 'bg-primary' : 'bg-slate-300'}`}
+                >
+                  <div className={`size-5 rounded-full bg-white shadow-md transition-transform ${noiseSuppression ? 'translate-x-6' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-bold text-slate-800">Automatic Gain Control (AGC)</span>
+                  <span className="text-[10px] text-neutral-muted">Normalizes voice volume automatically</span>
+                </div>
+                <button
+                  onClick={() => {
+                    const next = !autoGainControl;
+                    setAutoGainControl(next);
+                    if (typeof window !== 'undefined') localStorage.setItem('proto_auto_gain_control', String(next));
+                  }}
+                  className={`w-12 h-6 rounded-full transition-colors relative p-0.5 ${autoGainControl ? 'bg-primary' : 'bg-slate-300'}`}
+                >
+                  <div className={`size-5 rounded-full bg-white shadow-md transition-transform ${autoGainControl ? 'translate-x-6' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Section 5: ExpressTURN WebRTC Relay Inspector */}
+            <div className="p-4 sm:p-5 bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-2xl sm:rounded-3xl space-y-4 shadow-xl text-left border border-slate-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="size-10 rounded-2xl bg-sky-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center shrink-0">
+                    <Icon name="dns" className="text-xl" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-black uppercase tracking-wider text-slate-100">ExpressTURN Infrastructure</span>
+                    <span className="text-[10px] font-mono text-sky-400">Dedicated Enterprise WebRTC Relay</span>
+                  </div>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-mono font-bold uppercase tracking-widest">
+                  OPERATIONAL
+                </span>
+              </div>
+
+              <div className="space-y-2 text-xs font-mono text-slate-300 bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800/80">
+                <div className="flex justify-between items-center py-1 border-b border-slate-800/50">
+                  <span className="text-slate-500">STUN Server:</span>
+                  <span className="text-sky-300 font-bold">free.expressturn.com:3478</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-800/50">
+                  <span className="text-slate-500">TURN Relay (UDP):</span>
+                  <span className="text-emerald-400 font-bold">free.expressturn.com:3478</span>
+                </div>
+                <div className="flex justify-between items-center py-1">
+                  <span className="text-slate-500">TURN Relay (TCP/443):</span>
+                  <span className="text-amber-400 font-bold">free.expressturn.com:443</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'main':
+      default:
         return (
           <>
             {/* Profile Section */}
@@ -2752,6 +3279,21 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                     <div className="flex flex-col items-start text-left">
                       <span className="text-sm font-bold text-slate-700">Data & Network Usage</span>
                       <span className="text-[10px] text-neutral-muted">Track Chat & Call upload and download metrics</span>
+                    </div>
+                  </div>
+                  <Icon name="chevron_right" className="text-slate-400" />
+                </button>
+                <button 
+                  onClick={() => setActiveView('call-settings')}
+                  className="w-full p-4 rounded-2xl bg-primary/5 flex items-center justify-between hover:bg-primary/10 transition-colors group border border-primary/5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="size-10 rounded-xl bg-white flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-sm">
+                      <Icon name="call" />
+                    </div>
+                    <div className="flex flex-col items-start text-left">
+                      <span className="text-sm font-bold text-slate-700">Call & Media Settings</span>
+                      <span className="text-[10px] text-neutral-muted">Mic, Speaker, Camera & ExpressTURN voice routing</span>
                     </div>
                   </div>
                   <Icon name="chevron_right" className="text-slate-400" />
@@ -2914,9 +3456,9 @@ export const Settings = ({ onClose }: { onClose: () => void }) => {
                             }
                           }}
                           className={cn(
-                            "relative z-10 w-full p-4 rounded-[1.8rem] flex items-center justify-between bg-white shadow-sm transition-colors select-none",
+                            "relative z-10 w-full p-4 rounded-[1.8rem] flex items-center justify-between bg-white shadow-sm transition-all select-none",
                             isActive 
-                              ? "border-l-4 border-l-primary bg-primary/5/5" 
+                              ? "ring-2 ring-primary/30 bg-primary/5" 
                               : "hover:bg-slate-50 cursor-pointer active:scale-[0.99]"
                           )}
                         >

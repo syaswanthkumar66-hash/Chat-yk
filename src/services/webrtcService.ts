@@ -1532,8 +1532,48 @@ class WebRTCService {
     }
   }
 
+  // Room Heartbeat Check & Pre-Flight Ping-Pong
+  private roomHeartbeatIntervals: Map<string, any> = new Map();
+
+  startRoomHeartbeat(roomId: string, intervalMs: number = 3000) {
+    if (this.roomHeartbeatIntervals.has(roomId)) {
+      clearInterval(this.roomHeartbeatIntervals.get(roomId));
+    }
+
+    const interval = setInterval(() => {
+      const socket = useAppStore.getState().socket;
+      const myId = useAppStore.getState().user?.id;
+      if (socket && socket.connected && myId) {
+        socket.emit('sfu_signal', {
+          roomId,
+          from: myId,
+          signal: { type: 'room_heartbeat', timestamp: Date.now() }
+        });
+        
+        // Also send heartbeat ping over DataChannel
+        this.dataChannels.forEach((dc, key) => {
+          if (key.startsWith(`${roomId}_`) && dc.readyState === 'open') {
+            try {
+              dc.send(JSON.stringify({ type: 'hb_ping', timestamp: Date.now() }));
+            } catch (e) {}
+          }
+        });
+      }
+    }, intervalMs);
+
+    this.roomHeartbeatIntervals.set(roomId, interval);
+  }
+
+  stopRoomHeartbeat(roomId: string) {
+    if (this.roomHeartbeatIntervals.has(roomId)) {
+      clearInterval(this.roomHeartbeatIntervals.get(roomId));
+      this.roomHeartbeatIntervals.delete(roomId);
+    }
+  }
+
   closeSession(roomId?: string) {
     if (roomId) {
+      this.stopRoomHeartbeat(roomId);
       console.log(`Closing WebRTC session for room: ${roomId}`);
       this.pcs.forEach((pc, key) => {
         if (key.startsWith(`${roomId}_`)) {
@@ -1610,4 +1650,8 @@ class WebRTCService {
 }
 
 export const webrtcService = new WebRTCService();
+
+export function generateCallId(prefix: string = 'call'): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
 

@@ -113,12 +113,12 @@ const VideoPlayer = ({
   }, [speakerMode, isLocal, stream]);
 
   return isVideoOff ? (
-    <audio
+    <video
       ref={videoRef as any}
       autoPlay
-      controls={false}
+      playsInline
       muted={isLocal}
-      className="absolute opacity-0 pointer-events-none w-px h-px overflow-hidden"
+      className="absolute opacity-0 pointer-events-none size-px overflow-hidden"
     />
   ) : (
     <video
@@ -183,7 +183,7 @@ const playPongSound = () => {
   }
 };
 
-export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string, userId?: string, type: 'voice' | 'video', onClose: () => void }) => {
+export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { groupId?: string, userId?: string, roomId?: string, callId?: string, type: 'voice' | 'video', onClose: () => void }) => {
   const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
     removedFriendIds: s.removedFriendIds,
     socket: s.socket,
@@ -196,6 +196,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(type === 'voice');
   const [duration, setDuration] = useState(0);
+  const [connectionStage, setConnectionStage] = useState<'establishing' | 'testing_ping' | 'established'>('establishing');
   const [isHold, setIsHold] = useState(false);
   const [callError, setCallError] = useState<any | null>(null);
   const [callAttempt, setCallAttempt] = useState(0);
@@ -392,14 +393,39 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
     const startCall = async () => {
       try {
         setCallError(null);
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: type === 'video',
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
-        });
+        
+        const selectedAudioInput = localStorage.getItem('proto_selected_audioinput');
+        const selectedVideoInput = localStorage.getItem('proto_selected_videoinput');
+        const echoCancellation = localStorage.getItem('proto_echo_cancellation') !== 'false';
+        const noiseSuppression = localStorage.getItem('proto_noise_suppression') !== 'false';
+        const autoGainControl = localStorage.getItem('proto_auto_gain_control') !== 'false';
+
+        const audioConstraint: any = {
+          echoCancellation,
+          noiseSuppression,
+          autoGainControl
+        };
+        if (selectedAudioInput) {
+          audioConstraint.deviceId = { ideal: selectedAudioInput };
+        }
+
+        const videoConstraint: any = type === 'video' ? (
+          selectedVideoInput ? { deviceId: { ideal: selectedVideoInput } } : true
+        ) : false;
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraint,
+            audio: audioConstraint
+          });
+        } catch (mediaErr) {
+          console.warn("[WebRTC] Preferred media device failed, falling back to default:", mediaErr);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: type === 'video',
+            audio: true
+          });
+        }
+
         if (!mounted) return;
 
         // Step 1: getUserMedia logging
@@ -422,20 +448,22 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
 
         setLocalStream(stream);
 
-        const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+        const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
+        webrtcService.startRoomHeartbeat(computedRoomId);
+
         if (socket && mounted) {
-          socket.emit('join_call', { roomId, userId: user?.id });
+          socket.emit('join_call', { roomId: computedRoomId, userId: user?.id, callId });
         }
 
-        await webrtcService.publishLocalStream(stream, roomId);
+        await webrtcService.publishLocalStream(stream, computedRoomId);
 
         if (socket && mounted) {
           if (userId) {
-            socket.emit('call_user', { to: userId, roomId, type, from: user?.id });
+            socket.emit('call_user', { to: userId, roomId: computedRoomId, callId, type, from: user?.id });
           }
 
           socket.emit('sfu_signal', {
-            roomId,
+            roomId: computedRoomId,
             from: user?.id,
             signal: { type: 'request_tracks' }
           });
@@ -994,7 +1022,7 @@ export const GroupCall = ({ groupId, userId, type, onClose }: { groupId?: string
                 {participants[1] && (
                   <div className="size-full relative flex items-center justify-center">
                     <VideoPlayer 
-                      stream={participants[1].streamId ? remoteStreams[participants[1].streamId] : null} 
+                      stream={participants[1] ? (remoteStreams[participants[1].streamId] || remoteStreams[participants[1].id] || null) : null} 
                       className="size-full rounded-[2.5rem] object-cover" 
                       speakerMode={speakerMode}
                       isVideoOff={participants[1].isVideoOff || type === 'voice'}

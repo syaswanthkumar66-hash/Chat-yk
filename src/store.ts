@@ -1679,6 +1679,20 @@ export const useAppStore = create<AppState>((set) => ({
             chats: updatedChats
           };
         });
+
+        // Fast background Firestore presence sync (<1ms local priority)
+        if (useAppStore.getState().authMethod !== 'local') {
+          import('./firebase').then(({ db, handleFirestoreError, OperationType, doc, setDoc }) => {
+            setDoc(doc(db, 'users', targetUid), { 
+              isOnline, 
+              lastSeen: nowIso 
+            }, { merge: true }).catch((err) => {
+              try {
+                handleFirestoreError(err, OperationType.WRITE, `users/${targetUid}`);
+              } catch (e) {}
+            });
+          });
+        }
       });
 
       // 5a. all_users_data
