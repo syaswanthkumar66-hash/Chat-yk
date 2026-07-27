@@ -597,6 +597,11 @@ class WebRTCService {
           return;
         }
 
+        if (message.type === 'call_telemetry') {
+          window.dispatchEvent(new CustomEvent('webrtc_telemetry_update', { detail: message }));
+          return;
+        }
+
         // 1. Handle Sender feedback (ACK, NACK, ACK of transfer)
         if (message.type === 'transfer_chunk_ack') {
           const activeTx = this.activeOutgoingTransfers.get(message.transferId);
@@ -1119,22 +1124,33 @@ class WebRTCService {
     const isLocalStreamNull = this.localStream === null;
     const tracksToAttempt = this.localStream ? this.localStream.getTracks() : [];
     const currentSenders = pc.getSenders();
-    const tracksToBeAdded = tracksToAttempt.filter(track => !currentSenders.some(sender => sender.track === track));
 
     console.log(`[Diagnostic][Step 2] attachLocalTracks execution:
       - Whether localStream is null or a real MediaStream: ${isLocalStreamNull ? 'NULL' : 'REAL MediaStream'}
-      - How many tracks are about to be added via addTrack: ${tracksToBeAdded.length} (out of ${tracksToAttempt.length} total local tracks)`);
+      - Local tracks count: ${tracksToAttempt.length}`);
 
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
-        // Step 0 & 1: Confirm state of local track before adding
-        console.log(`[Diagnostic] Checking local track state: kind=${track.kind}, ID=${track.id}, readyState=${track.readyState}, enabled=${track.enabled}`);
-        const exists = currentSenders.some(sender => sender.track === track);
-        let sender: RTCRtpSender | undefined = currentSenders.find(s => s.track === track);
-        
-        if (!exists) {
+        // Ensure local audio track is live and enabled
+        if (track.kind === 'audio') {
+          track.enabled = true;
+        }
 
-            console.log(`[Diagnostic] Attaching local track "${track.kind}" to peer connection`);
+        console.log(`[Diagnostic] Checking local track state: kind=${track.kind}, ID=${track.id}, readyState=${track.readyState}, enabled=${track.enabled}`);
+        
+        // Check if a sender for this media kind already exists on the peer connection
+        let sender = currentSenders.find(s => s.track && s.track.kind === track.kind) || currentSenders.find(s => !s.track);
+
+        if (sender) {
+          if (sender.track !== track || (sender.track && sender.track.readyState === 'ended')) {
+            console.log(`[Diagnostic] Replacing track on existing RTCRtpSender for "${track.kind}"`);
+            sender.replaceTrack(track).catch(err => {
+              console.warn(`[Diagnostic] Failed to replaceTrack for "${track.kind}":`, err);
+            });
+          } else {
+            console.log(`[Diagnostic] Sender for "${track.kind}" is already active and attached`);
+          }
+        } else {
           // Check if there is an empty transceiver of this kind we can reuse
           const transceiver = pc.getTransceivers().find(t => t.receiver.track.kind === track.kind && !t.sender.track);
           if (transceiver) {
@@ -1143,62 +1159,72 @@ class WebRTCService {
             transceiver.direction = 'sendrecv';
             sender = transceiver.sender;
           } else {
-            console.log(`[Diagnostic] Attaching local track "${track.kind}" to peer connection`);
+            console.log(`[Diagnostic] Attaching local track "${track.kind}" to peer connection via addTrack`);
             sender = pc.addTrack(track, this.localStream!);
           }
-        } else {
-          console.log(`[Diagnostic] Local track "${track.kind}" is already attached to this peer connection`);
         }
 
-        // Apply transport and audio codec hardening for the audio transceiver (Step 3 & Step 4)
-        if (track.kind === 'audio' && sender) {
+        // Apply transport and codec hardening for BOTH audio and video transceivers
+        if (sender) {
           const transceiver = pc.getTransceivers().find(t => t.sender === sender);
           if (transceiver) {
             // STEP 3: Explicitly set direction to 'sendrecv' to prevent unexpected states (inactive, sendonly, etc.)
-            // across renegotiation events when peers join or leave group calls.
-            console.log(`[Diagnostic] Explicitly setting audio transceiver direction to 'sendrecv'`);
+            // across renegotiation events when peers join or leave group or 1-on-1 calls.
+            console.log(`[Diagnostic] Explicitly setting ${track.kind} transceiver direction to 'sendrecv'`);
             transceiver.direction = 'sendrecv';
 
-            // STEP 4: Prioritize Opus codec
-            // Code comment on why Opus is preferred:
-            // -----------------------------------------------------------------------------------------
-            // Opus is the standard of choice for high-quality, network-resilient, real-time calling.
-            // 1. Low Bitrate & High Quality: Excels at lower bandwidth ranges, scaling beautifully.
-            // 2. Built-in Forward Error Correction (FEC): Enables the decoder to recover lost packets
-            //    using slightly delayed redundant data embedded in subsequent packets, maintaining voice
-            //    intelligibility even during severe 20-30% packet loss.
-            // 3. Discontinuous Transmission (DTX): Pauses transmission of packets during silence,
-            //    significantly conserving network bandwidth and reducing device battery drainage.
-            // This is how raw analog microphone input is successfully transformed into robust, internet-suitable RTP packets.
-            // -----------------------------------------------------------------------------------------
             const getCaps = (typeof RTCRtpReceiver !== 'undefined' && RTCRtpReceiver.getCapabilities) 
               ? RTCRtpReceiver.getCapabilities.bind(RTCRtpReceiver)
               : (typeof RTCRtpSender !== 'undefined' && RTCRtpSender.getCapabilities)
                 ? RTCRtpSender.getCapabilities.bind(RTCRtpSender)
                 : null;
 
-            if ('setCodecPreferences' in transceiver && getCaps) {
-              try {
-                const capabilities = getCaps('audio');
-                if (capabilities && capabilities.codecs) {
-                  const opusCodecs = capabilities.codecs.filter(
-                    codec => codec.mimeType.toLowerCase() === 'audio/opus'
-                  );
-                  const otherCodecs = capabilities.codecs.filter(
-                    codec => codec.mimeType.toLowerCase() !== 'audio/opus'
-                  );
+            if (track.kind === 'audio') {
+              // Prioritize Opus codec for audio
+              if ('setCodecPreferences' in transceiver && getCaps) {
+                try {
+                  const capabilities = getCaps('audio');
+                  if (capabilities && capabilities.codecs) {
+                    const opusCodecs = capabilities.codecs.filter(
+                      codec => codec.mimeType.toLowerCase() === 'audio/opus'
+                    );
+                    const otherCodecs = capabilities.codecs.filter(
+                      codec => codec.mimeType.toLowerCase() !== 'audio/opus'
+                    );
 
-                  if (opusCodecs.length > 0) {
-                    const reorderedCodecs = [...opusCodecs, ...otherCodecs];
-                    (transceiver as any).setCodecPreferences(reorderedCodecs);
-                    console.log(`[Diagnostic] Successfully prioritized Opus codec on audio transceiver (Total codecs: ${reorderedCodecs.length})`);
+                    if (opusCodecs.length > 0) {
+                      const reorderedCodecs = [...opusCodecs, ...otherCodecs];
+                      (transceiver as any).setCodecPreferences(reorderedCodecs);
+                      console.log(`[Diagnostic] Successfully prioritized Opus codec on audio transceiver (Total codecs: ${reorderedCodecs.length})`);
+                    }
                   }
+                } catch (codecErr) {
+                  console.warn(`[Diagnostic] setCodecPreferences on audio transceiver failed:`, codecErr);
                 }
-              } catch (codecErr) {
-                console.warn(`[Diagnostic] setCodecPreferences on audio transceiver failed:`, codecErr);
               }
-            } else {
-              console.log(`[Diagnostic] setCodecPreferences API is not supported in this browser.`);
+            } else if (track.kind === 'video') {
+              // Prioritize H.264 / VP8 codecs for mobile video hardware acceleration compatibility
+              if ('setCodecPreferences' in transceiver && getCaps) {
+                try {
+                  const capabilities = getCaps('video');
+                  if (capabilities && capabilities.codecs) {
+                    const preferredCodecs = capabilities.codecs.filter(
+                      codec => codec.mimeType.toLowerCase() === 'video/h264' || codec.mimeType.toLowerCase() === 'video/vp8'
+                    );
+                    const otherCodecs = capabilities.codecs.filter(
+                      codec => codec.mimeType.toLowerCase() !== 'video/h264' && codec.mimeType.toLowerCase() !== 'video/vp8'
+                    );
+
+                    if (preferredCodecs.length > 0) {
+                      const reorderedCodecs = [...preferredCodecs, ...otherCodecs];
+                      (transceiver as any).setCodecPreferences(reorderedCodecs);
+                      console.log(`[Diagnostic] Successfully prioritized H264/VP8 codecs on video transceiver (Total codecs: ${reorderedCodecs.length})`);
+                    }
+                  }
+                } catch (codecErr) {
+                  console.warn(`[Diagnostic] setCodecPreferences on video transceiver failed:`, codecErr);
+                }
+              }
             }
           }
         }
@@ -1248,27 +1274,157 @@ class WebRTCService {
     }
   }
 
+  public autoHealConnection(peerId: string, roomId: string, reason: string): boolean {
+    const mapKey = this.getMapKey(peerId, roomId);
+    const pc = this.pcs.get(mapKey);
+    let healed = false;
+
+    console.log(`[Diagnostic][AutoHeal] Triggering unprompted auto-healing for peer ${peerId} (room ${roomId}). Reason: "${reason}"`);
+
+    // 1. Enforce transceiver direction 'sendrecv' and re-enable local tracks
+    if (pc) {
+      try {
+        pc.getTransceivers().forEach(transceiver => {
+          if (transceiver.direction !== 'sendrecv') {
+            console.log(`[Diagnostic][AutoHeal] Enforcing 'sendrecv' direction on ${transceiver.receiver?.track?.kind || 'media'} transceiver`);
+            transceiver.direction = 'sendrecv';
+            healed = true;
+          }
+          if (transceiver.sender && transceiver.sender.track) {
+            if (!transceiver.sender.track.enabled) {
+              console.log(`[Diagnostic][AutoHeal] Re-enabling disabled local ${transceiver.sender.track.kind} track`);
+              transceiver.sender.track.enabled = true;
+              healed = true;
+            }
+          }
+          if (transceiver.receiver && transceiver.receiver.track) {
+            if (!transceiver.receiver.track.enabled) {
+              console.log(`[Diagnostic][AutoHeal] Re-enabling disabled remote ${transceiver.receiver.track.kind} track`);
+              transceiver.receiver.track.enabled = true;
+              healed = true;
+            }
+          }
+        });
+      } catch (err) {
+        console.warn(`[Diagnostic][AutoHeal] Error enforcing transceivers:`, err);
+      }
+    }
+
+    // 2. Scan and auto-unmute / re-play all HTML5 media elements in the application
+    try {
+      const mediaEls = Array.from(document.querySelectorAll<HTMLMediaElement>('video, audio'));
+      mediaEls.forEach(el => {
+        if (el.paused && el.srcObject) {
+          console.log(`[Diagnostic][AutoHeal] Found paused media element with active stream. Re-triggering play()...`);
+          el.play().catch(pErr => console.warn('[Diagnostic][AutoHeal] play() retry failed:', pErr));
+          healed = true;
+        }
+        if (el.srcObject instanceof MediaStream) {
+          el.srcObject.getTracks().forEach(track => {
+            if (!track.enabled) {
+              console.log(`[Diagnostic][AutoHeal] Enabling track ${track.kind} inside HTML5 media element stream`);
+              track.enabled = true;
+              healed = true;
+            }
+          });
+        }
+      });
+    } catch (err) {
+      console.warn(`[Diagnostic][AutoHeal] Error scanning media elements:`, err);
+    }
+
+    // 3. Resume AudioContext if suspended
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtxClass) {
+        // Attempt resume on any active audio context instances attached to window
+        if ((window as any).__callAudioContext && (window as any).__callAudioContext.state === 'suspended') {
+          console.log(`[Diagnostic][AutoHeal] Resuming suspended WebAudio AudioContext`);
+          (window as any).__callAudioContext.resume().catch(() => {});
+          healed = true;
+        }
+      }
+    } catch (err) {}
+
+    // 4. Log to diagnostic logger
+    diagnosticLogger.log('webrtc', 'auto_heal_executed', `Unprompted Auto-Healing executed for peer ${peerId}: ${reason}`, peerId, roomId);
+
+    // 5. Dispatch window event to inform UI
+    window.dispatchEvent(new CustomEvent('webrtc_auto_heal', {
+      detail: {
+        peerId,
+        roomId,
+        reason,
+        timestamp: new Date().toISOString()
+      }
+    }));
+
+    return healed;
+  }
+
+  public sendTelemetry(peerId: string, roomId: string, payload: any) {
+    const mapKey = this.getMapKey(peerId, roomId);
+    const dc = this.dataChannels.get(mapKey);
+    const myId = useAppStore.getState().user?.id;
+    
+    const fullTelemetry = {
+      type: 'call_telemetry',
+      from: myId,
+      peerId: myId,
+      roomId,
+      timestamp: Date.now(),
+      ...payload
+    };
+
+    if (dc && dc.readyState === 'open') {
+      try {
+        dc.send(JSON.stringify(fullTelemetry));
+      } catch (err) {}
+    }
+
+    const socket = useAppStore.getState().socket;
+    if (socket && myId) {
+      socket.emit('sfu_signal', {
+        roomId,
+        from: myId,
+        signal: {
+          type: 'call_telemetry',
+          to: peerId,
+          telemetry: fullTelemetry
+        }
+      });
+    }
+  }
+
   private startStatsMonitoring(peerId: string, roomId: string) {
     const mapKey = this.getMapKey(peerId, roomId);
     if (this.statsIntervals.has(mapKey)) {
       clearInterval(this.statsIntervals.get(mapKey));
     }
 
-    let lastBytesSent = 0;
-    let lastBytesReceived = 0;
+    let lastAudioBytesSent = 0;
+    let lastAudioBytesReceived = 0;
+    let lastVideoBytesSent = 0;
+    let lastVideoBytesReceived = 0;
+    let lastFramesDecoded = 0;
     let consecutiveSilentInbound = 0;
     let consecutiveSilentOutbound = 0;
-    let lastOutboundStalled = false;
-    let lastInboundStalled = false;
+    let consecutiveStalledVideo = 0;
+    let autoHealAttempts = 0;
 
-    diagnosticLogger.log('media', 'stats_monitoring_started', `Started active audio flow statistics monitoring for peer ${peerId}`, peerId, roomId);
+    diagnosticLogger.log('media', 'stats_monitoring_started', `Started active audio & video flow statistics monitoring for peer ${peerId}`, peerId, roomId);
 
     const intervalId = setInterval(async () => {
       const pc = this.pcs.get(mapKey);
       if (!pc || pc.iceConnectionState !== 'connected') {
-        diagnosticLogger.log('media', 'stats_monitoring_stopped', `ICE is no longer connected, stopping active stats query for peer ${peerId}`, peerId, roomId);
-        clearInterval(intervalId);
-        this.statsIntervals.delete(mapKey);
+        if (pc && pc.iceConnectionState === 'failed') {
+          console.warn(`[Diagnostic] Connection failed for peer ${peerId}. Triggering auto-heal ICE restart.`);
+          this.requestIceRestart(peerId, roomId);
+        } else {
+          diagnosticLogger.log('media', 'stats_monitoring_stopped', `ICE is no longer connected, stopping active stats query for peer ${peerId}`, peerId, roomId);
+          clearInterval(intervalId);
+          this.statsIntervals.delete(mapKey);
+        }
         return;
       }
 
@@ -1277,16 +1433,32 @@ class WebRTCService {
         let activeCandidatePair: any = null;
         let audioBytesSent = 0;
         let audioBytesReceived = 0;
+        let videoBytesSent = 0;
+        let videoBytesReceived = 0;
+        let framesDecoded = 0;
+        let framesReceived = 0;
 
         stats.forEach(report => {
           if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
             activeCandidatePair = report;
           }
           if (report.type === 'inbound-rtp') {
-            audioBytesReceived += (report.bytesReceived || 0);
+            if (report.kind === 'audio' || report.mediaType === 'audio') {
+              audioBytesReceived += (report.bytesReceived || 0);
+            }
+            if (report.kind === 'video' || report.mediaType === 'video') {
+              videoBytesReceived += (report.bytesReceived || 0);
+              framesDecoded += (report.framesDecoded || 0);
+              framesReceived += (report.framesReceived || 0);
+            }
           }
           if (report.type === 'outbound-rtp') {
-            audioBytesSent += (report.bytesSent || 0);
+            if (report.kind === 'audio' || report.mediaType === 'audio') {
+              audioBytesSent += (report.bytesSent || 0);
+            }
+            if (report.kind === 'video' || report.mediaType === 'video') {
+              videoBytesSent += (report.bytesSent || 0);
+            }
           }
         });
 
@@ -1304,119 +1476,99 @@ class WebRTCService {
           candidatePairStr = `Local: ${localCandidateType} (${protocolType}), Remote: ${remoteCandidateType}`;
         }
 
-        const sentDelta = audioBytesSent - lastBytesSent;
-        const receivedDelta = audioBytesReceived - lastBytesReceived;
+        const audioSentDelta = audioBytesSent - lastAudioBytesSent;
+        const audioReceivedDelta = audioBytesReceived - lastAudioBytesReceived;
+        const videoReceivedDelta = videoBytesReceived - lastVideoBytesReceived;
+        const framesDecodedDelta = framesDecoded - lastFramesDecoded;
 
         // Record call upload and download usage
-        if (lastBytesSent > 0 && sentDelta > 0) {
+        if (lastAudioBytesSent > 0 && audioSentDelta > 0) {
           try {
-            useAppStore.getState().recordDataUsage('call_upload', sentDelta);
+            useAppStore.getState().recordDataUsage('call_upload', audioSentDelta);
           } catch (e) {}
         }
-        if (lastBytesReceived > 0 && receivedDelta > 0) {
+        if (lastAudioBytesReceived > 0 && audioReceivedDelta > 0) {
           try {
-            useAppStore.getState().recordDataUsage('call_download', receivedDelta);
+            useAppStore.getState().recordDataUsage('call_download', audioReceivedDelta);
           } catch (e) {}
         }
-        lastBytesSent = audioBytesSent;
-        lastBytesReceived = audioBytesReceived;
 
-        // Detect if media stopped flowing after connection was established
-        if (lastBytesSent > 0) {
-          if (sentDelta === 0) {
-            consecutiveSilentOutbound++;
-          } else {
-            consecutiveSilentOutbound = 0;
+        // Stalled detection logic
+        if (lastAudioBytesSent > 0 && audioSentDelta === 0) {
+          consecutiveSilentOutbound++;
+        } else {
+          consecutiveSilentOutbound = 0;
+        }
+
+        if (lastAudioBytesReceived > 0 && audioReceivedDelta === 0) {
+          consecutiveSilentInbound++;
+        } else {
+          consecutiveSilentInbound = 0;
+        }
+
+        if (lastVideoBytesReceived > 0 && videoReceivedDelta === 0 && framesDecodedDelta === 0) {
+          consecutiveStalledVideo++;
+        } else {
+          consecutiveStalledVideo = 0;
+        }
+
+        const outboundStalled = consecutiveSilentOutbound >= 2;
+        const inboundStalled = consecutiveSilentInbound >= 2;
+        const videoStalled = consecutiveStalledVideo >= 2;
+
+        // UNPROMPTED AUTO-HEALING ENGINE:
+        // Automatically detect and fix incoming/outgoing audio/video flow stalls
+        if ((inboundStalled || outboundStalled || videoStalled) && autoHealAttempts < 5) {
+          autoHealAttempts++;
+          const reason = inboundStalled ? 'Inbound audio flow stalled' 
+            : outboundStalled ? 'Outbound audio flow stalled'
+            : 'Video stream frames stalled';
+          
+          this.autoHealConnection(peerId, roomId, reason);
+
+          if (consecutiveSilentInbound >= 4 && autoHealAttempts >= 2) {
+            console.warn(`[Diagnostic][AutoHeal] Inbound audio remains silent for >8s. Requesting seamless ICE Restart...`);
+            this.requestIceRestart(peerId, roomId);
           }
         }
-        if (lastBytesReceived > 0) {
-          if (receivedDelta === 0) {
-            consecutiveSilentInbound++;
-          } else {
-            consecutiveSilentInbound = 0;
-          }
+
+        // Reset autoHealAttempts count if stream is flowing smoothly
+        if (audioReceivedDelta > 0 && audioSentDelta > 0) {
+          autoHealAttempts = 0;
         }
 
-        const outboundStalled = consecutiveSilentOutbound >= 2; // ~10 seconds of no outbound audio
-        const inboundStalled = consecutiveSilentInbound >= 2;   // ~10 seconds of no inbound audio
+        lastAudioBytesSent = audioBytesSent;
+        lastAudioBytesReceived = audioBytesReceived;
+        lastVideoBytesSent = videoBytesSent;
+        lastVideoBytesReceived = videoBytesReceived;
+        lastFramesDecoded = framesDecoded;
 
-        // Log transition statuses to diagnostic logger
-        if (outboundStalled !== lastOutboundStalled) {
-          diagnosticLogger.log(
-            outboundStalled ? 'error' : 'media', 
-            outboundStalled ? 'outbound_stalled' : 'outbound_recovered', 
-            outboundStalled ? `Outbound voice stream has stalled! No voice data transmitting.` : `Outbound voice stream has recovered! Sending voice data again.`, 
-            peerId, 
-            roomId
-          );
-          lastOutboundStalled = outboundStalled;
-        }
-        if (inboundStalled !== lastInboundStalled) {
-          diagnosticLogger.log(
-            inboundStalled ? 'error' : 'media', 
-            inboundStalled ? 'inbound_stalled' : 'inbound_recovered', 
-            inboundStalled ? `Inbound voice stream has stalled! No voice data received from remote peer.` : `Inbound voice stream has recovered! Receiving voice data again.`, 
-            peerId, 
-            roomId
-          );
-          lastInboundStalled = inboundStalled;
-        }
-
-        console.log(`[Diagnostic][StatsMonitor][${new Date().toISOString()}] Peer ${peerId} (room ${roomId}):
-          - Candidate Pair: ${candidatePairStr}
-          - Local Candidate Type: ${localCandidateType} (TURN/Relay Active: ${localCandidateType === 'relay'})
-          - Total Audio Bytes Sent: ${audioBytesSent} (Delta: +${sentDelta} bytes, Stalled: ${outboundStalled})
-          - Total Audio Bytes Received: ${audioBytesReceived} (Delta: +${receivedDelta} bytes, Stalled: ${inboundStalled})
-          - Audio Flow Status: ${sentDelta > 0 || receivedDelta > 0 ? "LIVE AUDIO TRANSMITTING ✅" : "STALLED / SILENT ⚠️"}
-        `);
-
-        // Emit continuous WebRTC connection audit event via Socket.io
-        const socket = useAppStore.getState().socket;
-        const myId = useAppStore.getState().user?.id;
-        if (socket && myId) {
-          socket.emit('webrtc_audit', {
-            roomId,
-            peerId: myId,
-            targetPeerId: peerId,
-            iceConnectionState: pc.iceConnectionState,
-            connectionState: pc.connectionState,
-            audioBytesSent,
-            audioBytesReceived,
-            sentDelta,
-            receivedDelta,
-            localCandidateType,
-            remoteCandidateType,
-            candidatePairStr,
-            outboundStalled,
-            inboundStalled,
-            isFlowing: sentDelta > 0 || receivedDelta > 0,
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // Dispatch local event for the call UI to display metrics instantly
+        // Dispatch local call stats event for the UI
         window.dispatchEvent(new CustomEvent('webrtc_call_stats', {
           detail: {
             peerId,
             audioBytesSent,
             audioBytesReceived,
-            sentDelta,
-            receivedDelta,
+            videoBytesSent,
+            videoBytesReceived,
+            framesDecoded,
+            audioSentDelta,
+            audioReceivedDelta,
+            videoReceivedDelta,
             candidatePairStr,
             localCandidateType,
             remoteCandidateType,
             outboundStalled,
             inboundStalled,
-            isFlowing: sentDelta > 0 || receivedDelta > 0
+            videoStalled,
+            isFlowing: (audioSentDelta > 0 || audioReceivedDelta > 0 || videoReceivedDelta > 0)
           }
         }));
 
-        lastBytesSent = audioBytesSent;
-        lastBytesReceived = audioBytesReceived;
       } catch (err: any) {
         diagnosticLogger.log('error', 'stats_query_failed', `Failed to query connection stats: ${err.message}`, peerId, roomId);
       }
-    }, 5000);
+    }, 2000);
 
     this.statsIntervals.set(mapKey, intervalId);
   }
@@ -1496,6 +1648,11 @@ class WebRTCService {
     if (from === myId) return; // Skip our own signals
 
     diagnosticLogger.log('socket', 'incoming_signal', `Received incoming socket signal of type '${signal.type}' from peer ${from}`, from, roomId, { signalType: signal.type });
+
+    if (signal.type === 'call_telemetry' && signal.telemetry) {
+      window.dispatchEvent(new CustomEvent('webrtc_telemetry_update', { detail: signal.telemetry }));
+      return;
+    }
 
     if (signal.type === 'peer_joined') {
       const peerId = signal.peerId || from;

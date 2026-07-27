@@ -32,19 +32,59 @@ const VideoPlayer = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // ARCHITECTURAL HARDENING: Local preview MUST NEVER contain audio tracks!
+  // This guarantees zero audio loopback or acoustic feedback between mic and speaker.
+  const effectiveStream = React.useMemo(() => {
+    if (!stream) return null;
+    if (isLocal) {
+      const videoTracks = stream.getVideoTracks();
+      return videoTracks.length > 0 ? new MediaStream(videoTracks) : null;
+    }
+    return stream;
+  }, [stream, isLocal]);
+
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    if (stream) {
-      if (el.srcObject !== stream) {
-        console.log(`[Diagnostic] Binding stream to VideoPlayer (isLocal: ${isLocal}). Tracks: ${stream.getTracks().length}`);
-        el.srcObject = stream;
+    // Set inline playback attributes for iOS/Android
+    el.setAttribute('playsinline', 'true');
+    el.setAttribute('webkit-playsinline', 'true');
+
+    if (isLocal) {
+      el.muted = true;
+      el.volume = 0;
+      el.setAttribute('muted', '');
+    } else {
+      el.muted = false;
+      el.volume = 1.0;
+      el.removeAttribute('muted');
+    }
+
+    if (effectiveStream) {
+      if (el.srcObject !== effectiveStream) {
+        console.log(`[Diagnostic] Binding effectiveStream to VideoPlayer (isLocal: ${isLocal}). Tracks: ${effectiveStream.getTracks().length}`);
+        el.srcObject = effectiveStream;
       }
       
-      el.volume = 1.0;
-      
+      if (!isLocal) {
+        effectiveStream.getAudioTracks().forEach(t => {
+          if (!t.enabled) {
+            console.log('[Diagnostic] Enabling remote audio track for video/audio player output');
+            t.enabled = true;
+          }
+        });
+      }
+
       const attemptPlay = () => {
+        if (!el) return;
+        if (isLocal) {
+          el.muted = true;
+          el.volume = 0;
+        } else {
+          el.muted = false;
+          el.volume = 1.0;
+        }
         el.play()
           .then(() => {
             console.log(`[Diagnostic] VideoPlayer stream playback active (isLocal: ${isLocal}, muted: ${el.muted})`);
@@ -57,12 +97,18 @@ const VideoPlayer = ({
             }
             
             const handleInteraction = () => {
+              if (!el) return;
+              if (isLocal) {
+                el.muted = true;
+                el.volume = 0;
+              } else {
+                el.muted = false;
+                el.volume = 1.0;
+              }
               el.play()
                 .then(() => {
                   console.log(`[Diagnostic] VideoPlayer playing after user interaction`);
                   webrtcService.clearCallError(CallError.PLAYBACK_BLOCKED);
-                  document.removeEventListener('click', handleInteraction);
-                  document.removeEventListener('touchstart', handleInteraction);
                 })
                 .catch(playErr => {
                   console.error(`[Diagnostic] Explicit play failed even after gesture:`, playErr);
@@ -77,25 +123,28 @@ const VideoPlayer = ({
 
       const handleTrackChange = () => {
         console.log(`[Diagnostic] Track change detected on stream in VideoPlayer. Re-triggering play...`);
+        if (el && effectiveStream) {
+          el.srcObject = effectiveStream;
+        }
         attemptPlay();
       };
 
-      stream.addEventListener('addtrack', handleTrackChange);
-      stream.addEventListener('removetrack', handleTrackChange);
+      effectiveStream.addEventListener('addtrack', handleTrackChange);
+      effectiveStream.addEventListener('removetrack', handleTrackChange);
 
       return () => {
-        stream.removeEventListener('addtrack', handleTrackChange);
-        stream.removeEventListener('removetrack', handleTrackChange);
+        effectiveStream.removeEventListener('addtrack', handleTrackChange);
+        effectiveStream.removeEventListener('removetrack', handleTrackChange);
       };
     } else {
       el.srcObject = null;
     }
-  }, [stream, isLocal, isVideoOff]);
+  }, [effectiveStream, isLocal, isVideoOff]);
 
   useEffect(() => {
     const applyAudioSink = async () => {
       const el = videoRef.current;
-      if (!el || isLocal || !stream) return;
+      if (!el || isLocal || !effectiveStream) return;
 
       if (typeof (el as any).setSinkId === 'function') {
         try {
@@ -118,10 +167,11 @@ const VideoPlayer = ({
               console.log(`[AudioRouting] Switching output to earpiece: ${earpiece.label} (${earpiece.deviceId})`);
               await (el as any).setSinkId(earpiece.deviceId);
             } else {
-              console.warn(`[AudioRouting] Earpiece mode selected, but no matching earpiece device found.`);
+              console.warn(`[AudioRouting] Earpiece mode selected, using system audio routing fallback.`);
+              await (el as any).setSinkId('');
             }
           } else {
-            console.log(`[AudioRouting] Switching output to default speaker`);
+            console.log(`[AudioRouting] Switching output to default speaker / bluetooth / car output`);
             await (el as any).setSinkId('');
           }
         } catch (err) {
@@ -131,7 +181,7 @@ const VideoPlayer = ({
     };
 
     applyAudioSink();
-  }, [speakerMode, isLocal, stream]);
+  }, [speakerMode, isLocal, effectiveStream]);
 
   return (
     <video
@@ -246,6 +296,152 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [peerStats, setPeerStats] = useState<Record<string, any>>({});
+
+  const [localMicDb, setLocalMicDb] = useState<number>(-60);
+  const [localMicLevel, setLocalMicLevel] = useState<number>(0);
+  const [remoteAudioDb, setRemoteAudioDb] = useState<number>(-60);
+  const [remoteAudioLevel, setRemoteAudioLevel] = useState<number>(0);
+
+  // Intelligent Diagnostics & Auto-Healing States
+  const [autoHealNotice, setAutoHealNotice] = useState<{ message: string; timestamp: string } | null>(null);
+  const [peerTelemetry, setPeerTelemetry] = useState<Record<string, any>>({});
+  const [autoHealCount, setAutoHealCount] = useState<number>(0);
+
+  // Real-time Local Microphone Audio Level Analyzer
+  useEffect(() => {
+    if (!localStream) {
+      setLocalMicDb(-60);
+      setLocalMicLevel(0);
+      return;
+    }
+
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      setLocalMicDb(-60);
+      setLocalMicLevel(0);
+      return;
+    }
+
+    let audioCtx: AudioContext | null = null;
+    let animId: number;
+
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtxClass) {
+        audioCtx = new AudioCtxClass();
+        const source = audioCtx.createMediaStreamSource(localStream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.5;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        const updateLevel = () => {
+          if (isMuted) {
+            setLocalMicDb(-60);
+            setLocalMicLevel(0);
+          } else {
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              sum += dataArray[i];
+            }
+            const avg = sum / dataArray.length;
+            const level = Math.min(100, Math.round((avg / 128) * 100));
+            const db = avg === 0 ? -60 : Math.max(-60, Math.round(20 * Math.log10(avg / 255)));
+            setLocalMicLevel(level);
+            setLocalMicDb(db);
+          }
+          animId = requestAnimationFrame(updateLevel);
+        };
+        updateLevel();
+      }
+    } catch (err) {
+      console.warn('[AudioAnalyzer] Local mic analyzer setup failed:', err);
+    }
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
+      }
+    };
+  }, [localStream, isMuted]);
+
+  // Real-time Remote Audio Streams Level Analyzer
+  useEffect(() => {
+    const activeRemoteStreams = Object.values(remoteStreams).filter(s => s && s.getAudioTracks().length > 0);
+    if (activeRemoteStreams.length === 0) {
+      setRemoteAudioDb(-60);
+      setRemoteAudioLevel(0);
+      return;
+    }
+
+    let audioCtx: AudioContext | null = null;
+    let animId: number;
+
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtxClass) {
+        audioCtx = new AudioCtxClass();
+        const mainStream = activeRemoteStreams[0];
+        const source = audioCtx.createMediaStreamSource(mainStream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.5;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        const updateRemoteLevel = () => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i];
+          }
+          const avg = sum / dataArray.length;
+          const level = Math.min(100, Math.round((avg / 128) * 100));
+          const db = avg === 0 ? -60 : Math.max(-60, Math.round(20 * Math.log10(avg / 255)));
+          setRemoteAudioLevel(level);
+          setRemoteAudioDb(db);
+          animId = requestAnimationFrame(updateRemoteLevel);
+        };
+        updateRemoteLevel();
+      }
+    } catch (err) {
+      console.warn('[AudioAnalyzer] Remote audio analyzer setup failed:', err);
+    }
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
+      }
+    };
+  }, [remoteStreams]);
+
+  const handleResetMicAndAudio = async () => {
+    try {
+      console.log('[Diagnostic] Re-syncing local microphone and WebRTC audio channels...');
+      if (localStream) {
+        localStream.getAudioTracks().forEach(t => {
+          t.enabled = true;
+          console.log(`[Diagnostic] Mic track enabled state: ${t.enabled}, readyState: ${t.readyState}`);
+        });
+      }
+      setIsMuted(false);
+      
+      const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
+      if (localStream) {
+        await webrtcService.publishLocalStream(localStream, computedRoomId);
+      }
+      setTestSoundNotice({ message: '🎤 Microphone & Audio Pipeline Re-synced!', type: 'sent' });
+      setTimeout(() => setTestSoundNotice(null), 3000);
+    } catch (err) {
+      console.error('[Diagnostic] Re-sync mic error:', err);
+    }
+  };
 
   const [isRecordingPTT, setIsRecordingPTT] = useState(false);
   const [incomingPTT, setIncomingPTT] = useState<{ url: string, fromName: string, fromId: string } | null>(null);
@@ -628,12 +824,38 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       }
     };
 
+    const handleAutoHealEvent = (e: any) => {
+      const { reason } = e.detail || {};
+      setAutoHealCount(prev => prev + 1);
+      setAutoHealNotice({
+        message: `⚡ Smart Auto-Fix: Detected ${reason || 'media stream issue'} — Auto-resumed WebAudio context & restored 2-way stream flow.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+      setTimeout(() => setAutoHealNotice(null), 6000);
+    };
+
+    const handleTelemetryUpdate = (e: any) => {
+      const data = e.detail;
+      if (data && data.from && data.from !== user?.id) {
+        setPeerTelemetry(prev => ({
+          ...prev,
+          [data.from]: {
+            ...prev[data.from],
+            ...data,
+            lastUpdated: Date.now()
+          }
+        }));
+      }
+    };
+
     window.addEventListener('webrtc_stream', handleRemoteStream);
     window.addEventListener('webrtc_connection_failed', handleConnectionFailed);
     window.addEventListener('webrtc_call_error', handleWebRTCCallError);
     window.addEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
     window.addEventListener('webrtc_call_stats', handleCallStats);
     window.addEventListener('webrtc_call_ping', handleDataChannelPing);
+    window.addEventListener('webrtc_auto_heal', handleAutoHealEvent);
+    window.addEventListener('webrtc_telemetry_update', handleTelemetryUpdate);
     
     if (socket) {
       socket.on('user_joined_call', handleUserJoined);
@@ -654,6 +876,8 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       window.removeEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
       window.removeEventListener('webrtc_call_stats', handleCallStats);
       window.removeEventListener('webrtc_call_ping', handleDataChannelPing);
+      window.removeEventListener('webrtc_auto_heal', handleAutoHealEvent);
+      window.removeEventListener('webrtc_telemetry_update', handleTelemetryUpdate);
       
       if (socket) {
         socket.off('user_joined_call', handleUserJoined);
@@ -670,6 +894,29 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       }
     };
   }, [type, socket, groupId, userId, user, callAttempt]);
+
+  // Periodic Telemetry Broadcast Effect: Transmit bi-directional call health stats to connected peer
+  useEffect(() => {
+    if (connectionStage !== 'established') return;
+
+    const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
+
+    const telemetryTimer = setInterval(() => {
+      const activePeerIds = Object.keys(remoteStreams);
+      activePeerIds.forEach(peerId => {
+        webrtcService.sendTelemetry(peerId, computedRoomId, {
+          micCapturing: !isMuted && localMicLevel > 2,
+          micLevel: localMicLevel,
+          speakerPlaying: remoteAudioLevel > 2,
+          videoOn: !isVideoOff,
+          hasLocalVideo: localStream ? localStream.getVideoTracks().length > 0 : false,
+          autoHealCount
+        });
+      });
+    }, 1500);
+
+    return () => clearInterval(telemetryTimer);
+  }, [connectionStage, isMuted, isVideoOff, localMicLevel, remoteAudioLevel, localStream, remoteStreams, autoHealCount, callId, roomId, groupId, user?.id, userId]);
 
   // Sync local mute/video state with participants list for "me"
   useEffect(() => {
@@ -1001,6 +1248,118 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
           </div>
         </div>
       </header>
+
+      {/* Intelligent Bi-Directional Health & Diagnostic Monitor Bar */}
+      <div className="bg-slate-900/95 backdrop-blur-xl border-y border-white/10 px-3 md:px-6 py-2 flex flex-wrap items-center justify-between gap-2.5 text-[11px] font-mono z-20 shrink-0 shadow-md">
+        <div className="flex items-center gap-2 md:gap-4 flex-wrap">
+          {/* Local Mic dB Level */}
+          <div className="flex items-center gap-2 bg-slate-950/80 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-inner">
+            <Icon name={isMuted ? "mic_off" : "mic"} className={cn("text-xs sm:text-sm", isMuted ? "text-red-400" : localMicLevel > 10 ? "text-emerald-400 animate-pulse" : "text-amber-400")} />
+            <span className="text-white/60 font-bold uppercase tracking-wider text-[10px]">Your Mic:</span>
+            <span className={cn("font-black text-[11px]", isMuted ? "text-red-400" : localMicDb > -45 ? "text-emerald-400" : "text-amber-300")}>
+              {isMuted ? "MUTED" : `${localMicDb} dB`}
+            </span>
+            {!isMuted && (
+              <div className="w-12 sm:w-16 h-2 bg-slate-800 rounded-full overflow-hidden flex items-center p-0.5 border border-white/10">
+                <div 
+                  className={cn("h-full rounded-full transition-all duration-100", localMicLevel > 30 ? "bg-emerald-400" : localMicLevel > 10 ? "bg-emerald-500" : "bg-amber-400")}
+                  style={{ width: `${Math.max(5, localMicLevel)}%` }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Partner Audio dB Level */}
+          <div className="flex items-center gap-2 bg-slate-950/80 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-inner">
+            <Icon name="volume_up" className={cn("text-xs sm:text-sm", remoteAudioLevel > 10 ? "text-emerald-400 animate-pulse" : "text-white/40")} />
+            <span className="text-white/60 font-bold uppercase tracking-wider text-[10px]">Partner Voice:</span>
+            <span className={cn("font-black text-[11px]", remoteAudioDb > -45 ? "text-emerald-400" : "text-white/50")}>
+              {remoteAudioDb > -60 ? `${remoteAudioDb} dB` : "Listening..."}
+            </span>
+            <div className="w-12 sm:w-16 h-2 bg-slate-800 rounded-full overflow-hidden flex items-center p-0.5 border border-white/10">
+              <div 
+                className={cn("h-full rounded-full transition-all duration-100", remoteAudioLevel > 30 ? "bg-emerald-400" : "bg-primary/70")}
+                style={{ width: `${Math.max(5, remoteAudioLevel)}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Bi-Directional Telemetry Status: Partner Mic & Speaker Verification */}
+          {Object.keys(remoteStreams).length > 0 && (() => {
+            const partnerId = Object.keys(remoteStreams)[0];
+            const pTelem = peerTelemetry[partnerId];
+            const partnerName = participants.find(p => p.id === partnerId)?.name || 'Peer';
+            return (
+              <div className="flex items-center gap-2 bg-slate-950/90 px-3 py-1.5 rounded-xl border border-primary/30 text-[10px] uppercase font-mono tracking-wider text-white">
+                <span className="text-primary font-bold">Partner Check ({partnerName}):</span>
+                
+                {/* Mic status */}
+                <span className={cn("px-1.5 py-0.5 rounded font-bold flex items-center gap-1", pTelem?.micCapturing ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-amber-500/20 text-amber-300 border border-amber-500/30")}>
+                  <Icon name={pTelem?.micCapturing ? "mic" : "mic_off"} className="text-[10px]" />
+                  {pTelem?.micCapturing ? "Mic Active" : "Mic Silent"}
+                </span>
+
+                {/* Speaker status */}
+                <span className={cn("px-1.5 py-0.5 rounded font-bold flex items-center gap-1", pTelem?.speakerPlaying !== false ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-red-500/20 text-red-300 border border-red-500/30 animate-pulse")}>
+                  <Icon name="volume_up" className="text-[10px]" />
+                  {pTelem?.speakerPlaying !== false ? "Speaker Listening" : "Speaker Blocked"}
+                </span>
+
+                {/* Video status */}
+                {type === 'video' && (
+                  <span className={cn("px-1.5 py-0.5 rounded font-bold flex items-center gap-1", pTelem?.videoOn ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-slate-800 text-white/50 border border-white/10")}>
+                    <Icon name={pTelem?.videoOn ? "videocam" : "videocam_off"} className="text-[10px]" />
+                    {pTelem?.videoOn ? "Video 720p" : "Cam Off"}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
+        <div className="flex items-center gap-2 ml-auto">
+          {/* Smart Health Auto-Heal Counter Pill */}
+          {autoHealCount > 0 && (
+            <div className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded-xl flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider animate-pulse shadow-sm">
+              <Icon name="auto_fix_high" className="text-xs text-emerald-400" />
+              <span>Auto-Healed ({autoHealCount})</span>
+            </div>
+          )}
+
+          {/* Re-sync / Reset Microphone Action */}
+          <button
+            onClick={handleResetMicAndAudio}
+            className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+            title="Re-sync microphone and WebRTC audio channels"
+          >
+            <Icon name="refresh" className="text-xs" />
+            <span>Re-sync Media</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Auto-Healing Unprompted Notification Banner Overlay */}
+      <AnimatePresence>
+        {autoHealNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -25, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -25, scale: 0.9 }}
+            className="absolute top-20 md:top-24 left-1/2 -translate-x-1/2 z-50 px-5 py-3 md:px-6 md:py-3.5 rounded-2xl border border-emerald-400/50 shadow-2xl bg-slate-900/95 text-white font-bold flex items-center gap-3 backdrop-blur-2xl transition-all max-w-lg shadow-emerald-500/20"
+          >
+            <div className="size-8 rounded-full bg-emerald-500/20 border border-emerald-400 flex items-center justify-center shrink-0">
+              <Icon name="auto_fix_high" className="text-emerald-400 text-lg animate-spin" />
+            </div>
+            <div className="flex flex-col text-left">
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-400 font-mono font-black text-[11px] uppercase tracking-wider">Smart Auto-Healing System</span>
+                <span className="text-white/40 font-mono text-[9px]">{autoHealNotice.timestamp}</span>
+              </div>
+              <span className="text-xs text-slate-200 font-semibold leading-tight mt-0.5">{autoHealNotice.message}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Test Sound Notification Banner Overlay */}
       <AnimatePresence>

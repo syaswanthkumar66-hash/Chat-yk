@@ -1937,7 +1937,7 @@ export const useAppStore = create<AppState>((set) => ({
       });
 
       // 6. receive_message
-      sock.off('receive_message').on('receive_message', async (data: { id?: string, messageId?: string, groupId?: string, senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[], recipientId?: string }) => {
+      sock.off('receive_message').on('receive_message', async (data: { id?: string, messageId?: string, groupId?: string, senderId: string, text: string, type: Message['type'], fileUrl?: string, fileSize?: string, encryptedFileKey?: number[], iv?: number[], recipientId?: string, timestamp?: string }) => {
         // Clear any incoming media upload progress indicator for this sender immediately
         if (mediaUploadStaleTimeouts[data.senderId]) {
           clearTimeout(mediaUploadStaleTimeouts[data.senderId]);
@@ -1997,7 +1997,7 @@ export const useAppStore = create<AppState>((set) => ({
           id: messageId,
           senderId: data.senderId,
           text: decryptedText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: data.type || 'text',
           fileUrl: resolvedFileUrl,
           fileSize: resolvedFileSize,
@@ -3157,6 +3157,7 @@ export const useAppStore = create<AppState>((set) => ({
           fileSize,
           iv: e2eData?.iv,
           encryptedFileKey: e2eData?.encryptedFileKey,
+          timestamp: newMessage.timestamp,
           recipientIds: chat.participants.map(p => p.id)
         });
       } else {
@@ -3171,7 +3172,8 @@ export const useAppStore = create<AppState>((set) => ({
             fileUrl,
             fileSize,
             iv: e2eData?.iv,
-            encryptedFileKey: e2eData?.encryptedFileKey
+            encryptedFileKey: e2eData?.encryptedFileKey,
+            timestamp: newMessage.timestamp
           });
 
           // Also store as temporary file if forwarded and contains a file URL

@@ -83,6 +83,20 @@ const DecryptedMedia = ({ msg, isOwn, peerId, onPreview, onRetrySend }: { msg: a
   const [aspectRatio, setAspectRatio] = useState<number | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
 
+  useEffect(() => {
+    const rawUrl = msg.fileUrl || msg.url;
+    if (rawUrl) {
+      if (rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')) {
+        setUrl(rawUrl);
+      } else {
+        const full = (rawUrl.startsWith('http') || rawUrl.startsWith('blob:') || rawUrl.startsWith('data:'))
+          ? rawUrl
+          : `${BACKEND_URL}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+        setUrl(full);
+      }
+    }
+  }, [msg.fileUrl, msg.url]);
+
   const isFailed = msg.status === 'failed';
   const displayError = (() => {
     if (isOwn && isFailed) {
@@ -815,6 +829,33 @@ export const ChatDetail = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
   const isCurrentlyTyping = useRef(false);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior });
+    } else if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  };
+
+  const [messageText, setMessageText] = useState('');
+
+  const chat = useMemo(() => chats.find(c => c.id === activeChatId), [chats, activeChatId]);
+  const recipient = useMemo(() => users.find(u => u.id === activeRecipientId), [users, activeRecipientId]);
+  const messages = useMemo(() => chat?.messages || [], [chat?.messages]);
+
+  const activeUploadsKey = activeChatId || activeRecipientId || '';
+  const uploadItems = incomingMediaUploads[activeUploadsKey] || [];
+
+  const partnerIdForTyping = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
+  const isPartnerTyping = !!(partnerIdForTyping && typingUsers[partnerIdForTyping]);
+  const messagesLen = messages?.length || 0;
+
+  useEffect(() => {
+    scrollToBottom(messagesLen <= 2 ? 'auto' : 'smooth');
+  }, [messagesLen, activeChatId, isPartnerTyping, uploadItems.length]);
 
   useEffect(() => {
     const socket = useAppStore.getState().socket;
@@ -924,12 +965,6 @@ export const ChatDetail = () => {
   const toggleReaction = (messageId: string) => {
     addReaction(messageId, '❤️');
   };
-
-  const [messageText, setMessageText] = useState('');
-
-  const chat = useMemo(() => chats.find(c => c.id === activeChatId), [chats, activeChatId]);
-  const recipient = useMemo(() => users.find(u => u.id === activeRecipientId), [users, activeRecipientId]);
-  const messages = useMemo(() => chat?.messages || [], [chat?.messages]);
 
   useEffect(() => {
     if (!user || (!activeRecipientId && !chat)) return;
@@ -2257,7 +2292,8 @@ export const ChatDetail = () => {
             </AnimatePresence>
           </header>
       <main 
-        className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar"
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar relative"
         onClick={() => setShowEmojiPicker(false)}
       >
         {cleared ? (
@@ -2444,27 +2480,62 @@ export const ChatDetail = () => {
               {(() => {
                 const partnerId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
                 if (partnerId && typingUsers[partnerId]) {
+                  const partnerName = recipient?.displayName || 'Partner';
                   return (
-                    <div className="flex flex-col gap-1.5 max-w-[85%] self-start items-start text-xs font-bold text-slate-400">
-                      <div className="flex items-end gap-2">
-                        <div className="p-4 rounded-[1.5rem] bg-white rounded-tl-none border border-slate-100 shadow-sm flex items-center gap-1.5 h-10">
-                          <motion.div className="w-1.5 h-1.5 bg-primary/50 rounded-full" animate={{ y: [0, -3, 0] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0 }} />
-                          <motion.div className="w-1.5 h-1.5 bg-primary/50 rounded-full" animate={{ y: [0, -3, 0] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.2 }} />
-                          <motion.div className="w-1.5 h-1.5 bg-primary/50 rounded-full" animate={{ y: [0, -3, 0] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.4 }} />
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="flex flex-col gap-1.5 max-w-[85%] self-start items-start text-xs font-bold text-slate-400 my-1 z-10"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="px-4 py-2.5 rounded-[1.5rem] bg-white rounded-tl-none border border-slate-200/80 shadow-md flex items-center gap-2.5">
+                          <span className="text-xs text-slate-600 font-semibold italic">
+                            {chat?.isGroup ? 'Someone is typing' : `${partnerName} is typing`}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <motion.div className="size-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} />
+                            <motion.div className="size-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} />
+                            <motion.div className="size-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} />
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 }
                 return null;
               })()}
             </div>
+            <div ref={messagesEndRef} className="h-2 w-full" />
           </>
         )}
       </main>
 
       <footer className="px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 bg-bg-light/80 backdrop-blur-xl border-t border-primary/5 flex flex-col gap-2 sm:gap-3 sticky bottom-0 z-30">
         <AnimatePresence>
+          {(() => {
+            const partnerId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
+            if (partnerId && typingUsers[partnerId]) {
+              return (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full self-start flex items-center gap-2 text-xs text-primary font-bold shadow-xs w-fit mb-1">
+                    <span className="animate-pulse">{chat?.isGroup ? 'Someone is typing...' : `${recipient?.displayName || 'Partner'} is typing...`}</span>
+                    <div className="flex items-center gap-1">
+                      <motion.div className="size-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.5, 1] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} />
+                      <motion.div className="size-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.5, 1] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} />
+                      <motion.div className="size-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.5, 1] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} />
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            }
+            return null;
+          })()}
           {capturedMedia.length > 0 && (
             <motion.div 
               initial={{ height: 0, opacity: 0 }}

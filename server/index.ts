@@ -756,9 +756,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       // Store in memory cache
       memoryFiles.set(fileId, fileObj);
 
-      // Store in Firestore if available and file is small enough (Firestore document limit is 1MB)
+      // Store in Firestore if available and file is small enough (Firestore document limit is ~1MB base64)
       if (db) {
-        if (req.file.size < 750 * 1024) {
+        if (req.file.size < 5 * 1024 * 1024) {
           try {
             await db.collection('uploaded_files').doc(fileId).set({
               id: fileId,

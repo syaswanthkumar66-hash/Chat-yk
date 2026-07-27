@@ -317,7 +317,7 @@ async function handleApiFallback(urlStr: string, init?: RequestInit): Promise<Re
             });
           }
 
-          if (file.size < 750 * 1024) {
+          if (file.size < 5 * 1024 * 1024) {
             try {
               const { db, doc, setDoc } = await getFirebase();
               if (db) {
