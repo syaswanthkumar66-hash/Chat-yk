@@ -1234,6 +1234,10 @@ class WebRTCService {
     }
   }
 
+  public async requestIceRestart(peerId: string, roomId: string) {
+    return this.handleIceFailure(peerId, roomId);
+  }
+
   private async handleIceFailure(peerId: string, roomId: string) {
     const mapKey = this.getMapKey(peerId, roomId);
     const pc = this.pcs.get(mapKey);
