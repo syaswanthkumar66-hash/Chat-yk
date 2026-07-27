@@ -426,7 +426,7 @@ const GlobalRemoteAudioPipeline = ({
   }, [remoteStreams, onRemoteAudioLevel]);
 
   return (
-    <div className="sr-only hidden" aria-hidden="true" id="remote-audio-pipeline">
+    <div className="pointer-events-none fixed -top-[9999px] -left-[9999px] opacity-0 w-px h-px overflow-hidden" aria-hidden="true" id="remote-audio-pipeline">
       {Object.entries(remoteStreams).map(([peerId, _]) => (
         <audio
           key={`remote-audio-${peerId}`}
@@ -437,7 +437,6 @@ const GlobalRemoteAudioPipeline = ({
           autoPlay
           playsInline
           controls={false}
-          className="hidden"
         />
       ))}
     </div>
@@ -1119,7 +1118,18 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
 
     const handleRemoteStream = (e: any) => {
       const { from, stream: newStream } = e.detail;
-      setRemoteStreams(prev => ({ ...prev, [from]: newStream }));
+      setRemoteStreams(prev => {
+        const existing = prev[from];
+        if (existing) {
+          newStream.getTracks().forEach((t: MediaStreamTrack) => {
+            if (!existing.getTracks().some(et => et.id === t.id)) {
+              existing.addTrack(t);
+            }
+          });
+          return { ...prev, [from]: new MediaStream(existing.getTracks()) };
+        }
+        return { ...prev, [from]: newStream };
+      });
       setConnectionStage('established');
       
       // Update participant with streamId
@@ -1300,11 +1310,16 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       const activePeerIds = new Set(Object.keys(remoteStreams));
       if (userId) activePeerIds.add(userId);
 
+      const isMicActive = !isMuted && !!localStream && localStream.getAudioTracks().some(t => t.enabled && t.readyState === 'live');
+
       activePeerIds.forEach(peerId => {
         webrtcService.sendTelemetry(peerId, computedRoomId, {
-          micCapturing: !isMuted && localMicLevel > 2,
+          micCapturing: isMicActive,
           micLevel: localMicLevel,
-          speakerPlaying: remoteAudioLevel > 2,
+          micDb: localMicDb,
+          speakerPlaying: true,
+          speakerLevel: remoteAudioLevel,
+          speakerDb: remoteAudioDb,
           videoOn: !isVideoOff,
           hasLocalVideo: localStream ? localStream.getVideoTracks().length > 0 : false,
           autoHealCount
@@ -1785,21 +1800,31 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
           {(Object.keys(remoteStreams).length > 0 || !!userId) && (() => {
             const partnerId = Object.keys(remoteStreams)[0] || userId;
             const pTelem = (partnerId ? peerTelemetry[partnerId] : null) || (userId ? peerTelemetry[userId] : null);
-            const partnerName = (partnerId ? participants.find(p => p.id === partnerId)?.name : null) || targetUser?.name || 'Partner';
+            const partnerName = (partnerId ? participants.find(p => p.id === partnerId && p.id !== 'me')?.name : null) || targetUser?.displayName || 'Partner';
+            const isMicOn = pTelem ? pTelem.micCapturing !== false : true;
+            const isSpeakerOk = pTelem ? pTelem.speakerPlaying !== false : true;
+            const partnerDb = pTelem?.micDb !== undefined ? pTelem.micDb : null;
+
             return (
               <div className="flex items-center gap-2 bg-slate-950/90 px-3 py-1.5 rounded-xl border border-primary/30 text-[10px] uppercase font-mono tracking-wider text-white">
                 <span className="text-primary font-bold">Partner Check ({partnerName}):</span>
                 
-                {/* Mic status */}
-                <span className={cn("px-1.5 py-0.5 rounded font-bold flex items-center gap-1", pTelem?.micCapturing ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-amber-500/20 text-amber-300 border border-amber-500/30")}>
-                  <Icon name={pTelem?.micCapturing ? "mic" : "mic_off"} className="text-[10px]" />
-                  {pTelem?.micCapturing ? "Mic Active" : "Mic Silent"}
+                {/* Mic status & received partner dB */}
+                <span className={cn(
+                  "px-2 py-0.5 rounded font-bold flex items-center gap-1 transition-all",
+                  isMicOn ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-red-500/20 text-red-300 border border-red-500/30"
+                )}>
+                  <Icon name={isMicOn ? "mic" : "mic_off"} className="text-[10px]" />
+                  <span>{isMicOn ? (partnerDb !== null ? `${partnerDb} dB` : "Mic Active") : "Muted"}</span>
                 </span>
 
                 {/* Speaker status */}
-                <span className={cn("px-1.5 py-0.5 rounded font-bold flex items-center gap-1", pTelem?.speakerPlaying !== false ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-red-500/20 text-red-300 border border-red-500/30 animate-pulse")}>
+                <span className={cn(
+                  "px-2 py-0.5 rounded font-bold flex items-center gap-1 transition-all",
+                  isSpeakerOk ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                )}>
                   <Icon name="volume_up" className="text-[10px]" />
-                  {pTelem?.speakerPlaying !== false ? "Speaker Listening" : "Speaker Blocked"}
+                  <span>{isSpeakerOk ? "Speaker Ready" : "Speaker Blocked"}</span>
                 </span>
 
                 {/* Video status */}
