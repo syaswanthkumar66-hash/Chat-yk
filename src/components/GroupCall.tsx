@@ -224,8 +224,10 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
   const [showRings, setShowRings] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'speaker'>('grid');
   const [speakerMode, setSpeakerMode] = useState<'speaker' | 'earpiece'>('speaker');
-  const [pingSoundsEnabled, setPingSoundsEnabled] = useState(false);
-  const pingSoundsEnabledRef = useRef(false);
+  const [pingSoundsEnabled, setPingSoundsEnabled] = useState(true);
+  const [testSoundNotice, setTestSoundNotice] = useState<{ message: string; type: 'sent' | 'received' } | null>(null);
+  const lastPingTimeRef = useRef<number>(0);
+  const pingSoundsEnabledRef = useRef(true);
 
   useEffect(() => {
     pingSoundsEnabledRef.current = pingSoundsEnabled;
@@ -594,9 +596,25 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
     };
 
     const handleCallPing = (data: any) => {
-      const { from } = data;
-      if (from !== user?.id && pingSoundsEnabledRef.current) {
-        playPongSound();
+      const { from, senderName } = data || {};
+      if (from && from !== user?.id) {
+        const now = Date.now();
+        if (now - lastPingTimeRef.current < 600) return;
+        lastPingTimeRef.current = now;
+
+        if (pingSoundsEnabledRef.current) {
+          playPingSound();
+        }
+        const displayName = senderName || 'Connected User';
+        setTestSoundNotice({ message: `🔊 Test Sound received from ${displayName}!`, type: 'received' });
+        setTimeout(() => setTestSoundNotice(null), 4000);
+        diagnosticLogger.log('webrtc', 'test_sound', `Received test sound chime from ${displayName}`);
+      }
+    };
+
+    const handleDataChannelPing = (e: any) => {
+      if (e?.detail) {
+        handleCallPing(e.detail);
       }
     };
 
@@ -605,6 +623,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
     window.addEventListener('webrtc_call_error', handleWebRTCCallError);
     window.addEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
     window.addEventListener('webrtc_call_stats', handleCallStats);
+    window.addEventListener('webrtc_call_ping', handleDataChannelPing);
     
     if (socket) {
       socket.on('user_joined_call', handleUserJoined);
@@ -624,6 +643,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       window.removeEventListener('webrtc_call_error', handleWebRTCCallError);
       window.removeEventListener('webrtc_call_error_cleared', handleWebRTCCallErrorCleared);
       window.removeEventListener('webrtc_call_stats', handleCallStats);
+      window.removeEventListener('webrtc_call_ping', handleDataChannelPing);
       
       if (socket) {
         socket.off('user_joined_call', handleUserJoined);
@@ -694,10 +714,28 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
   };
 
   const sendPing = () => {
-    if (!socket) return;
     playPingSound();
+    const senderName = user?.displayName || user?.username || 'User';
+    setTestSoundNotice({ message: `🔊 Test Sound Sent!`, type: 'sent' });
+    setTimeout(() => setTestSoundNotice(null), 3000);
+
     const computedRoomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
-    socket.emit('call_ping', { roomId: computedRoomId, from: user?.id });
+    
+    if (socket) {
+      socket.emit('call_ping', { 
+        roomId: computedRoomId, 
+        from: user?.id,
+        senderName
+      });
+    }
+
+    webrtcService.broadcastDataChannelMessage(computedRoomId, {
+      type: 'call_ping',
+      from: user?.id,
+      senderName
+    });
+
+    diagnosticLogger.log('webrtc', 'test_sound', `Sent test sound chime to connected room ${computedRoomId}`);
   };
 
   const ringAllMembers = () => {
@@ -926,6 +964,15 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
         </div>
 
         <div className="flex items-center gap-2 md:gap-4">
+          <button 
+            onClick={sendPing}
+            className="bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 px-3 py-1.5 md:px-4 md:py-2 rounded-full flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-mono font-bold uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-primary/10 group shrink-0"
+            title="Send Test Sound to connected user"
+          >
+            <Icon name="volume_up" className="text-xs md:text-sm group-hover:scale-110 transition-transform animate-pulse" />
+            <span className="hidden xs:inline">Send Test Sound</span>
+          </button>
+
           {!isOneOnOne && (
             <button 
               onClick={() => setViewMode(viewMode === 'grid' ? 'speaker' : 'grid')}
@@ -943,6 +990,26 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
           </div>
         </div>
       </header>
+
+      {/* Test Sound Notification Banner Overlay */}
+      <AnimatePresence>
+        {testSoundNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            className={cn(
+              "absolute top-20 md:top-24 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 md:px-6 md:py-3 rounded-2xl border shadow-2xl flex items-center gap-3 backdrop-blur-xl transition-all",
+              testSoundNotice.type === 'received'
+                ? "bg-emerald-500/95 text-slate-950 font-black border-emerald-300 shadow-emerald-500/40"
+                : "bg-primary/95 text-white font-black border-primary/40 shadow-primary/40"
+            )}
+          >
+            <div className={cn("size-3 rounded-full animate-ping", testSoundNotice.type === 'received' ? "bg-slate-950" : "bg-white")} />
+            <span className="text-xs md:text-sm uppercase tracking-wider font-extrabold">{testSoundNotice.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Platform routing warning for Safari/iOS */}
       {speakerMode === 'earpiece' && !isSinkSupported && (
@@ -1487,15 +1554,14 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
             <Icon name={pingSoundsEnabled ? 'notifications_active' : 'notifications_off'} className="text-base sm:text-lg md:text-2xl" />
           </button>
 
-          {pingSoundsEnabled && (
-            <button 
-              onClick={sendPing}
-              className="size-9 sm:size-11 md:size-14 rounded-full bg-white/5 text-white flex items-center justify-center hover:bg-white/10 transition-all hover:text-yellow-400 active:scale-90 shrink-0"
-              title="Send Ping"
-            >
-              <Icon name="vibration" className="text-base sm:text-lg md:text-2xl" />
-            </button>
-          )}
+          <button 
+            onClick={sendPing}
+            className="h-9 sm:h-11 md:h-14 px-3 sm:px-4 md:px-5 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 hover:bg-yellow-500/30 flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-yellow-500/10 shrink-0"
+            title="Send Test Sound Chime to connected user"
+          >
+            <Icon name="vibration" className="text-base sm:text-lg md:text-2xl animate-pulse" />
+            <span className="hidden sm:inline text-[10px] md:text-xs font-mono font-bold uppercase tracking-wider">Test Sound</span>
+          </button>
 
           <button 
             onClick={() => setShowDiagnostics(!showDiagnostics)}

@@ -592,6 +592,11 @@ class WebRTCService {
       try {
         const message = JSON.parse(event.data);
 
+        if (message.type === 'call_ping') {
+          window.dispatchEvent(new CustomEvent('webrtc_call_ping', { detail: message }));
+          return;
+        }
+
         // 1. Handle Sender feedback (ACK, NACK, ACK of transfer)
         if (message.type === 'transfer_chunk_ack') {
           const activeTx = this.activeOutgoingTransfers.get(message.transferId);
@@ -1071,6 +1076,21 @@ class WebRTCService {
       }
     }
     return results;
+  }
+
+  broadcastDataChannelMessage(roomId: string, message: any): number {
+    let sentCount = 0;
+    for (const [mapKey, channel] of this.dataChannels.entries()) {
+      if ((mapKey.startsWith(`${roomId}_`) || mapKey.includes(roomId)) && channel.readyState === 'open') {
+        try {
+          channel.send(JSON.stringify(message));
+          sentCount++;
+        } catch (e) {
+          console.error("Failed to send dataChannel message:", e);
+        }
+      }
+    }
+    return sentCount;
   }
 
   private flushPendingLocalCandidates(mapKey: string, peerId: string, roomId: string) {
