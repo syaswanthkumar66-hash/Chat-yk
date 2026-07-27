@@ -250,6 +250,200 @@ const playPongSound = () => {
   }
 };
 
+const playTestSpeakerChime = (speakerMode: 'speaker' | 'earpiece' = 'speaker') => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(523.25, ctx.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.15);
+
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(659.25, ctx.currentTime + 0.15);
+    osc2.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.35);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.2);
+    osc2.start(ctx.currentTime + 0.15);
+    osc2.stop(ctx.currentTime + 0.5);
+  } catch (e) {
+    console.error("Test speaker chime failed:", e);
+  }
+};
+
+// Global Dedicated Remote Audio Engine Component
+const GlobalRemoteAudioPipeline = ({
+  remoteStreams,
+  speakerMode,
+  onRemoteAudioLevel
+}: {
+  remoteStreams: Record<string, MediaStream>;
+  speakerMode: 'speaker' | 'earpiece';
+  onRemoteAudioLevel?: (db: number, level: number) => void;
+}) => {
+  const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
+
+  // 1. Bind dedicated HTML5 <audio> for every remote stream
+  useEffect(() => {
+    Object.entries(remoteStreams).forEach(([peerId, stream]) => {
+      if (!stream) return;
+
+      stream.getAudioTracks().forEach(track => {
+        if (!track.enabled) {
+          console.log(`[RemoteAudioPipeline] Enforcing enabled=true on remote audio track for peer ${peerId}`);
+          track.enabled = true;
+        }
+      });
+
+      const audioEl = audioRefs.current[peerId];
+      if (audioEl) {
+        if (audioEl.srcObject !== stream) {
+          console.log(`[RemoteAudioPipeline] Attaching MediaStream to dedicated audio node for peer ${peerId}`);
+          audioEl.srcObject = stream;
+        }
+
+        audioEl.muted = false;
+        audioEl.volume = 1.0;
+
+        if (typeof (audioEl as any).setSinkId === 'function') {
+          navigator.mediaDevices.enumerateDevices().then(devices => {
+            const outputs = devices.filter(d => d.kind === 'audiooutput');
+            if (speakerMode === 'earpiece') {
+              const earpiece = outputs.find(d => {
+                const label = d.label.toLowerCase();
+                return label.includes('earpiece') || label.includes('receiver') || label.includes('handset') || label.includes('internal') || label.includes('phone');
+              });
+              (audioEl as any).setSinkId(earpiece ? earpiece.deviceId : '').catch(() => {});
+            } else {
+              (audioEl as any).setSinkId('').catch(() => {});
+            }
+          }).catch(() => {});
+        }
+
+        audioEl.play().catch(playErr => {
+          console.warn(`[RemoteAudioPipeline] Autoplay prevented for peer ${peerId}:`, playErr);
+          const handleGesture = () => {
+            if (audioEl) {
+              audioEl.play().catch(() => {});
+            }
+          };
+          window.addEventListener('click', handleGesture, { once: true });
+          window.addEventListener('touchstart', handleGesture, { once: true });
+        });
+      }
+    });
+  }, [remoteStreams, speakerMode]);
+
+  // 2. WebAudio fallback + real-time dB analysis
+  useEffect(() => {
+    const activeStreams = Object.values(remoteStreams).filter(s => s && s.getAudioTracks().length > 0);
+    if (activeStreams.length === 0) return;
+
+    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtxClass) return;
+
+    let audioCtx: AudioContext | null = null;
+    let animId: number;
+
+    try {
+      audioCtx = new AudioCtxClass();
+      (window as any).__callAudioContext = audioCtx;
+
+      const activeStream = activeStreams[0];
+      const source = audioCtx.createMediaStreamSource(activeStream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.5;
+
+      source.connect(analyser);
+
+      const gain = audioCtx.createGain();
+      gain.gain.value = 1.0;
+      source.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const updateLevel = () => {
+        if (audioCtx && audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length;
+        const level = Math.min(100, Math.round((avg / 128) * 100));
+        const db = avg === 0 ? -60 : Math.max(-60, Math.round(20 * Math.log10(avg / 255)));
+
+        if (onRemoteAudioLevel) {
+          onRemoteAudioLevel(db, level);
+        }
+
+        animId = requestAnimationFrame(updateLevel);
+      };
+
+      updateLevel();
+    } catch (err) {
+      console.warn('[RemoteAudioPipeline] WebAudio pipeline error:', err);
+    }
+
+    const handleGlobalResume = () => {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      Object.values(audioRefs.current).forEach(el => {
+        if (el && el.paused && el.srcObject) {
+          el.play().catch(() => {});
+        }
+      });
+    };
+
+    window.addEventListener('click', handleGlobalResume);
+    window.addEventListener('touchstart', handleGlobalResume);
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+      window.removeEventListener('click', handleGlobalResume);
+      window.removeEventListener('touchstart', handleGlobalResume);
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
+      }
+    };
+  }, [remoteStreams, onRemoteAudioLevel]);
+
+  return (
+    <div className="sr-only hidden" aria-hidden="true" id="remote-audio-pipeline">
+      {Object.entries(remoteStreams).map(([peerId, _]) => (
+        <audio
+          key={`remote-audio-${peerId}`}
+          ref={el => {
+            if (el) audioRefs.current[peerId] = el;
+            else delete audioRefs.current[peerId];
+          }}
+          autoPlay
+          playsInline
+          controls={false}
+          className="hidden"
+        />
+      ))}
+    </div>
+  );
+};
+
 export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { groupId?: string, userId?: string, roomId?: string, callId?: string, type: 'voice' | 'video', onClose: () => void }) => {
   const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
     removedFriendIds: s.removedFriendIds,
@@ -1368,6 +1562,15 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[200] bg-slate-950 flex flex-col text-white overflow-hidden font-sans"
     >
+      {/* Global Remote Audio Output Pipeline Engine */}
+      <GlobalRemoteAudioPipeline
+        remoteStreams={remoteStreams}
+        speakerMode={speakerMode}
+        onRemoteAudioLevel={(db, level) => {
+          setRemoteAudioDb(db);
+          setRemoteAudioLevel(level);
+        }}
+      />
       {/* PTT Broadcast Overlay */}
       {isRecordingPTT && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[250] bg-emerald-500/90 backdrop-blur-md px-6 py-3 rounded-full border border-emerald-400/30 flex items-center gap-3 shadow-2xl animate-bounce">
@@ -1619,6 +1822,20 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
               <span>Auto-Healed ({autoHealCount})</span>
             </div>
           )}
+
+          {/* Test Speaker Sound Action */}
+          <button
+            onClick={() => {
+              playTestSpeakerChime(speakerMode);
+              setTestSoundNotice({ message: `🔊 Test Speaker Chime Played (${speakerMode.toUpperCase()})`, type: 'received' });
+              setTimeout(() => setTestSoundNotice(null), 3000);
+            }}
+            className="bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 shadow-sm"
+            title="Test Speaker Output Hardware"
+          >
+            <Icon name="volume_up" className="text-xs" />
+            <span>Test Speaker</span>
+          </button>
 
           {/* Re-sync / Reset Microphone Action */}
           <button
