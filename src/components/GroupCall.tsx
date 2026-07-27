@@ -307,6 +307,150 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
   const [peerTelemetry, setPeerTelemetry] = useState<Record<string, any>>({});
   const [autoHealCount, setAutoHealCount] = useState<number>(0);
 
+  // Multi-Microphone Hardware Enumeration & Signal Probing States
+  const [allMics, setAllMics] = useState<MediaDeviceInfo[]>([]);
+  const [activeMicId, setActiveMicId] = useState<string>('');
+  const [showMicDropdown, setShowMicDropdown] = useState<boolean>(false);
+  const [isProbingMics, setIsProbingMics] = useState<boolean>(false);
+
+  // Enumerate all available hardware microphones on device
+  const refreshMicrophoneDevices = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.deviceId);
+      setAllMics(audioInputs);
+      if (!activeMicId && audioInputs.length > 0) {
+        setActiveMicId(audioInputs[0].deviceId);
+      }
+    } catch (e) {
+      console.warn('[Microphone] Device enumeration warning:', e);
+    }
+  };
+
+  // Switch microphone device dynamically and replace WebRTC stream
+  const switchMicrophoneDevice = async (targetDeviceId: string, reasonLabel?: string) => {
+    try {
+      console.log(`[Microphone] Switching active microphone to deviceId: "${targetDeviceId}"`);
+      
+      if (localStream) {
+        localStream.getAudioTracks().forEach(t => t.stop());
+      }
+
+      const newAudioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: targetDeviceId },
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true }
+        }
+      }).catch(async () => {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { ideal: targetDeviceId } }
+        });
+      });
+
+      const newAudioTrack = newAudioStream.getAudioTracks()[0];
+      if (!newAudioTrack) return;
+
+      newAudioTrack.enabled = !isMuted;
+
+      const existingVideoTracks = localStream ? localStream.getVideoTracks() : [];
+      const combinedStream = new MediaStream([newAudioTrack, ...existingVideoTracks]);
+
+      setLocalStream(combinedStream);
+      setActiveMicId(targetDeviceId);
+
+      const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
+      await webrtcService.publishLocalStream(combinedStream, computedRoomId);
+
+      const micDevice = allMics.find(m => m.deviceId === targetDeviceId);
+      const micName = micDevice?.label || 'Microphone';
+
+      setAutoHealNotice({
+        message: `⚡ ${reasonLabel || 'Switched Microphone'}: Now using "${micName}"`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+      setTimeout(() => setAutoHealNotice(null), 5000);
+
+    } catch (err: any) {
+      console.error('[Microphone] Failed to switch microphone hardware:', err);
+    }
+  };
+
+  // Auto-probe candidate microphones for actual audio signal (> -55 dB) and auto-select best working mic
+  const autoProbeAndSwitchBestMic = async () => {
+    if (isProbingMics || isMuted) return;
+    setIsProbingMics(true);
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.deviceId);
+      setAllMics(audioInputs);
+
+      if (audioInputs.length <= 1) {
+        setIsProbingMics(false);
+        return;
+      }
+
+      console.log(`[MicrophoneProbe] Multi-mic setup detected (${audioInputs.length} mics). Probing audio signal...`);
+
+      let bestDeviceId = '';
+      let maxDb = -100;
+
+      for (const mic of audioInputs) {
+        try {
+          const testStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: { exact: mic.deviceId },
+              echoCancellation: false,
+              noiseSuppression: false
+            }
+          });
+
+          const testCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const testSource = testCtx.createMediaStreamSource(testStream);
+          const testAnalyser = testCtx.createAnalyser();
+          testAnalyser.fftSize = 256;
+          testSource.connect(testAnalyser);
+
+          await new Promise(r => setTimeout(r, 250));
+
+          const testData = new Uint8Array(testAnalyser.frequencyBinCount);
+          testAnalyser.getByteFrequencyData(testData);
+
+          let sum = 0;
+          for (let i = 0; i < testData.length; i++) sum += testData[i];
+          const avg = sum / testData.length;
+          const db = avg === 0 ? -100 : Math.max(-100, Math.round(20 * Math.log10(avg / 255)));
+
+          console.log(`[MicrophoneProbe] Tested mic "${mic.label}" (${mic.deviceId}): level=${avg.toFixed(1)}, db=${db}dB`);
+
+          testStream.getTracks().forEach(t => t.stop());
+          testCtx.close().catch(() => {});
+
+          if (db > maxDb) {
+            maxDb = db;
+            bestDeviceId = mic.deviceId;
+          }
+        } catch (probeErr) {
+          console.warn(`[MicrophoneProbe] Could not probe mic "${mic.label}":`, probeErr);
+        }
+      }
+
+      if (bestDeviceId && bestDeviceId !== activeMicId && maxDb > -55) {
+        console.log(`[MicrophoneProbe] Found active mic (${bestDeviceId} with ${maxDb}dB)! Auto-switching...`);
+        await switchMicrophoneDevice(bestDeviceId, 'Smart Auto-Mic Selection');
+      } else {
+        console.log(`[MicrophoneProbe] Current mic is optimal or no alternative mic showed stronger signal.`);
+      }
+    } catch (err) {
+      console.warn('[MicrophoneProbe] Auto probe failed:', err);
+    } finally {
+      setIsProbingMics(false);
+    }
+  };
+
   // Real-time Local Microphone Audio Level Analyzer
   useEffect(() => {
     if (!localStream) {
@@ -329,6 +473,8 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtxClass) {
         audioCtx = new AudioCtxClass();
+        (window as any).__callAudioContext = audioCtx;
+        
         const source = audioCtx.createMediaStreamSource(localStream);
         const analyser = audioCtx.createAnalyser();
         analyser.fftSize = 256;
@@ -338,6 +484,10 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         const updateLevel = () => {
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+          }
+
           if (isMuted) {
             setLocalMicDb(-60);
             setLocalMicLevel(0);
@@ -361,13 +511,36 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       console.warn('[AudioAnalyzer] Local mic analyzer setup failed:', err);
     }
 
+    const handleGlobalResume = () => {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+    };
+    window.addEventListener('click', handleGlobalResume);
+    window.addEventListener('touchstart', handleGlobalResume);
+
     return () => {
       if (animId) cancelAnimationFrame(animId);
+      window.removeEventListener('click', handleGlobalResume);
+      window.removeEventListener('touchstart', handleGlobalResume);
       if (audioCtx) {
         audioCtx.close().catch(() => {});
       }
     };
   }, [localStream, isMuted]);
+
+  // Unprompted auto-detection of silent microphone during call
+  useEffect(() => {
+    if (connectionStage !== 'established' || isMuted || isProbingMics) return;
+
+    if (localMicDb <= -58) {
+      const timer = setTimeout(() => {
+        console.log('[Diagnostic][AutoMic] Detected silent mic signal during active call. Auto-probing candidate hardware mics...');
+        autoProbeAndSwitchBestMic();
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [localMicDb, connectionStage, isMuted, isProbingMics, allMics.length]);
 
   // Real-time Remote Audio Streams Level Analyzer
   useEffect(() => {
@@ -395,6 +568,10 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         const updateRemoteLevel = () => {
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+          }
+
           analyser.getByteFrequencyData(dataArray);
           let sum = 0;
           for (let i = 0; i < dataArray.length; i++) {
@@ -413,8 +590,18 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       console.warn('[AudioAnalyzer] Remote audio analyzer setup failed:', err);
     }
 
+    const handleGlobalResume = () => {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+    };
+    window.addEventListener('click', handleGlobalResume);
+    window.addEventListener('touchstart', handleGlobalResume);
+
     return () => {
       if (animId) cancelAnimationFrame(animId);
+      window.removeEventListener('click', handleGlobalResume);
+      window.removeEventListener('touchstart', handleGlobalResume);
       if (audioCtx) {
         audioCtx.close().catch(() => {});
       }
@@ -424,19 +611,23 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
   const handleResetMicAndAudio = async () => {
     try {
       console.log('[Diagnostic] Re-syncing local microphone and WebRTC audio channels...');
-      if (localStream) {
+      await refreshMicrophoneDevices();
+
+      if ((window as any).__callAudioContext && (window as any).__callAudioContext.state === 'suspended') {
+        await (window as any).__callAudioContext.resume().catch(() => {});
+      }
+
+      if (allMics.length > 1) {
+        await autoProbeAndSwitchBestMic();
+      } else if (localStream) {
         localStream.getAudioTracks().forEach(t => {
           t.enabled = true;
-          console.log(`[Diagnostic] Mic track enabled state: ${t.enabled}, readyState: ${t.readyState}`);
         });
-      }
-      setIsMuted(false);
-      
-      const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
-      if (localStream) {
+        const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
         await webrtcService.publishLocalStream(localStream, computedRoomId);
       }
-      setTestSoundNotice({ message: '🎤 Microphone & Audio Pipeline Re-synced!', type: 'sent' });
+      setIsMuted(false);
+      setTestSoundNotice({ message: '🎤 Microphone & Media Pipeline Re-synced!', type: 'sent' });
       setTimeout(() => setTestSoundNotice(null), 3000);
     } catch (err) {
       console.error('[Diagnostic] Re-sync mic error:', err);
@@ -673,6 +864,16 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
 
         setLocalStream(stream);
 
+        // Enumerate microphones after getUserMedia approval and track active mic ID
+        refreshMicrophoneDevices();
+        const activeTrack = stream.getAudioTracks()[0];
+        if (activeTrack) {
+          const trackSettings = activeTrack.getSettings();
+          if (trackSettings.deviceId) {
+            setActiveMicId(trackSettings.deviceId);
+          }
+        }
+
         const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
         webrtcService.startRoomHeartbeat(computedRoomId);
 
@@ -902,7 +1103,9 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
     const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
 
     const telemetryTimer = setInterval(() => {
-      const activePeerIds = Object.keys(remoteStreams);
+      const activePeerIds = new Set(Object.keys(remoteStreams));
+      if (userId) activePeerIds.add(userId);
+
       activePeerIds.forEach(peerId => {
         webrtcService.sendTelemetry(peerId, computedRoomId, {
           micCapturing: !isMuted && localMicLevel > 2,
@@ -1252,8 +1455,8 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       {/* Intelligent Bi-Directional Health & Diagnostic Monitor Bar */}
       <div className="bg-slate-900/95 backdrop-blur-xl border-y border-white/10 px-3 md:px-6 py-2 flex flex-wrap items-center justify-between gap-2.5 text-[11px] font-mono z-20 shrink-0 shadow-md">
         <div className="flex items-center gap-2 md:gap-4 flex-wrap">
-          {/* Local Mic dB Level */}
-          <div className="flex items-center gap-2 bg-slate-950/80 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-inner">
+          {/* Local Mic dB Level & Interactive Hardware Selector */}
+          <div className="relative flex items-center gap-2 bg-slate-950/80 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-inner">
             <Icon name={isMuted ? "mic_off" : "mic"} className={cn("text-xs sm:text-sm", isMuted ? "text-red-400" : localMicLevel > 10 ? "text-emerald-400 animate-pulse" : "text-amber-400")} />
             <span className="text-white/60 font-bold uppercase tracking-wider text-[10px]">Your Mic:</span>
             <span className={cn("font-black text-[11px]", isMuted ? "text-red-400" : localMicDb > -45 ? "text-emerald-400" : "text-amber-300")}>
@@ -1267,6 +1470,97 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
                 />
               </div>
             )}
+
+            {/* Microphone Hardware Selector Button */}
+            <button
+              onClick={() => {
+                refreshMicrophoneDevices();
+                setShowMicDropdown(prev => !prev);
+              }}
+              className="ml-1 bg-white/5 hover:bg-white/15 text-white/80 hover:text-white px-2 py-0.5 rounded-lg border border-white/10 text-[9px] uppercase font-bold flex items-center gap-1 transition-all"
+              title="Select / Switch Microphone Hardware"
+            >
+              <span className="max-w-[80px] sm:max-w-[120px] truncate">
+                {allMics.find(m => m.deviceId === activeMicId)?.label || (allMics.length > 0 ? `${allMics.length} Mics` : 'Mics')}
+              </span>
+              <Icon name="expand_more" className="text-xs text-white/50" />
+            </button>
+
+            {/* Microphone Selector Dropdown Popover */}
+            <AnimatePresence>
+              {showMicDropdown && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute top-full left-0 mt-2 w-72 bg-slate-900 border border-white/20 rounded-2xl p-3 shadow-2xl z-50 text-white backdrop-blur-2xl"
+                >
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <Icon name="settings_voice" className="text-xs" />
+                      Detected Hardware Mics ({allMics.length})
+                    </span>
+                    <button
+                      onClick={() => setShowMicDropdown(false)}
+                      className="text-white/50 hover:text-white p-1 rounded-lg hover:bg-white/10"
+                    >
+                      <Icon name="close" className="text-xs" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                    {allMics.length === 0 ? (
+                      <div className="text-[10px] text-white/50 py-2 text-center italic">
+                        Scanning for audio input hardware...
+                      </div>
+                    ) : (
+                      allMics.map((mic, idx) => {
+                        const isSelected = mic.deviceId === activeMicId;
+                        return (
+                          <button
+                            key={mic.deviceId || idx}
+                            onClick={() => {
+                              switchMicrophoneDevice(mic.deviceId, 'Manual Switch');
+                              setShowMicDropdown(false);
+                            }}
+                            className={cn(
+                              "w-full text-left px-2.5 py-2 rounded-xl text-[11px] flex items-center justify-between transition-all border",
+                              isSelected 
+                                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold" 
+                                : "bg-slate-950/60 hover:bg-slate-800 border-white/5 text-slate-300"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 truncate pr-2">
+                              <Icon name="mic" className={cn("text-xs shrink-0", isSelected ? "text-emerald-400" : "text-white/40")} />
+                              <span className="truncate">{mic.label || `Microphone ${idx + 1}`}</span>
+                            </div>
+                            {isSelected && (
+                              <span className="text-[9px] bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-mono shrink-0">
+                                Active
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="pt-2 mt-2 border-t border-white/10 flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        autoProbeAndSwitchBestMic();
+                        setShowMicDropdown(false);
+                      }}
+                      disabled={isProbingMics}
+                      className="w-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                    >
+                      <Icon name="auto_fix_high" className={cn("text-xs", isProbingMics && "animate-spin")} />
+                      <span>{isProbingMics ? 'Testing Mics...' : '⚡ Probe & Select Active Mic'}</span>
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Partner Audio dB Level */}
@@ -1285,10 +1579,10 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
           </div>
 
           {/* Bi-Directional Telemetry Status: Partner Mic & Speaker Verification */}
-          {Object.keys(remoteStreams).length > 0 && (() => {
-            const partnerId = Object.keys(remoteStreams)[0];
-            const pTelem = peerTelemetry[partnerId];
-            const partnerName = participants.find(p => p.id === partnerId)?.name || 'Peer';
+          {(Object.keys(remoteStreams).length > 0 || !!userId) && (() => {
+            const partnerId = Object.keys(remoteStreams)[0] || userId;
+            const pTelem = (partnerId ? peerTelemetry[partnerId] : null) || (userId ? peerTelemetry[userId] : null);
+            const partnerName = (partnerId ? participants.find(p => p.id === partnerId)?.name : null) || targetUser?.name || 'Partner';
             return (
               <div className="flex items-center gap-2 bg-slate-950/90 px-3 py-1.5 rounded-xl border border-primary/30 text-[10px] uppercase font-mono tracking-wider text-white">
                 <span className="text-primary font-bold">Partner Check ({partnerName}):</span>
