@@ -219,6 +219,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
   const [callAttempt, setCallAttempt] = useState(0);
   
   const [showAddFriend, setShowAddFriend] = useState(false);
+  const [showEndCallConfirm, setShowEndCallConfirm] = useState(false);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showRings, setShowRings] = useState(true);
@@ -228,6 +229,15 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
   const [testSoundNotice, setTestSoundNotice] = useState<{ message: string; type: 'sent' | 'received' } | null>(null);
   const lastPingTimeRef = useRef<number>(0);
   const pingSoundsEnabledRef = useRef(true);
+
+  const handleRequestEndCall = () => {
+    setShowEndCallConfirm(true);
+  };
+
+  const handleConfirmEndCall = () => {
+    setShowEndCallConfirm(false);
+    onClose();
+  };
 
   useEffect(() => {
     pingSoundsEnabledRef.current = pingSoundsEnabled;
@@ -945,8 +955,9 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       <header className="px-6 md:px-10 py-5 md:py-8 flex items-center justify-between z-20 shrink-0">
         <div className="flex items-center gap-3 md:gap-5">
           <button 
-            onClick={onClose} 
+            onClick={handleRequestEndCall} 
             className="size-9 md:size-12 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all border border-white/5 group"
+            title="Leave / End Call"
           >
             <Icon name="arrow_back" className="text-sm md:text-base group-hover:-translate-x-1 transition-transform" />
           </button>
@@ -1510,8 +1521,9 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
           )}
           
           <button 
-            onClick={onClose}
+            onClick={handleRequestEndCall}
             className="size-12 sm:size-16 md:size-20 rounded-full bg-red-600 text-white flex items-center justify-center shadow-2xl shadow-red-600/40 active:scale-90 hover:scale-105 hover:brightness-110 transition-all shrink-0"
+            title="End Call"
           >
             <Icon name="call_end" className="text-xl sm:text-2xl md:text-4xl" />
           </button>
@@ -1855,6 +1867,46 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
                     );
                   })
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* End Call Confirmation Modal Overlay */}
+      <AnimatePresence>
+        {showEndCallConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 10 }}
+              className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl text-center space-y-6"
+            >
+              <div className="size-16 sm:size-20 rounded-full bg-red-500/10 border border-red-500/20 text-red-500 flex items-center justify-center mx-auto shadow-inner">
+                <Icon name="call_end" className="text-3xl sm:text-4xl" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-xl sm:text-2xl font-black uppercase tracking-tight italic text-white">End Call?</h3>
+                <p className="text-xs sm:text-sm text-white/60 leading-relaxed font-medium">
+                  Are you sure you want to end this active {type === 'video' ? 'video' : 'voice'} call session?
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowEndCallConfirm(false)}
+                  className="flex-1 py-3 px-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmEndCall}
+                  className="flex-1 py-3 px-4 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-red-600/30 transition-all active:scale-95"
+                >
+                  End Call
+                </button>
               </div>
             </motion.div>
           </div>
