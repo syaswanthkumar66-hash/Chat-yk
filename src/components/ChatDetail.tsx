@@ -2220,6 +2220,22 @@ export const ChatDetail = () => {
                     >
                       <Icon name="videocam" />
                     </button>
+                    <button 
+                      onClick={() => {
+                        if (!canStartCalls) return;
+                        if (chat?.isGroup) {
+                          setActiveGroupCall({ type: 'walkie-talkie', groupId: chat.id, callId: generateCallId('call_group') });
+                        } else {
+                          const userId = otherParticipantId;
+                          if (userId) setActiveGroupCall({ type: 'walkie-talkie', userId, callId: generateCallId('call_p2p') });
+                        }
+                      }}
+                      disabled={!canStartCalls}
+                      className={`size-9 sm:size-11 rounded-xl sm:rounded-2xl bg-white flex items-center justify-center transition-all active:scale-95 border border-white shadow-sm ${!canStartCalls ? 'opacity-50 grayscale cursor-not-allowed' : 'text-amber-500 hover:bg-amber-500 hover:text-white'}`}
+                      title="Walkie Talkie"
+                    >
+                      <Icon name="graphic_eq" />
+                    </button>
 
                     <div className="relative">
                       <button 

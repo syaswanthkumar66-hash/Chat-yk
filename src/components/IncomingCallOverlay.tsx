@@ -13,7 +13,7 @@ const generateInitialsAvatar = (id: string, name: string) => {
 };
 
 interface IncomingCallOverlayProps {
-  incomingCall: { type: 'voice' | 'video'; roomId: string; from: string };
+  incomingCall: { type: 'voice' | 'video' | 'walkie-talkie'; roomId: string; from: string };
   onAccept: () => void;
   onDecline: () => void;
 }

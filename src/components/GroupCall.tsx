@@ -285,7 +285,7 @@ const playTestSpeakerChime = (speakerMode: 'speaker' | 'earpiece' = 'speaker') =
 };
 
 
-export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inline }: { groupId?: string, userId?: string, roomId?: string, callId?: string, type: 'voice' | 'video', onClose: () => void, inline?: boolean }) => {
+export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inline }: { groupId?: string, userId?: string, roomId?: string, callId?: string, type: 'voice' | 'video' | 'walkie-talkie', onClose: () => void, inline?: boolean }) => {
   const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
     removedFriendIds: s.removedFriendIds,
     socket: s.socket,
@@ -295,7 +295,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
   }), shallowEqual);
 
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(type === 'walkie-talkie');
   const [isVideoOff, setIsVideoOff] = useState(type === 'voice');
   const [duration, setDuration] = useState(0);
   const [connectionStage, setConnectionStage] = useState<'establishing' | 'testing_ping' | 'established'>('establishing');
@@ -1862,7 +1862,38 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
 
       {/* Main Video Area */}
       <main className="flex-1 relative overflow-y-auto no-scrollbar py-4 md:py-8 px-4 md:px-8">
-        {isOneOnOne ? (
+        {type === 'walkie-talkie' ? (
+          <div className="min-h-full flex flex-col items-center justify-center gap-12 relative w-full">
+            <div className="text-center mb-8">
+              <Icon name="graphic_eq" className="text-6xl text-amber-500 mb-4 animate-pulse" />
+              <h2 className="text-3xl font-black uppercase tracking-widest text-white">Walkie Talkie Mode</h2>
+              <p className="text-white/50 text-sm tracking-widest mt-2 uppercase font-mono">Hold button below to transmit</p>
+            </div>
+            
+            <button 
+              onMouseDown={() => startPTT()}
+              onMouseUp={() => stopPTT()}
+              onMouseLeave={() => isRecordingPTT && stopPTT()}
+              onTouchStart={(e) => { e.preventDefault(); startPTT(); }}
+              onTouchEnd={(e) => { e.preventDefault(); stopPTT(); }}
+              className={`size-48 sm:size-64 rounded-full flex flex-col items-center justify-center transition-all relative select-none shrink-0 shadow-2xl active:scale-95 ${
+                isRecordingPTT 
+                  ? 'bg-amber-500 text-white shadow-amber-500/50 ring-8 ring-amber-500/30' 
+                  : 'bg-slate-800 text-white/50 border-4 border-slate-700 hover:bg-slate-700'
+              }`}
+            >
+              <Icon name="mic" className={`text-6xl sm:text-8xl ${isRecordingPTT ? 'animate-bounce' : ''}`} />
+              <span className="mt-4 font-black tracking-widest uppercase text-xs sm:text-sm">PUSH TO TALK</span>
+            </button>
+            
+            {incomingPTT && (
+              <div className="absolute top-10 bg-amber-500/20 text-amber-500 px-6 py-3 rounded-full border border-amber-500/30 animate-pulse flex items-center gap-3">
+                <Icon name="volume_up" />
+                <span className="font-bold tracking-widest uppercase text-xs">Receiving from {incomingPTT.fromName}...</span>
+              </div>
+            )}
+          </div>
+        ) : isOneOnOne ? (
           /* One-on-One View */
           <div className="min-h-full flex flex-col items-center justify-center gap-6 md:gap-12 relative w-full">
             {type === 'video' ? (
@@ -2207,6 +2238,8 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
       {/* Footer Controls */}
       <footer className="p-3 sm:p-6 md:p-8 z-30 shrink-0 flex justify-center w-full max-w-full overflow-hidden">
         <div className="bg-slate-900/80 backdrop-blur-3xl px-3 sm:px-6 py-2.5 sm:py-3.5 rounded-full border border-white/10 shadow-2xl flex items-center gap-2 sm:gap-4 md:gap-8 overflow-x-auto max-w-full no-scrollbar shrink-0">
+          {type !== 'walkie-talkie' && (
+            <>
           <button 
             onClick={() => setIsMuted(!isMuted)}
             className={cn(
@@ -2248,6 +2281,9 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
               <Icon name={isVideoOff ? 'videocam_off' : 'videocam'} className="text-base sm:text-lg md:text-2xl" />
             </button>
           )}
+            </>
+          )}
+
           
           <button 
             onClick={handleRequestEndCall}

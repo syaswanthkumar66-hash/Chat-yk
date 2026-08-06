@@ -154,10 +154,10 @@ interface AppState {
     messageId: string;
   }>;
   setIncomingMediaUpload: (senderId: string, data: { percent: number; mediaType: string; fileName?: string; messageId: string } | null) => void;
-  activeGroupCall: { type: 'voice' | 'video', groupId?: string, userId?: string, roomId?: string } | null;
-  setActiveGroupCall: (call: { type: 'voice' | 'video', groupId?: string, userId?: string, roomId?: string } | null) => void;
-  incomingCall: { type: 'voice' | 'video', roomId: string, from: string } | null;
-  setIncomingCall: (call: { type: 'voice' | 'video', roomId: string, from: string } | null) => void;
+  activeGroupCall: { type: 'voice' | 'video' | 'walkie-talkie' | 'walkie-talkie', groupId?: string, userId?: string, roomId?: string } | null;
+  setActiveGroupCall: (call: { type: 'voice' | 'video' | 'walkie-talkie', groupId?: string, userId?: string, roomId?: string } | null) => void;
+  incomingCall: { type: 'voice' | 'video' | 'walkie-talkie', roomId: string, from: string } | null;
+  setIncomingCall: (call: { type: 'voice' | 'video' | 'walkie-talkie', roomId: string, from: string } | null) => void;
   blockedUserIds: string[];
   removedFriendIds: string[];
   removeFriend: (userId: string) => void;
@@ -2148,7 +2148,7 @@ export const useAppStore = create<AppState>((set) => ({
       });
 
       // 9. incoming_call
-      sock.off('incoming_call').on('incoming_call', (data: { roomId: string, type: 'voice' | 'video', from: string }) => {
+      sock.off('incoming_call').on('incoming_call', (data: { roomId: string, type: 'voice' | 'video' | 'walkie-talkie', from: string }) => {
         set((state) => {
           if (!state.activeGroupCall && !state.incomingCall) {
             return { incomingCall: { type: data.type, roomId: data.roomId, from: data.from } };
