@@ -759,6 +759,7 @@ export const ChatDetail = () => {
     chats,
     typingUsers,
     incomingMediaUploads,
+    systemSettings,
     selfTypingChats,
     sendMessage,
     users,
@@ -784,6 +785,7 @@ export const ChatDetail = () => {
     chats: s.chats,
     typingUsers: s.typingUsers,
     incomingMediaUploads: s.incomingMediaUploads,
+    systemSettings: s.systemSettings,
     selfTypingChats: s.selfTypingChats,
     sendMessage: s.sendMessage,
     users: s.users,
@@ -2192,6 +2194,10 @@ export const ChatDetail = () => {
                   <div className="flex gap-1.5 sm:gap-2 relative flex-shrink-0">
                     <button 
                       onClick={() => {
+                        if (!systemSettings?.enableVoiceCalls || (systemSettings?.versionControl?.isPublishedToAll === false && (!user || !systemSettings?.versionControl?.betaUserIds?.includes(user.id)))) {
+                           alert('Voice calls are coming soon!');
+                           return;
+                        }
                         if (!canStartCalls) return;
                         if (chat?.isGroup) {
                           setActiveGroupCall({ type: 'voice', groupId: chat.id, callId: generateCallId('call_group') });
@@ -2207,6 +2213,10 @@ export const ChatDetail = () => {
                     </button>
                     <button 
                       onClick={() => {
+                        if (!systemSettings?.enableVideoCalls || (systemSettings?.versionControl?.isPublishedToAll === false && (!user || !systemSettings?.versionControl?.betaUserIds?.includes(user.id)))) {
+                           alert('Video calls are coming soon!');
+                           return;
+                        }
                         if (!canStartCalls) return;
                         if (chat?.isGroup) {
                           setActiveGroupCall({ type: 'video', groupId: chat.id, callId: generateCallId('call_group') });
@@ -2222,6 +2232,10 @@ export const ChatDetail = () => {
                     </button>
                     <button 
                       onClick={() => {
+                        if (!systemSettings?.enableVoiceCalls || (systemSettings?.versionControl?.isPublishedToAll === false && (!user || !systemSettings?.versionControl?.betaUserIds?.includes(user.id)))) {
+                           alert('Voice calls are coming soon!');
+                           return;
+                        }
                         if (!canStartCalls) return;
                         if (chat?.isGroup) {
                           setActiveGroupCall({ type: 'walkie-talkie', groupId: chat.id, callId: generateCallId('call_group') });

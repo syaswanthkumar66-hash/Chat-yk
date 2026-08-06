@@ -53,7 +53,8 @@ export const SocialLayout = () => {
   const [showDevicesDropdown, setShowDevicesDropdown] = useState(false);
   const [showDeviceSyncFlow, setShowDeviceSyncFlow] = useState(false);
   const { 
-    setMode, 
+    setMode,
+    systemSettings, 
     activeChatId, 
     setActiveChatId, 
     activeRecipientId, 
@@ -96,6 +97,7 @@ export const SocialLayout = () => {
     performCatchUpSync
   } = useStore(s => ({
     setMode: s.setMode,
+    systemSettings: s.systemSettings,
     activeChatId: s.activeChatId,
     setActiveChatId: s.setActiveChatId,
     activeRecipientId: s.activeRecipientId,
@@ -390,6 +392,17 @@ export const SocialLayout = () => {
                 >
                   <Icon name="security" className="text-sm sm:text-base" />
                 </button>
+              )}
+              {systemSettings?.versionControl?.latestVersion !== 'v2.1.0' && user && systemSettings?.versionControl?.betaUserIds?.includes(user.id) && (
+                <div className="hidden sm:flex items-center px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700">
+                  <Icon name="new_releases" className="text-sm mr-2" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Beta Access</span>
+                </div>
+              )}
+              {systemSettings?.versionControl?.latestVersion && systemSettings?.versionControl?.isPublishedToAll && (
+                 <div className="hidden sm:flex items-center px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700">
+                  <span className="text-[10px] font-black uppercase tracking-widest">{systemSettings.versionControl.latestVersion}</span>
+                </div>
               )}
               <button 
                 onClick={() => useAppStore.getState().logout()}

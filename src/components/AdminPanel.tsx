@@ -78,6 +78,7 @@ const ADMIN_TABS = [
   { id: 'integrations', label: 'Integrations', icon: 'hub' },
   { id: 'security', label: 'Security', icon: 'security' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
+  { id: 'version_control', label: 'Version Control', icon: 'new_releases' },
   { id: 'website', label: 'Website', icon: 'language' },
   { id: 'test_mode', label: 'Test Mode', icon: 'speed' },
   { id: 'call_tester', label: 'Call Tester', icon: 'video_call' },
@@ -94,7 +95,7 @@ const FLAG_OPTIONS = [
 ];
 
 export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'helpdesk' | 'user_manage' | 'users' | 'broadcast' | 'integrations' | 'security' | 'settings' | 'website' | 'test_mode' | 'call_tester' | 'walkie_talkie'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'helpdesk' | 'user_manage' | 'users' | 'broadcast' | 'integrations' | 'security' | 'settings' | 'version_control' | 'website' | 'test_mode' | 'call_tester' | 'walkie_talkie'>('monitor');
   const [timeframe, setTimeframe] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | 'all_time'>('today');
   const [systemHealth, setSystemHealth] = useState(98);
   const { 
@@ -3341,6 +3342,134 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
           </motion.div>
         )}
 
+        {activeTab === 'version_control' && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-10"
+          >
+            <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 items-start lg:items-end justify-between">
+              <div className="space-y-2 sm:space-y-3">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="size-10 sm:size-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                    <Icon name="new_releases" className="text-xl sm:text-2xl" />
+                  </div>
+                  <h3 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 uppercase italic tracking-tighter">Version Control</h3>
+                </div>
+                <p className="text-[9px] sm:text-[11px] font-black text-neutral-muted uppercase tracking-[0.3em] sm:tracking-[0.4em] pl-1">Manage global app version and rollouts</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+              <div className="space-y-6 sm:space-y-10">
+                <Card className="p-6 sm:p-10 space-y-8 sm:space-y-12 bg-white shadow-2xl shadow-indigo-500/5 border-none rounded-2xl sm:rounded-[3rem]">
+                  <div className="space-y-6 sm:space-y-8">
+                    <h4 className="text-lg sm:text-xl font-black text-slate-900 uppercase italic tracking-tight">Global Rollout</h4>
+                    
+                    <div className="flex items-start justify-between p-4 sm:p-6 bg-indigo-500/5 rounded-2xl sm:rounded-3xl">
+                      <div className="flex gap-3 sm:gap-4">
+                        <div className="size-8 sm:size-10 rounded-lg sm:rounded-xl bg-white shadow-sm flex items-center justify-center text-indigo-500">
+                          <Icon name="rocket_launch" className="text-sm sm:text-base" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] sm:text-[12px] font-black text-slate-900 uppercase italic tracking-tight">Publish to All</p>
+                          <p className="text-[8px] sm:text-[9px] text-neutral-muted font-bold uppercase tracking-widest leading-relaxed">Toggle to enable the latest version for all users on the protocol.</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          updateSystemSettings({
+                            versionControl: {
+                              ...systemSettings.versionControl,
+                              isPublishedToAll: !systemSettings.versionControl.isPublishedToAll
+                            }
+                          });
+                        }}
+                        className={cn(
+                          "w-10 h-5 sm:w-12 sm:h-6 rounded-full transition-all relative mt-1 shrink-0",
+                          systemSettings.versionControl.isPublishedToAll ? "bg-indigo-500 shadow-lg shadow-indigo-500/20" : "bg-indigo-500/10"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-1/2 -translate-y-1/2 size-4 sm:size-5 rounded-full bg-white transition-all shadow-sm",
+                          systemSettings.versionControl.isPublishedToAll ? "left-[calc(100%-2px)] -translate-x-full" : "left-[2px]"
+                        )} />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] sm:text-[11px] font-black text-slate-900 uppercase tracking-widest pl-2">Latest Version ID</label>
+                      <input 
+                        type="text"
+                        value={systemSettings.versionControl.latestVersion}
+                        onChange={(e) => {
+                          updateSystemSettings({
+                            versionControl: {
+                              ...systemSettings.versionControl,
+                              latestVersion: e.target.value
+                            }
+                          });
+                        }}
+                        className="w-full bg-slate-50 border-none rounded-xl sm:rounded-2xl px-4 py-3 sm:py-4 text-sm font-mono focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                        placeholder="e.g. v2.1.0-beta"
+                      />
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              <div className="space-y-6 sm:space-y-10">
+                <Card className="p-6 sm:p-10 space-y-8 sm:space-y-12 bg-white shadow-2xl shadow-indigo-500/5 border-none rounded-2xl sm:rounded-[3rem] h-full">
+                  <div className="space-y-6 sm:space-y-8">
+                    <h4 className="text-lg sm:text-xl font-black text-slate-900 uppercase italic tracking-tight">Beta Access</h4>
+                    <p className="text-[10px] sm:text-[11px] font-bold text-neutral-muted uppercase tracking-widest leading-relaxed">
+                      Select users to grant early access to the latest version before it is published globally.
+                    </p>
+
+                    <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                      {users.map(u => {
+                        const hasAccess = systemSettings.versionControl.betaUserIds.includes(u.id);
+                        return (
+                          <div key={'beta-' + u.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <Avatar src={u.avatar} fallbackName={u.name} className="size-8" />
+                              <div>
+                                <p className="text-sm font-bold text-slate-900">{u.name}</p>
+                                <p className="text-[10px] text-neutral-muted font-mono">{u.email}</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const newIds = hasAccess 
+                                  ? systemSettings.versionControl.betaUserIds.filter(id => id !== u.id)
+                                  : [...systemSettings.versionControl.betaUserIds, u.id];
+                                updateSystemSettings({
+                                  versionControl: {
+                                    ...systemSettings.versionControl,
+                                    betaUserIds: newIds
+                                  }
+                                });
+                              }}
+                              className={cn(
+                                "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                                hasAccess 
+                                  ? "bg-indigo-500/10 text-indigo-600 hover:bg-indigo-500/20" 
+                                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                              )}
+                            >
+                              {hasAccess ? 'Revoke Access' : 'Grant Beta'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {activeTab === 'settings' && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -3398,6 +3527,20 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                           active: true,
                           icon: 'trending_up'
                         },
+                        { 
+                          id: 'enableVoiceCalls', 
+                          label: 'Voice Calls', 
+                          desc: 'Enable voice calls across the protocol (Coming Soon)',
+                          active: systemSettings.enableVoiceCalls,
+                          icon: 'call'
+                        },
+                        { 
+                          id: 'enableVideoCalls', 
+                          label: 'Video Calls', 
+                          desc: 'Enable video calls across the protocol (Coming Soon)',
+                          active: systemSettings.enableVideoCalls,
+                          icon: 'videocam'
+                        },
                       ].map((setting) => (
                         <div key={`protocol-setting-${setting.id}`} className="flex items-start justify-between p-4 sm:p-6 bg-primary/5 rounded-2xl sm:rounded-3xl group hover:bg-primary/10 transition-all">
                           <div className="flex gap-3 sm:gap-4">
@@ -3411,8 +3554,11 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                           </div>
                           <button 
                             onClick={() => {
-                              if (setting.id === 'maintenanceMode' || setting.id === 'allowRegistration') {
+                              if (setting.id === 'maintenanceMode' || setting.id === 'allowRegistration' || setting.id === 'enableVoiceCalls' || setting.id === 'enableVideoCalls') {
                                 updateSystemSettings({ [setting.id]: !setting.active });
+                                if (setting.id === 'enableVoiceCalls' || setting.id === 'enableVideoCalls') {
+                                  alert(`${setting.label} feature is coming soon!`);
+                                }
                               }
                             }}
                             className={cn(

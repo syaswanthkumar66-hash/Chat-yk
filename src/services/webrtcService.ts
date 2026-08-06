@@ -605,6 +605,11 @@ class WebRTCService {
           return;
         }
 
+        if (message.type === 'ptt_state') {
+          window.dispatchEvent(new CustomEvent('webrtc_data_message', { detail: { from: peerId, message } }));
+          return;
+        }
+
         // 1. Handle Sender feedback (ACK, NACK, ACK of transfer)
         if (message.type === 'transfer_chunk_ack') {
           const activeTx = this.activeOutgoingTransfers.get(message.transferId);

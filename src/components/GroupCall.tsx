@@ -686,70 +686,22 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
 
   const startPTT = async () => {
     try {
-      const stream = localStream || await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-      let options: any = {};
-      const mimeTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-        'audio/aac',
-        'audio/wav'
-      ];
-      
-      let selectedMimeType = '';
-      for (const type of mimeTypes) {
-        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
-          options = { mimeType: type };
-          selectedMimeType = type;
-          break;
-        }
-      }
-      
-      const recorder = new MediaRecorder(stream, options);
-      pttMediaRecorder.current = recorder;
-      pttChunks.current = [];
-      
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          pttChunks.current.push(e.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        if (pttChunks.current.length === 0) return;
-        const finalMime = selectedMimeType || 'audio/webm';
-        const blob = new Blob(pttChunks.current, { type: finalMime });
-        const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
-        console.log(`[PTT] Finished recording live PTT voice note. Size: ${blob.size} bytes. Broadcasting to room: ${computedRoomId}`);
-        
-        // Broadcast over WebRTC Data Channel
-        await webrtcService.broadcastAudioChunks(computedRoomId, blob, finalMime);
-        
-        diagnosticLogger.log('webrtc', 'ptt_broadcast_done', `Finished broadcasting live P2P voice note (${(blob.size / 1024).toFixed(1)} KB) to all connected peers.`, undefined, computedRoomId);
-      };
-
-      recorder.start();
       setIsRecordingPTT(true);
+      setIsMuted(false); // Ultra low-latency WebRTC live stream
       
       const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
-      diagnosticLogger.log('webrtc', 'ptt_started', `Started recording live voice note via P2P data channels. Speak now...`, undefined, computedRoomId);
+      webrtcService.broadcastDataChannelMessage(computedRoomId, { type: 'ptt_state', state: 'start' });
+      diagnosticLogger.log('webrtc', 'ptt_started', `Started live WebRTC audio transmission (PTT). Speak now...`, undefined, computedRoomId);
     } catch (err: any) {
-      console.error("Failed to start PTT voice recording:", err);
+      console.error("Failed to start PTT transmission:", err);
     }
   };
 
   const stopPTT = () => {
-    if (pttMediaRecorder.current && pttMediaRecorder.current.state !== 'inactive') {
-      pttMediaRecorder.current.stop();
-    }
     setIsRecordingPTT(false);
+    setIsMuted(true);
+    const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
+    webrtcService.broadcastDataChannelMessage(computedRoomId, { type: 'ptt_state', state: 'stop' });
   };
 
   const togglePTT = () => {
@@ -761,34 +713,25 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
   };
 
   useEffect(() => {
-    const handleAudioReceived = (e: any) => {
-      const { from, url } = e.detail;
-      const sender = participantsRef.current.find(p => p.id === from) || usersRef.current.find(u => u.id === from);
-      const senderName = sender?.displayName || sender?.name || `User ${from.substring(0, 4)}`;
-      
-      setIncomingPTT({
-        url,
-        fromName: senderName,
-        fromId: from
-      });
-
-      const audio = new Audio(url);
-      audio.onended = () => {
-        setIncomingPTT(null);
-      };
-      audio.onerror = () => {
-        setIncomingPTT(null);
-      };
-      audio.play().catch(playErr => {
-        console.warn("Auto-play failed (blocked by browser autoplay policy):", playErr);
-        // Still clear after a brief duration
-        setTimeout(() => setIncomingPTT(null), 3500);
-      });
+    const handleDataChannelMessage = (e: any) => {
+      const { from, message } = e.detail;
+      if (message && message.type === 'ptt_state') {
+        if (message.state === 'start') {
+          const sender = participantsRef.current.find(p => p.id === from) || usersRef.current.find(u => u.id === from);
+          const senderName = sender?.displayName || sender?.name || `User ${from.substring(0, 4)}`;
+          setIncomingPTT({
+            url: '',
+            fromName: senderName,
+            fromId: from
+          });
+        } else if (message.state === 'stop') {
+          setIncomingPTT(null);
+        }
+      }
     };
-
-    window.addEventListener('webrtc_audio_received', handleAudioReceived);
+    window.addEventListener('webrtc_data_message', handleDataChannelMessage);
     return () => {
-      window.removeEventListener('webrtc_audio_received', handleAudioReceived);
+      window.removeEventListener('webrtc_data_message', handleDataChannelMessage);
     };
   }, []);
 
@@ -917,12 +860,16 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
 
         await webrtcService.publishLocalStream(stream, computedRoomId);
         if (mounted) {
-          setConnectionStage('testing_ping');
-          setTimeout(() => {
-            if (mounted) {
-              setConnectionStage('established');
-            }
-          }, 2500);
+          if (type === 'walkie-talkie') {
+             setConnectionStage('established');
+          } else {
+             setConnectionStage('testing_ping');
+             setTimeout(() => {
+               if (mounted) {
+                 setConnectionStage('established');
+               }
+             }, 400); // reduced delay significantly for other calls too
+          }
         }
 
         if (socket && mounted) {

@@ -211,6 +211,13 @@ interface AppState {
     allowRegistration: boolean;
     maxFileSize: number;
     activeFeatures: string[];
+    enableVoiceCalls: boolean;
+    enableVideoCalls: boolean;
+    versionControl: {
+      latestVersion: string;
+      isPublishedToAll: boolean;
+      betaUserIds: string[];
+    };
   };
   updateSystemSettings: (settings: Partial<AppState['systemSettings']>) => void;
   onlineUserIds: string[];
@@ -3066,7 +3073,14 @@ export const useAppStore = create<AppState>((set) => ({
     maintenanceMode: false,
     allowRegistration: true,
     maxFileSize: 100, // MB
-    activeFeatures: ['social', 'fileshare', 'calls']
+    activeFeatures: ['social', 'fileshare', 'calls'],
+    enableVoiceCalls: true,
+    enableVideoCalls: true,
+    versionControl: {
+      latestVersion: 'v2.1.0-beta',
+      isPublishedToAll: true,
+      betaUserIds: []
+    }
   },
   updateSystemSettings: (settings) => set((state) => ({
     systemSettings: { ...state.systemSettings, ...settings }
