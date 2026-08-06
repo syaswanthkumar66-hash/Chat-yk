@@ -1,5 +1,6 @@
 import { WebRTCConnectivityTester, Admin1On1CallTester } from './WebRTCConnectivityTester';
 import { AdminCallTester } from './AdminCallTester';
+import { AdminWalkieTalkieTester } from './AdminWalkieTalkieTester';
 import { useState, useEffect, useMemo } from 'react';
 import { Icon, Avatar, Card, Button, cn } from './UI';
 import { motion, AnimatePresence } from 'motion/react';
@@ -79,7 +80,8 @@ const ADMIN_TABS = [
   { id: 'settings', label: 'Settings', icon: 'settings' },
   { id: 'website', label: 'Website', icon: 'language' },
   { id: 'test_mode', label: 'Test Mode', icon: 'speed' },
-  { id: 'call_tester', label: 'Call Tester', icon: 'video_call' }
+  { id: 'call_tester', label: 'Call Tester', icon: 'video_call' },
+  { id: 'walkie_talkie', label: 'Walkie Talkie', icon: 'graphic_eq' }
 ];
 
 const FLAG_OPTIONS = [
@@ -92,7 +94,7 @@ const FLAG_OPTIONS = [
 ];
 
 export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'helpdesk' | 'user_manage' | 'users' | 'broadcast' | 'integrations' | 'security' | 'settings' | 'website' | 'test_mode' | 'call_tester'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'helpdesk' | 'user_manage' | 'users' | 'broadcast' | 'integrations' | 'security' | 'settings' | 'website' | 'test_mode' | 'call_tester' | 'walkie_talkie'>('monitor');
   const [timeframe, setTimeframe] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | 'all_time'>('today');
   const [systemHealth, setSystemHealth] = useState(98);
   const { 
@@ -3863,6 +3865,9 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
         )}
         {activeTab === 'call_tester' && (
           <AdminCallTester />
+        )}
+        {activeTab === 'walkie_talkie' && (
+          <AdminWalkieTalkieTester />
         )}
         </main>
       </div>

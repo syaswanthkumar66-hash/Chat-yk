@@ -11,10 +11,10 @@ export const AdminCallTester = () => {
   }), shallowEqual);
 
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
-  const [callType, setCallType] = useState<'voice' | 'video' | 'walkie-talkie'>('video');
+  const [callType, setCallType] = useState<'voice' | 'video'>('video');
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
 
-  const handleCreateCall = (type: 'voice' | 'video' | 'walkie-talkie') => {
+  const handleCreateCall = (type: 'voice' | 'video') => {
     const newCallId = 'test-call-' + Math.random().toString(36).substr(2, 9);
     setCallType(type);
     setActiveCallId(newCallId);
@@ -42,7 +42,7 @@ export const AdminCallTester = () => {
       </div>
 
       {!activeCallId ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card className="p-8 space-y-6 border-none shadow-xl shadow-primary/5 rounded-[2rem] bg-white text-center hover:scale-[1.02] transition-transform">
             <div className="mx-auto size-16 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center">
               <Icon name="videocam" className="text-3xl" />
@@ -69,18 +69,7 @@ export const AdminCallTester = () => {
             </Button>
           </Card>
 
-          <Card className="p-8 space-y-6 border-none shadow-xl shadow-primary/5 rounded-[2rem] bg-white text-center hover:scale-[1.02] transition-transform">
-            <div className="mx-auto size-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center">
-              <Icon name="graphic_eq" className="text-3xl" />
-            </div>
-            <div>
-              <h4 className="text-lg font-black uppercase text-slate-800">Walkie Talkie Test</h4>
-              <p className="text-xs text-slate-500 font-bold uppercase mt-2">Test P2P Audio Broadcast</p>
-            </div>
-            <Button onClick={() => handleCreateCall('walkie-talkie')} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-12">
-              Start Walkie Talkie
-            </Button>
-          </Card>
+
         </div>
       ) : (
         <div className="space-y-6">
