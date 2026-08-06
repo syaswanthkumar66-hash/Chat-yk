@@ -6,6 +6,7 @@ export const Hub = () => {
   const setMode = useAppStore(state => state.setMode);
   const user = useAppStore(state => state.user);
   const logout = useAppStore(state => state.logout);
+  const systemSettings = useAppStore(state => state.systemSettings);
 
   return (
     <div className="h-full bg-bg-light text-slate-900 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row">
@@ -153,6 +154,7 @@ export const Hub = () => {
           </motion.button>
 
           {/* File Share Card */}
+          {(systemSettings?.enableFileTransfer !== false || user?.isAdmin) && (
           <motion.button
             whileHover={{ y: -4, backgroundColor: 'rgba(255,255,255,0.95)' }}
             whileTap={{ scale: 0.98 }}
@@ -178,6 +180,7 @@ export const Hub = () => {
               <Icon name="arrow_forward" className="text-lg" />
             </div>
           </motion.button>
+          )}
 
           {/* Admin Panel Card if allowed */}
           {(user?.isAdmin || (user?.allowedTabs && user.allowedTabs.length > 0)) && (

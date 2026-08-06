@@ -1383,7 +1383,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {mode === 'fileshare' && !joinGroupId && (
+        {mode === 'fileshare' && !joinGroupId && (systemSettings?.enableFileTransfer !== false || user?.isAdmin) && (
           <motion.div key="fileshare" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <FileShareLayout />
           </motion.div>

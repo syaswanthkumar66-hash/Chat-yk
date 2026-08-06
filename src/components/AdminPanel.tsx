@@ -3541,6 +3541,13 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                           active: systemSettings.enableVideoCalls,
                           icon: 'videocam'
                         },
+                        { 
+                          id: 'enableFileTransfer', 
+                          label: 'File Transfer Engine', 
+                          desc: 'Enable the front page file transfer engine',
+                          active: systemSettings.enableFileTransfer !== false,
+                          icon: 'folder_shared'
+                        },
                       ].map((setting) => (
                         <div key={`protocol-setting-${setting.id}`} className="flex items-start justify-between p-4 sm:p-6 bg-primary/5 rounded-2xl sm:rounded-3xl group hover:bg-primary/10 transition-all">
                           <div className="flex gap-3 sm:gap-4">
@@ -3554,7 +3561,7 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                           </div>
                           <button 
                             onClick={() => {
-                              if (setting.id === 'maintenanceMode' || setting.id === 'allowRegistration' || setting.id === 'enableVoiceCalls' || setting.id === 'enableVideoCalls') {
+                              if (setting.id === 'maintenanceMode' || setting.id === 'allowRegistration' || setting.id === 'enableVoiceCalls' || setting.id === 'enableVideoCalls' || setting.id === 'enableFileTransfer') {
                                 updateSystemSettings({ [setting.id]: !setting.active });
                                 if (setting.id === 'enableVoiceCalls' || setting.id === 'enableVideoCalls') {
                                   alert(`${setting.label} feature is coming soon!`);

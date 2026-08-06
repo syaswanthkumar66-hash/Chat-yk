@@ -213,6 +213,7 @@ interface AppState {
     activeFeatures: string[];
     enableVoiceCalls: boolean;
     enableVideoCalls: boolean;
+    enableFileTransfer: boolean;
     versionControl: {
       latestVersion: string;
       isPublishedToAll: boolean;
@@ -3076,6 +3077,7 @@ export const useAppStore = create<AppState>((set) => ({
     activeFeatures: ['social', 'fileshare', 'calls'],
     enableVoiceCalls: true,
     enableVideoCalls: true,
+    enableFileTransfer: true,
     versionControl: {
       latestVersion: 'v2.1.0-beta',
       isPublishedToAll: true,
