@@ -87,7 +87,7 @@ export const AdminCallTester = () => {
             </div>
           </Card>
           
-          <div className="h-[600px] w-full rounded-2xl overflow-hidden shadow-2xl ring-1 ring-slate-200/50">
+          <div className="h-[600px] w-full rounded-2xl overflow-hidden shadow-2xl ring-1 ring-slate-200/50 relative">
             <GroupCall 
               roomId={activeCallId}
               type={callType}

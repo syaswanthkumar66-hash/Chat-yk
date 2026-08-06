@@ -1207,23 +1207,25 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
               >
                 <Icon name="grid_view" className="text-2xl opacity-70" />
                 <span className="text-[7px] font-black uppercase tracking-[0.2em]">More</span>
-              </button>
-
-              <AnimatePresence>
+                            </button>
+            </div>
+          )}
+        </nav>
+        <AnimatePresence>
                 {isMobileMenuOpen && (
                   <>
                     <motion.div 
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="fixed inset-0 bg-black/60 backdrop-blur-md z-40" 
+                      className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200]" 
                       onClick={() => setIsMobileMenuOpen(false)} 
                     />
                     <motion.div
                       initial={{ opacity: 0, y: 100 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 100 }}
-                      className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[3rem] shadow-2xl p-6 z-50 max-h-[70vh] overflow-y-auto no-scrollbar"
+                      className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[3rem] shadow-2xl p-6 z-[210] max-h-[70vh] overflow-y-auto no-scrollbar"
                     >
                       <div className="flex items-center justify-between mb-8 px-2">
                         <p className="text-[11px] font-black text-slate-900 uppercase tracking-[0.4em]">Extended Command Center</p>
@@ -1255,9 +1257,6 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                   </>
                 )}
               </AnimatePresence>
-            </div>
-          )}
-        </nav>
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 pb-32 md:pb-8 space-y-6 sm:space-y-8 md:space-y-10 no-scrollbar relative min-h-0 touch-action-pan-y">
           {activeTab === 'monitor' && (
