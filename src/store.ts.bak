@@ -154,7 +154,7 @@ interface AppState {
     messageId: string;
   }>;
   setIncomingMediaUpload: (senderId: string, data: { percent: number; mediaType: string; fileName?: string; messageId: string } | null) => void;
-  activeGroupCall: { type: 'voice' | 'video' | 'walkie-talkie', groupId?: string, userId?: string, roomId?: string } | null;
+  activeGroupCall: { type: 'voice' | 'video' | 'walkie-talkie' | 'walkie-talkie', groupId?: string, userId?: string, roomId?: string } | null;
   setActiveGroupCall: (call: { type: 'voice' | 'video' | 'walkie-talkie', groupId?: string, userId?: string, roomId?: string } | null) => void;
   incomingCall: { type: 'voice' | 'video' | 'walkie-talkie', roomId: string, from: string } | null;
   setIncomingCall: (call: { type: 'voice' | 'video' | 'walkie-talkie', roomId: string, from: string } | null) => void;

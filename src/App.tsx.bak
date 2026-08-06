@@ -437,7 +437,7 @@ export default function App() {
   }, [user?.id, setActiveChatId, setMode]);
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
-  const [testCallInfo, setTestCallInfo] = useState<{ id: string, type: 'voice' | 'video' | 'walkie-talkie' } | null>(null);
+  const [testCallInfo, setTestCallInfo] = useState<{ id: string, type: 'voice' | 'video' | 'walkie-talkie' | 'walkie-talkie' } | null>(null);
   const [hideTestCallPrompt, setHideTestCallPrompt] = useState(false);
   const cloudSyncStatus = useAppStore((state) => state.cloudSyncStatus);
   const onlineDevices = useAppStore((state) => state.onlineDevices);

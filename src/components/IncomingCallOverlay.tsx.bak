@@ -225,7 +225,7 @@ export const IncomingCallOverlay = ({ incomingCall, onAccept, onDecline }: Incom
             <div className="space-y-2 z-10">
               <h2 className="text-2xl font-black uppercase tracking-tight italic text-slate-100">{callerName}</h2>
               <p className="text-[10px] font-mono font-black uppercase tracking-[0.3em] text-sky-400 animate-pulse">
-                Incoming {incomingCall.type === 'walkie-talkie' ? 'Walkie Talkie' : incomingCall.type === 'voice' ? 'Voice Call' : 'Video Call'}...
+                Incoming {incomingCall.type === 'voice' ? 'Voice Call' : 'Video Call'}...
               </p>
               <div className="flex items-center justify-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20 w-fit mx-auto mt-2">
                 <Icon name="verified" className="text-xs" /> Pre-Flight Test Verified

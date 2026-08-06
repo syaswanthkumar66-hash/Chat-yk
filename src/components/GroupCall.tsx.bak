@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon, Avatar, Button, cn } from './UI';
-import { useAppStore, useStore, shallowEqual, generateInitialsAvatar } from '../store';
+import { useStore, shallowEqual, generateInitialsAvatar } from '../store';
 import { webrtcService } from '../services/webrtcService';
 import { CallError, CallErrorDetails } from '../types';
 import { diagnosticLogger, DiagnosticEntry } from '../services/diagnosticLogService';
@@ -975,7 +975,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
               profileVisibility: 'everyone',
               notificationSettings: { pushEnabled: true, previewEnabled: true, soundEnabled: true, vibrateEnabled: true }
            };
-           return [...prev, { id: u.id, name: u.displayName || u.id, avatar: u.avatar, isMuted: false, isVideoOff: false, isSpeaking: false, status: 'online' }];
+           return [...prev, { ...u, status: 'online', isMuted: false, isVideoOff: false }];
         }
         return prev;
       });
@@ -1056,7 +1056,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inli
             vibrateEnabled: true
           }
         };
-        return [...prev, { id: u.id, name: u.displayName || u.id, avatar: u.avatar, isMuted: false, isVideoOff: false, isSpeaking: false, status: 'online' }];
+        return [...prev, { ...u, status: 'online', isMuted: false, isVideoOff: false }];
       });
     };
 
