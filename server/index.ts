@@ -1611,20 +1611,26 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     socket.on("sfu_signal", (data) => {
       const { roomId, signal, from, type } = data;
-      if (roomId) {
-        socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
-      }
-      // Also route directly by target user if signal.to or data.to is specified to ensure delivery
       const targetId = signal?.to || data?.to;
-      if (targetId && String(targetId) !== String(from) && users.has(String(targetId))) {
-        const targetSockets = users.get(String(targetId));
-        if (targetSockets) {
-          for (const sId of targetSockets.keys()) {
-            if (sId !== socket.id) {
-              io.to(sId).emit("sfu_signal", { roomId, signal, from, type });
+
+      // If targeted to a specific peer, send ONLY to target user's sockets
+      if (targetId && String(targetId) !== String(from)) {
+        if (users.has(String(targetId))) {
+          const targetSockets = users.get(String(targetId));
+          if (targetSockets) {
+            for (const sId of targetSockets.keys()) {
+              if (sId !== socket.id) {
+                io.to(sId).emit("sfu_signal", { roomId, signal, from, type });
+              }
             }
           }
+        } else if (roomId) {
+          // Fallback to room if target socket not indexed in users map
+          socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
         }
+      } else if (roomId) {
+        // Broadcast signal (like peer_joined, request_tracks) to the room
+        socket.to(roomId).emit("sfu_signal", { roomId, signal, from, type });
       }
     });
 

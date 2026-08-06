@@ -539,6 +539,9 @@ class WebRTCService {
     // Handle remote stream tracks being added
     pc.ontrack = (event) => {
       const track = event.track;
+      if (track) {
+        track.enabled = true;
+      }
       let stream = event.streams && event.streams[0];
       
       if (!stream) {
@@ -1664,8 +1667,19 @@ class WebRTCService {
         diagnosticLogger.log('signaling', 'peer_joined_received', `Handling 'peer_joined' signal from ${peerId}. Initializing call negotiation...`, peerId, roomId);
         const pc = this.createPeerConnection(peerId, roomId);
 
-        // Step 1 point 3: Add all local tracks BEFORE calling createOffer
+        // Add all local tracks BEFORE creating or receiving offer
         this.attachLocalTracks(pc);
+
+        // DETERMINISTIC OFFER INITIATION:
+        // To prevent WebRTC offer glare / collisions when both peers join simultaneously,
+        // only the peer with the lexicographically smaller ID creates the initial offer.
+        // The peer with the larger ID prepares the peer connection and awaits the incoming offer.
+        const isOfferer = myId && peerId ? String(myId) < String(peerId) : true;
+
+        if (!isOfferer) {
+          console.log(`[Diagnostic] Peer ${myId} is answerer for ${peerId} (myId >= peerId). Waiting for incoming offer.`);
+          return;
+        }
 
         // ALWAYS ensure that we create the DataChannel on the SDP offer creator side
         if (!this.dataChannels.has(this.getMapKey(peerId, roomId))) {
