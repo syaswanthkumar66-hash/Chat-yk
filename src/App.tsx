@@ -7,6 +7,7 @@ import { SocialLayout } from './components/SocialLayout';
 import { FileShareLayout } from './components/FileShareLayout';
 import { JoinGroupView } from './components/JoinGroupView';
 import { AdminPanel } from './components/AdminPanel';
+import { GroupCall } from './components/GroupCall';
 import { Icon, cn } from './components/UI';
 import { NotificationPrompt } from './components/NotificationPrompt';
 import { QuickProfileSwitcher } from './components/QuickProfileSwitcher';
@@ -436,6 +437,8 @@ export default function App() {
   }, [user?.id, setActiveChatId, setMode]);
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+  const [testCallInfo, setTestCallInfo] = useState<{ id: string, type: 'voice' | 'video' } | null>(null);
+  const [hideTestCallPrompt, setHideTestCallPrompt] = useState(false);
   const cloudSyncStatus = useAppStore((state) => state.cloudSyncStatus);
   const onlineDevices = useAppStore((state) => state.onlineDevices);
   const isWssConnected = useAppStore((state) => state.isWssConnected);
@@ -1166,6 +1169,15 @@ export default function App() {
       const newUrl = window.location.pathname;
       window.history.replaceState({}, '', newUrl);
     }
+
+    const joinCallId = urlParams.get('join_call');
+    const joinCallType = urlParams.get('type') as 'voice' | 'video' || 'video';
+    if (joinCallId) {
+      setTestCallInfo({ id: joinCallId, type: joinCallType });
+      // Clean up URL
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
   }, []);
 
   // Auth Loading Splash Screen
@@ -1384,6 +1396,48 @@ export default function App() {
         )}
         </AnimatePresence>
       </div>
+
+      {testCallInfo && isLoggedIn && (
+        <div className="fixed inset-0 z-[500] bg-slate-950 flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-white/10">
+            <div>
+              <h2 className="text-white font-black uppercase text-lg">Test Call: {testCallInfo.id}</h2>
+              <p className="text-white/50 text-xs font-bold uppercase">Diagnostic Mode ({testCallInfo.type})</p>
+            </div>
+            <button 
+              onClick={() => setTestCallInfo(null)}
+              className="size-10 bg-white/10 hover:bg-red-500/20 text-white hover:text-red-400 rounded-xl flex items-center justify-center transition-colors"
+            >
+              <Icon name="close" />
+            </button>
+          </div>
+          <div className="flex-1 relative">
+            <GroupCall 
+              roomId={testCallInfo.id}
+              type={testCallInfo.type}
+              onClose={() => setTestCallInfo(null)}
+              inline={true}
+            />
+          </div>
+        </div>
+      )}
+      
+      {testCallInfo && !isLoggedIn && !hideTestCallPrompt && (
+        <div className="fixed inset-0 z-[500] bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="max-w-md w-full bg-slate-900 rounded-[2rem] p-8 border border-white/10 shadow-2xl space-y-6">
+            <div className="size-16 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto">
+              <Icon name="account_circle" className="text-3xl" />
+            </div>
+            <div>
+              <h2 className="text-white font-black uppercase text-2xl tracking-tighter">Identity Required</h2>
+              <p className="text-slate-400 text-xs font-bold uppercase mt-2">Please create a profile first to join the test call.</p>
+            </div>
+            <div className="pt-4 flex flex-col gap-3">
+              <button onClick={() => { setMode('social'); setHideTestCallPrompt(true); }} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-xs h-12 rounded-xl">Create Profile</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating In-App Notifications Container */}
       <div className="fixed top-4 right-4 z-[400] max-w-sm w-full pointer-events-none flex flex-col gap-3">

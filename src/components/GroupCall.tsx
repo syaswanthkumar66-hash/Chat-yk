@@ -285,7 +285,7 @@ const playTestSpeakerChime = (speakerMode: 'speaker' | 'earpiece' = 'speaker') =
 };
 
 
-export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { groupId?: string, userId?: string, roomId?: string, callId?: string, type: 'voice' | 'video', onClose: () => void }) => {
+export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose, inline }: { groupId?: string, userId?: string, roomId?: string, callId?: string, type: 'voice' | 'video', onClose: () => void, inline?: boolean }) => {
   const { removedFriendIds, socket, user, chats, users } = useStore(s => ({
     removedFriendIds: s.removedFriendIds,
     socket: s.socket,
@@ -726,20 +726,20 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
         if (pttChunks.current.length === 0) return;
         const finalMime = selectedMimeType || 'audio/webm';
         const blob = new Blob(pttChunks.current, { type: finalMime });
-        const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
-        console.log(`[PTT] Finished recording live PTT voice note. Size: ${blob.size} bytes. Broadcasting to room: ${roomId}`);
+        const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
+        console.log(`[PTT] Finished recording live PTT voice note. Size: ${blob.size} bytes. Broadcasting to room: ${computedRoomId}`);
         
         // Broadcast over WebRTC Data Channel
-        await webrtcService.broadcastAudioChunks(roomId, blob, finalMime);
+        await webrtcService.broadcastAudioChunks(computedRoomId, blob, finalMime);
         
-        diagnosticLogger.log('webrtc', 'ptt_broadcast_done', `Finished broadcasting live P2P voice note (${(blob.size / 1024).toFixed(1)} KB) to all connected peers.`, undefined, roomId);
+        diagnosticLogger.log('webrtc', 'ptt_broadcast_done', `Finished broadcasting live P2P voice note (${(blob.size / 1024).toFixed(1)} KB) to all connected peers.`, undefined, computedRoomId);
       };
 
       recorder.start();
       setIsRecordingPTT(true);
       
-      const roomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
-      diagnosticLogger.log('webrtc', 'ptt_started', `Started recording live voice note via P2P data channels. Speak now...`, undefined, roomId);
+      const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
+      diagnosticLogger.log('webrtc', 'ptt_started', `Started recording live voice note via P2P data channels. Speak now...`, undefined, computedRoomId);
     } catch (err: any) {
       console.error("Failed to start PTT voice recording:", err);
     }
@@ -1114,7 +1114,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
       }
-      const computedRoomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+      const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
       webrtcService.closeSession(computedRoomId);
       window.removeEventListener('webrtc_stream', handleRemoteStream);
       window.removeEventListener('webrtc_connection_failed', handleConnectionFailed);
@@ -1229,7 +1229,7 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
     setTestSoundNotice({ message: `🔊 Test Sound Sent!`, type: 'sent' });
     setTimeout(() => setTestSoundNotice(null), 3000);
 
-    const computedRoomId = groupId || `call-${[user?.id, userId].sort().join('-')}`;
+    const computedRoomId = callId || roomId || groupId || `call-${[user?.id, userId].sort().join('-')}`;
     
     if (socket) {
       socket.emit('call_ping', { 
@@ -1416,7 +1416,9 @@ export const GroupCall = ({ groupId, userId, roomId, callId, type, onClose }: { 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[200] bg-slate-950 flex flex-col text-white overflow-hidden font-sans"
+      className={cn(
+        inline ? "absolute inset-0 bg-slate-950 flex flex-col text-white overflow-hidden font-sans" : "fixed inset-0 z-[200] bg-slate-950 flex flex-col text-white overflow-hidden font-sans"
+      )}
     >
       {/* PTT Broadcast Overlay */}
       {isRecordingPTT && (
