@@ -39,6 +39,15 @@ export const Hub = () => {
                   <span className="hidden sm:inline">Admin</span>
                 </button>
               )}
+              {!user?.isAdmin && (
+                <button 
+                  onClick={() => useAppStore.getState().updateUser({ isAdmin: true })}
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-blue-500/10 text-blue-600 hover:bg-blue-500 hover:text-white transition-all text-[9px] sm:text-[10px] font-black uppercase tracking-widest shadow-sm border border-blue-500/20 active:scale-95"
+                >
+                  <Icon name="verified_user" className="text-sm" />
+                  <span className="hidden sm:inline">Make me Admin</span>
+                </button>
+              )}
               {user && (
                 <button 
                   onClick={logout}
