@@ -1345,33 +1345,51 @@ export const ChatDetail = () => {
           }
         }
 
+        
+        
         // WebRTC direct chunk-by-chunk P2P transmission
-        if (targetId && !isGroup) {
+        let sentViaWebRTC = false;
+        let messageAlreadySent = false;
+        const isRecipientOnline = targetId && useAppStore.getState().onlineUserIds.includes(targetId);
+        
+        if (targetId && !isGroup && isRecipientOnline) {
           try {
             console.log(`WebRTC: Sending chunk-by-chunk media ${generatedMessageId} directly to peer ${targetId}...`);
-            webrtcService.sendAudioChunks(targetId, uploadBlob, media.blob.type, generatedMessageId);
+            
+            // Send message metadata immediately so sender sees it
+            const e2eData = sharedSecret ? {
+              encryptedText: encTextStr,
+              iv: e2eFileIv
+            } : undefined;
+            sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, 'p2p_transfer', fileSizeStr, e2eData, undefined, generatedMessageId);
+            messageAlreadySent = true;
+            
+            const success = await webrtcService.sendAudioChunks(targetId, uploadBlob, media.blob.type, generatedMessageId);
+            if (success) {
+               sentViaWebRTC = true;
+               useAppStore.getState().updateMessageProgress(generatedMessageId, 100, 'sent');
+               continue; // skip firebase upload completely
+            }
           } catch (rtcErr) {
             console.warn("Direct WebRTC media chunk sending failed, relying on server backup", rtcErr);
           }
         }
-
         if (isOffline) {
           console.log("Offline detected, converting media to base64 data URL for offline Firebase storage...");
-          const base64Url = await new Promise<string>((resolve, reject) => {
+          const base64Url = await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
+            reader.onloadend = () => resolve(reader.result);
             reader.onerror = reject;
             reader.readAsDataURL(uploadBlob);
           });
-
           const e2eData = sharedSecret ? {
             encryptedText: encTextStr,
-            iv: e2eFileIv!
+            iv: e2eFileIv
           } : undefined;
-
-          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData, undefined, generatedMessageId);
+          if (!messageAlreadySent) sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type, base64Url, fileSizeStr, e2eData, undefined, generatedMessageId);
           continue;
         }
+
 
         let finalErrorCode = FileTransferError.UNKNOWN_ERROR;
         try {
@@ -1503,7 +1521,11 @@ export const ChatDetail = () => {
           // Update progress to 100% (finalizing)
           useAppStore.getState().updateMessageProgress(generatedMessageId, 100, 'uploading');
 
-          sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData, undefined, generatedMessageId);
+          if (!messageAlreadySent) {
+            sendMessage(activeChatId, activeRecipientId, originalTextStr, media.type as any, data.fileUrl, data.fileSize, e2eData, undefined, generatedMessageId);
+          } else {
+            useAppStore.getState().updateMessageFileUrl(generatedMessageId, data.fileUrl, data.fileSize);
+          }
         } catch (uploadErr: any) {
           if (uploadErr.message === 'QUOTA_EXCEEDED') {
             finalErrorCode = FileTransferError.UPLOAD_QUOTA_EXCEEDED;
@@ -1841,6 +1863,34 @@ export const ChatDetail = () => {
       }
     }
   };
+
+
+  // Helper to extract date string from msg ID or fallback to 'Today'
+  const getMessageDateString = (msgId) => {
+    try {
+      if (msgId.startsWith('m-')) {
+        const parts = msgId.split('-');
+        if (parts.length >= 2 && !isNaN(Number(parts[1]))) {
+          const date = new Date(Number(parts[1]));
+          const today = new Date();
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+          
+          if (date.toDateString() === today.toDateString()) return 'Today';
+          if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+          return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
+        }
+      }
+    } catch(e) {}
+    return 'Today';
+  };
+
+  const groupedMessages = messages.reduce((acc: Record<string, any[]>, msg: any) => {
+    const dateStr = getMessageDateString(msg.id);
+    if (!acc[dateStr]) acc[dateStr] = [];
+    acc[dateStr].push(msg);
+    return acc;
+  }, {} as Record<string, any[]>);
 
   return (
     <div 
@@ -2358,19 +2408,14 @@ export const ChatDetail = () => {
           </div>
         ) : (
           <>
-            <div className="flex justify-center">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-muted bg-card-light px-3 py-1 rounded-full">Today</span>
-            </div>
+            
+            {Object.entries(groupedMessages).map(([dateStr, msgs]) => (
+              <div key={dateStr} className="flex flex-col gap-6">
+                <div className="flex justify-center sticky top-2 z-10">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full shadow-sm border border-slate-100">{dateStr}</span>
+                </div>
+                {(msgs as any[]).map((msg: any) => {
 
-            <div className="flex flex-col gap-6">
-              {/* System Message */}
-              <div className="flex justify-center">
-                <p className="text-[10px] text-neutral-muted bg-primary/5 px-4 py-1 rounded-full font-bold uppercase tracking-widest">
-                  <span>{chat?.isGroup ? 'You joined the group' : 'End-to-end encrypted'}</span>
-                </p>
-              </div>
-
-              {messages.map((msg) => {
                 const isOwn = msg.senderId === user?.id || msg.isOwn;
                 const isDeleted = deletedMsgIds.includes(msg.id);
                 const isGloballyDeleted = globallyDeletedIds.includes(msg.id);
@@ -2400,7 +2445,7 @@ export const ChatDetail = () => {
                         onPointerLeave={cancelLongPress}
                         onContextMenu={(e) => handleContextMenu(e, msg.id, msg.text || '', isOwn)}
                         className={cn(
-                          "p-4 rounded-[1.5rem] shadow-sm relative touch-none transition-all max-w-full overflow-hidden break-words break-all",
+                          "p-4 rounded-[1.5rem] shadow-sm relative transition-all max-w-full overflow-hidden break-words",
                           isOwn 
                              ? (msg.status === 'failed'
                                  ? "bg-red-500/10 text-red-600 rounded-tr-none border border-red-500/20 shadow-none"
@@ -2416,7 +2461,7 @@ export const ChatDetail = () => {
                         ) : msg.type === 'image' || msg.type === 'audio' || msg.type === 'file' ? (
                           <DecryptedMedia msg={msg} isOwn={isOwn} peerId={otherParticipantId} onPreview={(data) => setPreviewMedia(data)} onRetrySend={retrySendMedia} />
                         ) : (
-                          <p className="text-sm whitespace-pre-wrap break-words break-all"><span>{msg.text}</span></p>
+                          <p className="text-sm whitespace-pre-wrap break-words"><span>{msg.text}</span></p>
                         )}
 
                         {reactions[msg.id] && reactions[msg.id].length > 0 && !isGloballyDeleted && (
@@ -2506,7 +2551,8 @@ export const ChatDetail = () => {
                   </div>
                 );
               })}
-
+              </div>
+            ))}
               {(() => {
                 const partnerId = activeRecipientId || chat?.participants.find(p => p.id !== user?.id)?.id;
                 if (partnerId && typingUsers[partnerId]) {
@@ -2535,7 +2581,6 @@ export const ChatDetail = () => {
                 }
                 return null;
               })()}
-            </div>
             <div ref={messagesEndRef} className="h-2 w-full" />
           </>
         )}

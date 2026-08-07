@@ -3563,9 +3563,6 @@ export const AdminPanel = ({ onClose }: { onClose: () => void }) => {
                             onClick={() => {
                               if (setting.id === 'maintenanceMode' || setting.id === 'allowRegistration' || setting.id === 'enableVoiceCalls' || setting.id === 'enableVideoCalls' || setting.id === 'enableFileTransfer') {
                                 updateSystemSettings({ [setting.id]: !setting.active });
-                                if (setting.id === 'enableVoiceCalls' || setting.id === 'enableVideoCalls') {
-                                  alert(`${setting.label} feature is coming soon!`);
-                                }
                               }
                             }}
                             className={cn(

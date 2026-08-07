@@ -814,10 +814,20 @@ export default function App() {
     let unsubscribeSent = () => {};
     let unsubscribeNotifications = () => {};
     let unsubscribeCloudSync = () => {};
+    let unsubscribeSystemSettings = () => {};
 
     const syncCloudData = async () => {
       try {
         const syncDocRef = doc(db, 'cloud_syncs', user.id);
+        const systemSettingsRef = doc(db, 'system_config', 'settings');
+        unsubscribeSystemSettings = onSnapshot(systemSettingsRef, (snapshot) => {
+          if (snapshot.exists()) {
+            useAppStore.setState(state => ({
+              systemSettings: { ...state.systemSettings, ...snapshot.data() as any }
+            }));
+          }
+        });
+
         unsubscribeCloudSync = onSnapshot(syncDocRef, (snapshot) => {
           if (!snapshot.exists()) return;
           const data = snapshot.data();
@@ -1102,6 +1112,7 @@ export default function App() {
       unsubscribeSent();
       unsubscribeNotifications();
       unsubscribeCloudSync();
+      unsubscribeSystemSettings();
     };
   }, [isLoggedIn, user?.id, auth.currentUser?.uid]);
 
@@ -1180,20 +1191,74 @@ export default function App() {
     }
   }, []);
 
-  // Auth Loading Splash Screen
+  // Auth Loading Splash Screen (Skeleton UI)
   if (isAuthLoading) {
     return (
-      <div className="min-h-[100dvh] bg-[#FFF1E7] flex flex-col items-center justify-center p-6 text-center">
-        <div className="max-w-md space-y-6">
-          <div className="size-16 rounded-2xl bg-primary flex items-center justify-center text-white shadow-2xl shadow-primary/30 rotate-3 animate-pulse mx-auto">
-            <Icon name="share" className="text-3xl" />
+      <div className="h-[100dvh] w-full flex bg-bg-light relative overflow-hidden font-sans">
+        {/* Left Sidebar Skeleton */}
+        <div className="w-full md:w-80 lg:w-[380px] xl:w-[420px] 2xl:w-[480px] 3xl:w-[540px] flex flex-col h-full bg-white border-r border-slate-100 p-4 sm:p-6 gap-6 z-20 relative">
+          <div className="flex items-center justify-between mb-2">
+            <div className="h-10 w-32 rounded-xl bg-slate-200/60 animate-pulse" />
+            <div className="flex gap-2">
+              <div className="size-12 rounded-xl bg-slate-200/60 animate-pulse" />
+              <div className="size-12 rounded-xl bg-slate-200/60 animate-pulse" />
+            </div>
           </div>
-          <div className="space-y-2">
-            <h1 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">Connecting Protocol</h1>
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] animate-pulse">Initializing Secure Digital Ecosystem...</p>
+          <div className="h-14 w-full rounded-2xl bg-slate-200/60 animate-pulse" />
+          <div className="flex gap-3 mt-2 overflow-hidden">
+            <div className="h-10 w-20 rounded-full bg-slate-200/60 animate-pulse shrink-0" />
+            <div className="h-10 w-24 rounded-full bg-slate-200/60 animate-pulse shrink-0" />
+            <div className="h-10 w-16 rounded-full bg-slate-200/60 animate-pulse shrink-0" />
           </div>
-          <div className="pt-6 border-t border-slate-200 max-w-[180px] mx-auto">
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em]">Protocol v2.5 • Loading</p>
+          <div className="flex-1 overflow-hidden flex flex-col gap-6 mt-4">
+            {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+              <div key={i} className="flex items-center gap-4">
+                <div className="size-14 rounded-full bg-slate-200/60 animate-pulse shrink-0" />
+                <div className="flex-1 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="h-4 w-1/2 rounded-md bg-slate-200/60 animate-pulse" />
+                    <div className="h-3 w-8 rounded-md bg-slate-200/60 animate-pulse" />
+                  </div>
+                  <div className="h-3 w-3/4 rounded-md bg-slate-200/60 animate-pulse" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right Content Skeleton (hidden on mobile initially) */}
+        <div className="hidden md:flex flex-1 flex-col bg-slate-50 relative overflow-hidden">
+          <div className="h-20 bg-white/80 border-b border-slate-100 flex items-center justify-between px-6 z-10 shrink-0">
+             <div className="flex items-center gap-4">
+               <div className="size-12 rounded-full bg-slate-200/60 animate-pulse shrink-0" />
+               <div className="h-5 w-48 rounded-md bg-slate-200/60 animate-pulse" />
+             </div>
+             <div className="flex gap-3">
+               <div className="size-10 rounded-xl bg-slate-200/60 animate-pulse shrink-0" />
+               <div className="size-10 rounded-xl bg-slate-200/60 animate-pulse shrink-0" />
+               <div className="size-10 rounded-xl bg-slate-200/60 animate-pulse shrink-0" />
+             </div>
+          </div>
+          
+          <div className="flex-1 p-6 flex flex-col gap-6 justify-end pb-[120px]">
+            <div className="flex justify-start">
+              <div className="h-24 w-[350px] max-w-[80%] rounded-3xl rounded-tl-sm bg-slate-200/60 animate-pulse" />
+            </div>
+            <div className="flex justify-end">
+              <div className="h-16 w-[280px] max-w-[80%] rounded-3xl rounded-tr-sm bg-primary/10 animate-pulse" />
+            </div>
+            <div className="flex justify-end">
+              <div className="h-12 w-[180px] max-w-[80%] rounded-3xl rounded-tr-sm bg-primary/10 animate-pulse" />
+            </div>
+            <div className="flex justify-start">
+              <div className="h-32 w-[420px] max-w-[80%] rounded-3xl rounded-tl-sm bg-slate-200/60 animate-pulse" />
+            </div>
+          </div>
+          
+          <div className="h-24 bg-white border-t border-slate-100 absolute bottom-0 left-0 right-0 p-4 sm:p-6 flex items-center gap-4 z-20">
+             <div className="size-12 rounded-2xl bg-slate-200/60 animate-pulse shrink-0" />
+             <div className="flex-1 h-14 rounded-3xl bg-slate-200/60 animate-pulse" />
+             <div className="size-12 rounded-full bg-primary/20 animate-pulse shrink-0" />
           </div>
         </div>
       </div>
@@ -1383,7 +1448,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {mode === 'fileshare' && !joinGroupId && (systemSettings?.enableFileTransfer !== false || user?.isAdmin) && (
+        {mode === 'fileshare' && !joinGroupId && (systemSettings?.enableFileTransfer !== false) && (
           <motion.div key="fileshare" className="flex-1 flex flex-col min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <FileShareLayout />
           </motion.div>
@@ -1464,7 +1529,7 @@ export default function App() {
       </div>
 
       {isLoggedIn && <NotificationPrompt />}
-      <PWAInstallPrompt />
+      {/* <PWAInstallPrompt /> */}
       {isLoggedIn && onlineDevices.length > 1 && (backendSyncStatus === 'mismatch' || backendSyncStatus === 'syncing' || backendSyncStatus === 'checking') && <QuickProfileSwitcher />}
     </div>
   );

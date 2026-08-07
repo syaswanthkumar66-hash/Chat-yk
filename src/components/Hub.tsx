@@ -154,7 +154,7 @@ export const Hub = () => {
           </motion.button>
 
           {/* File Share Card */}
-          {(systemSettings?.enableFileTransfer !== false || user?.isAdmin) && (
+          {(systemSettings?.enableFileTransfer !== false) && (
           <motion.button
             whileHover={{ y: -4, backgroundColor: 'rgba(255,255,255,0.95)' }}
             whileTap={{ scale: 0.98 }}

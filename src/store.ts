@@ -3084,9 +3084,13 @@ export const useAppStore = create<AppState>((set) => ({
       betaUserIds: []
     }
   },
-  updateSystemSettings: (settings) => set((state) => ({
-    systemSettings: { ...state.systemSettings, ...settings }
-  })),
+  updateSystemSettings: (settings) => set((state) => {
+    const newSettings = { ...state.systemSettings, ...settings };
+    import('./firebase').then(({ db, doc, setDoc }) => {
+      setDoc(doc(db, 'system_config', 'settings'), newSettings, { merge: true }).catch(console.error);
+    });
+    return { systemSettings: newSettings };
+  }),
   users: cachedUsers,
   banUser: (userId) => set((state) => ({
     users: state.users.map(u => u.id === userId ? { ...u, isBanned: !u.isBanned } : u)
